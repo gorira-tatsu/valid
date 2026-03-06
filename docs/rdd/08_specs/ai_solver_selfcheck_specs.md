@@ -103,7 +103,10 @@
   "property_id": "P_SAFE",
   "backend": "command",
   "solver_executable": "sh",
-  "solver_args": ["-c", "printf 'STATUS=UNKNOWN\\nACTIONS=Jump'"]
+  "solver_args": [
+    "-c",
+    "printf 'STATUS=UNKNOWN\\nACTIONS=Jump\\nASSURANCE_LEVEL=BOUNDED\\nREASON_CODE=SOLVER_REPORTED_UNKNOWN\\nSUMMARY=command-backend\\nUNKNOWN_REASON=TIME_LIMIT_REACHED'"
+  ]
 }
 ```
 
@@ -356,7 +359,14 @@ MVP で受け付ける backend config は次の3種類とする。
 - `mock-bmc`
 - `command { solver_executable, solver_args[] }`
 
-`command` は最小の外部プロセス adapter であり、protocol は `STATUS=<PASS|FAIL|UNKNOWN>` と `ACTIONS=a,b,c` を受け付ける。
+`command` は最小の外部プロセス adapter であり、protocol は次を受け付ける。
+
+- `STATUS=<PASS|FAIL|UNKNOWN>`
+- `ACTIONS=a,b,c`
+- `ASSURANCE_LEVEL=<COMPLETE|BOUNDED|INCOMPLETE>`
+- `REASON_CODE=<machine_reason>`
+- `SUMMARY=<human_summary>`
+- `UNKNOWN_REASON=<TIME_LIMIT_REACHED|STATE_LIMIT_REACHED|ENGINE_ABORTED>`
 
 ## 9. I-2 BMC / command Run Plan
 

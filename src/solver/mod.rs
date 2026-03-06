@@ -67,6 +67,10 @@ pub enum RawSolverResult {
 pub struct CommandProtocolResult {
     pub status: String,
     pub actions: Vec<String>,
+    pub assurance_level: Option<String>,
+    pub reason_code: Option<String>,
+    pub summary: Option<String>,
+    pub unknown_reason: Option<String>,
     pub raw_output: String,
 }
 
@@ -386,6 +390,10 @@ impl SolverAdapter for CommandSolverAdapter {
         Ok(RawSolverResult::Protocol(CommandProtocolResult {
             status,
             actions: parse_protocol_actions(&body),
+            assurance_level: parse_protocol_value(&body, "ASSURANCE_LEVEL"),
+            reason_code: parse_protocol_value(&body, "REASON_CODE"),
+            summary: parse_protocol_value(&body, "SUMMARY"),
+            unknown_reason: parse_protocol_value(&body, "UNKNOWN_REASON"),
             raw_output: body,
         }))
     }
@@ -463,11 +471,18 @@ fn normalize_protocol_result(
         .find(|property| property.property_id == property_id)
         .map(|property| property.kind.clone())
         .ok_or_else(|| format!("unknown property `{}`", property_id))?;
-    let assurance_level = if run_plan.search_bounds.max_depth.is_some() {
-        AssuranceLevel::Bounded
-    } else {
-        AssuranceLevel::Incomplete
-    };
+    let assurance_level = protocol
+        .assurance_level
+        .as_deref()
+        .map(parse_assurance_level)
+        .transpose()?
+        .unwrap_or_else(|| {
+            if run_plan.search_bounds.max_depth.is_some() {
+                AssuranceLevel::Bounded
+            } else {
+                AssuranceLevel::Incomplete
+            }
+        });
     let trace = if protocol.actions.is_empty() {
         None
     } else {
@@ -503,16 +518,24 @@ fn normalize_protocol_result(
             status: RunStatus::Pass,
             assurance_level,
             property_result: PropertyResult {
-                property_id: property_id.clone(),
-                property_kind: property_kind.clone(),
-                status: RunStatus::Pass,
-                assurance_level,
-                reason_code: Some("SOLVER_REPORTED_PASS".to_string()),
-                unknown_reason: None,
-                terminal_state_id: None,
-                evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
-                summary: "external solver reported pass".to_string(),
-            },
+                    property_id: property_id.clone(),
+                    property_kind: property_kind.clone(),
+                    status: RunStatus::Pass,
+                    assurance_level,
+                    reason_code: Some(
+                        protocol
+                            .reason_code
+                            .clone()
+                            .unwrap_or_else(|| "SOLVER_REPORTED_PASS".to_string()),
+                    ),
+                    unknown_reason: None,
+                    terminal_state_id: None,
+                    evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
+                    summary: protocol
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| "external solver reported pass".to_string()),
+                },
             explored_states: 0,
             explored_transitions: trace.as_ref().map(|item| item.steps.len()).unwrap_or(0),
             trace: trace.clone(),
@@ -545,11 +568,19 @@ fn normalize_protocol_result(
                     property_kind: property_kind.clone(),
                     status: RunStatus::Fail,
                     assurance_level,
-                    reason_code: Some("SOLVER_REPORTED_FAIL".to_string()),
+                    reason_code: Some(
+                        protocol
+                            .reason_code
+                            .clone()
+                            .unwrap_or_else(|| "SOLVER_REPORTED_FAIL".to_string()),
+                    ),
                     unknown_reason: None,
                     terminal_state_id: Some("s-000001".to_string()),
                     evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
-                    summary: "external solver reported fail".to_string(),
+                    summary: protocol
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| "external solver reported fail".to_string()),
                 },
                 explored_states: 0,
                 explored_transitions: trace.as_ref().map(|item| item.steps.len()).unwrap_or(0),
@@ -559,17 +590,30 @@ fn normalize_protocol_result(
         "UNKNOWN" => CheckOutcome::Completed(ExplicitRunResult {
             manifest: run_plan.manifest.clone(),
             status: RunStatus::Unknown,
-            assurance_level: AssuranceLevel::Incomplete,
+            assurance_level,
             property_result: PropertyResult {
                 property_id,
                 property_kind,
                 status: RunStatus::Unknown,
-                assurance_level: AssuranceLevel::Incomplete,
-                reason_code: Some("SOLVER_REPORTED_UNKNOWN".to_string()),
-                unknown_reason: Some(UnknownReason::EngineAborted),
+                assurance_level,
+                reason_code: Some(
+                    protocol
+                        .reason_code
+                        .clone()
+                        .unwrap_or_else(|| "SOLVER_REPORTED_UNKNOWN".to_string()),
+                ),
+                unknown_reason: protocol
+                    .unknown_reason
+                    .as_deref()
+                    .map(parse_unknown_reason)
+                    .transpose()?
+                    .or(Some(UnknownReason::EngineAborted)),
                 terminal_state_id: trace.as_ref().map(|_| "s-000001".to_string()),
                 evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
-                summary: "external solver reported unknown".to_string(),
+                summary: protocol
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| "external solver reported unknown".to_string()),
             },
             explored_states: 0,
             explored_transitions: trace.as_ref().map(|item| item.steps.len()).unwrap_or(0),
@@ -589,6 +633,25 @@ fn normalize_protocol_result(
     };
 
     Ok(NormalizedRunResult { outcome, trace })
+}
+
+fn parse_assurance_level(value: &str) -> Result<AssuranceLevel, String> {
+    match value {
+        "COMPLETE" => Ok(AssuranceLevel::Complete),
+        "BOUNDED" => Ok(AssuranceLevel::Bounded),
+        "INCOMPLETE" => Ok(AssuranceLevel::Incomplete),
+        other => Err(format!("unsupported ASSURANCE_LEVEL `{other}`")),
+    }
+}
+
+fn parse_unknown_reason(value: &str) -> Result<UnknownReason, String> {
+    match value {
+        "UNKNOWN_ENGINE_ABORTED" | "ENGINE_ABORTED" => Ok(UnknownReason::EngineAborted),
+        "UNKNOWN_STATE_LIMIT_REACHED" | "STATE_LIMIT_REACHED" => Ok(UnknownReason::StateLimitReached),
+        "UNKNOWN_DEPTH_LIMIT_REACHED" | "DEPTH_LIMIT_REACHED" => Ok(UnknownReason::EngineAborted),
+        "UNKNOWN_TIME_LIMIT_REACHED" | "TIME_LIMIT_REACHED" => Ok(UnknownReason::TimeLimitReached),
+        other => Err(format!("unsupported UNKNOWN_REASON `{other}`")),
+    }
 }
 
 fn parse_protocol_value(body: &str, key: &str) -> Option<String> {
@@ -611,7 +674,7 @@ fn parse_protocol_actions(body: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        engine::{PropertySelection, RunPlan},
+        engine::{PropertySelection, RunPlan, UnknownReason},
         frontend::compile_model,
     };
 
@@ -652,7 +715,7 @@ mod tests {
             executable: "sh".to_string(),
             args: vec![
                 "-c".to_string(),
-                "printf 'STATUS=UNKNOWN\\nACTIONS=Jump'".to_string(),
+                "printf 'STATUS=UNKNOWN\\nACTIONS=Jump\\nASSURANCE_LEVEL=BOUNDED\\nREASON_CODE=SOLVER_REPORTED_UNKNOWN\\nSUMMARY=command%20backend\\nUNKNOWN_REASON=TIME_LIMIT_REACHED'".to_string(),
             ],
         };
         let model = compile_model(
@@ -665,5 +728,15 @@ mod tests {
         let raw = adapter.run(&model, &plan).unwrap();
         let normalized = adapter.normalize(&model, &run_plan, raw).unwrap();
         assert!(normalized.trace.is_some());
+        let crate::engine::CheckOutcome::Completed(result) = normalized.outcome else {
+            panic!("expected completed outcome");
+        };
+        assert_eq!(result.assurance_level, crate::engine::AssuranceLevel::Bounded);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("SOLVER_REPORTED_UNKNOWN")
+        );
+        assert_eq!(result.property_result.unknown_reason, Some(UnknownReason::TimeLimitReached));
+        assert!(result.property_result.summary.contains("command"));
     }
 }
