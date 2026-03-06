@@ -255,6 +255,32 @@ ApalacheはTLA+のシンボリック検査系として参考になる。
 - 並行スケジュール探索に実用価値がある
 - TLA+的並行性を実装側へ近づける補助として重要
 
+## 6.8 SMT-COMP and solver selection policy
+
+関連ID: `FR-023`, `I-1`〜`I-4`, `Phase 4`
+
+参考:
+
+- https://smt-comp.github.io/2024/results.html
+- https://smt-comp.github.io/
+
+評価:
+
+- SMT-COMP は solver 導入判断の一次資料として使う
+- ただし「総合 1 位」をそのまま採用基準にしない
+- logic, track, model production quality, unsat core/model availability, CLI 運用性を分けて評価する
+
+本計画への採用:
+
+- 最初の正式 backend 候補は `cvc5`
+- bit-vector 系の強化候補は `Bitwuzla`
+- 比較用・互換性確認用に `Z3` を残す
+
+不採用方針:
+
+- SMT-COMP の単年結果だけで固定採用しない
+- solver 固有出力をそのまま上位 API へ漏らさない
+
 ## 7. 基礎研究
 
 ### 7.1 RustBelt

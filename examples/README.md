@@ -50,3 +50,20 @@ Not fully implemented yet:
 - full external solver integrations beyond the generic command protocol
 - complete JSON Schema validation against full schemas
 - richer witness synthesis beyond short synthetic traces
+
+## Command backend demo
+
+The repository also includes a minimal solver-protocol script:
+
+- `solvers/mock_command_solver.sh`
+
+You can use it to exercise the generic command backend without installing a
+real SMT solver.
+
+```sh
+cargo run -- check examples/models/failing_counter.valid \
+  --backend=command \
+  --solver-exec sh \
+  --solver-arg examples/solvers/mock_command_solver.sh \
+  --json
+```

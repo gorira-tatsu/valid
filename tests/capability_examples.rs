@@ -164,3 +164,26 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
     let stdout = String::from_utf8_lossy(&orchestrate.stdout);
     assert!(stdout.contains("\"aggregate_coverage\""));
 }
+
+#[test]
+fn cli_command_backend_demo_script_normalizes_failures() {
+    let fail = repo_path("examples/models/failing_counter.valid");
+    let solver = repo_path("examples/solvers/mock_command_solver.sh");
+
+    let output = Command::new(binary_path())
+        .arg("check")
+        .arg(&fail)
+        .arg("--json")
+        .arg("--backend=command")
+        .arg("--solver-exec")
+        .arg("sh")
+        .arg("--solver-arg")
+        .arg(solver)
+        .output()
+        .expect("command backend should run");
+    assert_eq!(output.status.code(), Some(2));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("MOCK_SOLVER_COUNTEREXAMPLE"));
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+}
