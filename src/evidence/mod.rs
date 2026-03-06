@@ -437,6 +437,7 @@ fn unknown_reason_label(reason: UnknownReason) -> &'static str {
 fn backend_label(kind: crate::engine::BackendKind) -> &'static str {
     match kind {
         crate::engine::BackendKind::Explicit => "explicit",
+        crate::engine::BackendKind::MockBmc => "mock-bmc",
     }
 }
 fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {

@@ -31,6 +31,7 @@ pub trait SolverAdapter {
 }
 
 pub struct ExplicitAdapter;
+pub struct MockBmcAdapter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolverRunPlan {
@@ -111,6 +112,69 @@ impl SolverAdapter for ExplicitAdapter {
     }
 }
 
+impl SolverAdapter for MockBmcAdapter {
+    fn backend_kind(&self) -> BackendKind {
+        BackendKind::MockBmc
+    }
+
+    fn capabilities(&self) -> CapabilityMatrix {
+        CapabilityMatrix {
+            backend_name: "mock-bmc".to_string(),
+            supports_explicit: false,
+            supports_bmc: true,
+            supports_certificate: false,
+            supports_trace: true,
+            supports_witness: true,
+            selfcheck_compatible: false,
+        }
+    }
+
+    fn build_plan(&self, _model: &ModelIr, run_plan: &RunPlan) -> Result<SolverRunPlan, String> {
+        let target_property_ids = match &run_plan.property_selection {
+            crate::engine::PropertySelection::ExactlyOne(id) => vec![id.clone()],
+        };
+        Ok(SolverRunPlan {
+            run_id: format!("{}-bmc", run_plan.manifest.run_id),
+            backend: BackendKind::MockBmc,
+            target_property_ids,
+            horizon: run_plan
+                .search_bounds
+                .max_depth
+                .map(|value| value as u32)
+                .or(Some(8)),
+            encoded_model_hash: format!("bmc:{}", run_plan.manifest.source_hash),
+        })
+    }
+
+    fn run(&self, model: &ModelIr, plan: &SolverRunPlan) -> Result<RawSolverResult, String> {
+        let mut run_plan = RunPlan::default();
+        run_plan.manifest.run_id = plan.run_id.clone();
+        if let Some(property_id) = plan.target_property_ids.first() {
+            run_plan.property_selection =
+                crate::engine::PropertySelection::ExactlyOne(property_id.clone());
+        }
+        run_plan.search_bounds.max_depth = plan.horizon.map(|value| value as usize);
+        Ok(RawSolverResult::Explicit(check_explicit(model, &run_plan)))
+    }
+
+    fn normalize(
+        &self,
+        _model: &ModelIr,
+        _run_plan: &RunPlan,
+        raw: RawSolverResult,
+    ) -> Result<NormalizedRunResult, String> {
+        match raw {
+            RawSolverResult::Explicit(outcome) => {
+                let trace = match &outcome {
+                    CheckOutcome::Completed(result) => result.trace.clone(),
+                    CheckOutcome::Errored(_) => None,
+                };
+                Ok(NormalizedRunResult { outcome, trace })
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -118,7 +182,7 @@ mod tests {
         frontend::compile_model,
     };
 
-    use super::{ExplicitAdapter, SolverAdapter};
+    use super::{ExplicitAdapter, MockBmcAdapter, SolverAdapter};
 
     #[test]
     fn explicit_adapter_normalizes_completed_outcome() {
@@ -133,5 +197,13 @@ mod tests {
         let raw = adapter.run(&model, &plan).unwrap();
         let normalized = adapter.normalize(&model, &run_plan, raw).unwrap();
         assert!(normalized.trace.is_some());
+    }
+
+    #[test]
+    fn mock_bmc_adapter_reports_bmc_capabilities() {
+        let adapter = MockBmcAdapter;
+        let caps = adapter.capabilities();
+        assert!(caps.supports_bmc);
+        assert!(caps.supports_witness);
     }
 }

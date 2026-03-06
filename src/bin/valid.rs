@@ -16,6 +16,8 @@ use valid::{
         write_vector_artifact,
     },
     frontend::compile_model,
+    orchestrator::run_all_properties,
+    reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{
         build_counterexample_vector, build_transition_coverage_vectors, generated_test_output_path,
@@ -33,11 +35,13 @@ fn main() {
         "explain" => cmd_explain(args.collect()),
         "minimize" => cmd_minimize(args.collect()),
         "contract" => cmd_contract(args.collect()),
+        "trace" => cmd_trace(args.collect()),
+        "orchestrate" => cmd_orchestrate(args.collect()),
         "testgen" => cmd_testgen(args.collect()),
         "coverage" => cmd_coverage(args.collect()),
         "selfcheck" => cmd_selfcheck(),
         _ => {
-            eprintln!("usage: valid <check|inspect|explain|minimize|contract|testgen|coverage|selfcheck> ...");
+            eprintln!("usage: valid <check|inspect|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck> ...");
             process::exit(3);
         }
     }
@@ -315,6 +319,68 @@ fn cmd_testgen(args: Vec<String>) {
         Err(error) => {
             print_diagnostics(&error.diagnostics);
             process::exit(3);
+        }
+    }
+}
+
+fn cmd_trace(args: Vec<String>) {
+    let mut format = "mermaid-state".to_string();
+    let mut path = None;
+    for arg in args {
+        if let Some(value) = arg.strip_prefix("--format=") {
+            format = value.to_string();
+        } else {
+            path = Some(arg);
+        }
+    }
+    let path = path.unwrap_or_else(|| {
+        eprintln!("usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json]");
+        process::exit(3);
+    });
+    let source = read_source(&path);
+    let outcome = check_source(&CheckRequest {
+        request_id: "req-local-trace".to_string(),
+        source_name: path.clone(),
+        source,
+        property_id: None,
+    });
+    let trace = match outcome {
+        CheckOutcome::Completed(result) => result.trace,
+        CheckOutcome::Errored(error) => {
+            print_diagnostics(&error.diagnostics);
+            process::exit(3);
+        }
+    }
+    .unwrap_or_else(|| {
+        eprintln!("no trace available");
+        process::exit(3);
+    });
+    match format.as_str() {
+        "json" => println!("{}", valid::evidence::render_trace_json(&trace)),
+        "mermaid-sequence" => println!("{}", render_trace_sequence_mermaid(&trace)),
+        _ => println!("{}", render_trace_mermaid(&trace)),
+    }
+}
+
+fn cmd_orchestrate(args: Vec<String>) {
+    let (_, path) = parse_json_and_path(args, "usage: valid orchestrate <model-file> [--json]");
+    let source = read_source(&path);
+    let model = compile_model(&source).unwrap_or_else(|diagnostics| {
+        print_diagnostics(&diagnostics);
+        process::exit(3);
+    });
+    let runs = run_all_properties(&model, &valid::engine::RunPlan::default());
+    for run in runs {
+        match run.outcome {
+            CheckOutcome::Completed(result) => {
+                println!(
+                    "property_id: {} status: {:?}",
+                    run.property_id, result.status
+                );
+            }
+            CheckOutcome::Errored(_) => {
+                println!("property_id: {} status: ERROR", run.property_id);
+            }
         }
     }
 }

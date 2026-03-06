@@ -39,10 +39,10 @@ pub fn run_smoke_selfcheck() -> SelfcheckReport {
     cases.push(run_replay_case());
     cases.push(run_engine_case());
 
-    let status = if cases.iter().all(|case| case.status == "ok") {
-        "ok"
+    let status = if cases.iter().all(|case| case.status == "PASS") {
+        "PASS"
     } else {
-        "failed"
+        "FAIL"
     };
 
     SelfcheckReport {
@@ -90,8 +90,8 @@ fn run_expr_case() -> SelfcheckCase {
         right: Box::new(ExprIr::Literal(Value::UInt(1))),
     };
     let status = match eval_expr(&model, &state, &expr) {
-        Ok(Value::UInt(1)) => "ok",
-        _ => "failed",
+        Ok(Value::UInt(1)) => "PASS",
+        _ => "FAIL",
     };
     SelfcheckCase {
         case_id: "expr-eval".to_string(),
@@ -108,8 +108,8 @@ fn run_guard_case() -> SelfcheckCase {
         .find(|item| item.action_id == "Jump")
         .expect("action");
     let status = match evaluate_guard(&model, &state, action) {
-        Ok(true) => "ok",
-        _ => "failed",
+        Ok(true) => "PASS",
+        _ => "FAIL",
     };
     SelfcheckCase {
         case_id: "guard-eval".to_string(),
@@ -121,8 +121,8 @@ fn run_transition_case() -> SelfcheckCase {
     let model = selfcheck_model();
     let state = build_initial_state(&model).expect("selfcheck init");
     let status = match apply_action(&model, &state, "Jump") {
-        Ok(Some(next)) if next.values == vec![Value::UInt(2)] => "ok",
-        _ => "failed",
+        Ok(Some(next)) if next.values == vec![Value::UInt(2)] => "PASS",
+        _ => "FAIL",
     };
     SelfcheckCase {
         case_id: "transition-apply".to_string(),
@@ -133,8 +133,8 @@ fn run_transition_case() -> SelfcheckCase {
 fn run_replay_case() -> SelfcheckCase {
     let model = selfcheck_model();
     let status = match replay_actions(&model, &["Jump".to_string()]) {
-        Ok(state) if state.values == vec![Value::UInt(2)] => "ok",
-        _ => "failed",
+        Ok(state) if state.values == vec![Value::UInt(2)] => "PASS",
+        _ => "FAIL",
     };
     SelfcheckCase {
         case_id: "trace-replay".to_string(),
@@ -148,8 +148,10 @@ fn run_engine_case() -> SelfcheckCase {
     let mut plan = RunPlan::default();
     plan.property_selection = PropertySelection::ExactlyOne("P_SAFE".to_string());
     let status = match check_explicit(&model, &plan) {
-        CheckOutcome::Completed(result) if result.status == crate::engine::RunStatus::Fail => "ok",
-        _ => "failed",
+        CheckOutcome::Completed(result) if result.status == crate::engine::RunStatus::Fail => {
+            "PASS"
+        }
+        _ => "FAIL",
     };
     SelfcheckCase {
         case_id: "explicit-counterexample".to_string(),
@@ -201,7 +203,7 @@ mod tests {
     #[test]
     fn smoke_selfcheck_passes() {
         let report = run_smoke_selfcheck();
-        assert_eq!(report.status, "ok");
+        assert_eq!(report.status, "PASS");
         assert!(report.cases.len() >= 5);
     }
 

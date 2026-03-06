@@ -40,6 +40,7 @@ pub enum RunStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     Explicit,
+    MockBmc,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
