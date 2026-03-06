@@ -1,0 +1,1 @@
+//! Selfcheck suites and runners.

@@ -1,0 +1,14 @@
+[package]
+name = "valid"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "valid"
+path = "src/lib.rs"
+
+[[bin]]
+name = "valid"
+path = "src/bin/valid.rs"
+
+[dependencies]

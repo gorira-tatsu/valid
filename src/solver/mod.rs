@@ -1,0 +1,1 @@
+//! Solver adapters and normalization.
