@@ -13,7 +13,11 @@ use crate::{
         replay::replay_actions,
         transition::{apply_action, build_initial_state},
     },
-    support::{artifact::selfcheck_report_path, io::write_text_file},
+    support::{
+        artifact::selfcheck_report_path,
+        io::write_text_file,
+        schema::{require_non_empty, require_schema_version},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +83,16 @@ pub fn write_selfcheck_artifact(report: &SelfcheckReport) -> Result<String, Stri
     let path = selfcheck_report_path(&report.suite_id, &report.run_id);
     write_text_file(&path, &render_selfcheck_json(report))?;
     Ok(path)
+}
+
+pub fn validate_selfcheck_report(report: &SelfcheckReport) -> Result<(), String> {
+    require_schema_version(&report.schema_version)?;
+    require_non_empty(&report.suite_id, "suite_id")?;
+    require_non_empty(&report.run_id, "run_id")?;
+    if !matches!(report.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
+        return Err("status must be PASS, FAIL, or UNKNOWN".to_string());
+    }
+    Ok(())
 }
 
 fn run_expr_case() -> SelfcheckCase {
@@ -198,13 +212,17 @@ fn selfcheck_model() -> ModelIr {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_selfcheck_json, run_smoke_selfcheck, write_selfcheck_artifact};
+    use super::{
+        render_selfcheck_json, run_smoke_selfcheck, validate_selfcheck_report,
+        write_selfcheck_artifact,
+    };
 
     #[test]
     fn smoke_selfcheck_passes() {
         let report = run_smoke_selfcheck();
         assert_eq!(report.status, "PASS");
         assert!(report.cases.len() >= 5);
+        validate_selfcheck_report(&report).unwrap();
     }
 
     #[test]

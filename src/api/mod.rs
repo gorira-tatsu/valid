@@ -6,7 +6,11 @@ use crate::{
     },
     frontend,
     ir::ModelIr,
-    support::{diagnostics::Diagnostic, hash::stable_hash_hex},
+    support::{
+        diagnostics::Diagnostic,
+        hash::stable_hash_hex,
+        schema::{require_len_match, require_non_empty, require_schema_version},
+    },
     testgen::{build_counterexample_vector, minimize_counterexample_vector, MinimizeResult},
 };
 
@@ -377,22 +381,14 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
 }
 
 pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
-    if request.request_id.trim().is_empty() {
-        return Err("request_id must not be empty".to_string());
-    }
-    if request.source.trim().is_empty() {
-        return Err("source must not be empty".to_string());
-    }
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source, "source")?;
     Ok(())
 }
 
 pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), String> {
-    if response.schema_version != "1.0.0" {
-        return Err("unexpected schema_version".to_string());
-    }
-    if response.evidence_id.trim().is_empty() {
-        return Err("evidence_id must not be empty".to_string());
-    }
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.evidence_id, "evidence_id")?;
     if !(0.0..=1.0).contains(&response.confidence) {
         return Err("confidence must be between 0.0 and 1.0".to_string());
     }
@@ -400,9 +396,8 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
 }
 
 pub fn validate_minimize_response(response: &MinimizeResponse) -> Result<(), String> {
-    if response.vector_id.trim().is_empty() {
-        return Err("vector_id must not be empty".to_string());
-    }
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.vector_id, "vector_id")?;
     if response.minimized_steps > response.original_steps {
         return Err("minimized_steps must not exceed original_steps".to_string());
     }
@@ -410,9 +405,13 @@ pub fn validate_minimize_response(response: &MinimizeResponse) -> Result<(), Str
 }
 
 pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), String> {
-    if response.vector_ids.len() != response.generated_files.len() {
-        return Err("vector_ids and generated_files must have the same length".to_string());
-    }
+    require_schema_version(&response.schema_version)?;
+    require_len_match(
+        response.vector_ids.len(),
+        response.generated_files.len(),
+        "vector_ids",
+        "generated_files",
+    )?;
     Ok(())
 }
 

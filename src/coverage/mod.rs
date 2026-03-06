@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::{evidence::EvidenceTrace, ir::ModelIr};
+use crate::{evidence::EvidenceTrace, ir::ModelIr, support::schema::require_schema_version};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageReport {
@@ -131,6 +131,14 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out
 }
 
+pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
+    require_schema_version(&report.schema_version)?;
+    if report.transition_coverage_percent > 100 {
+        return Err("transition_coverage_percent must not exceed 100".to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -142,7 +150,9 @@ mod tests {
         ir::Value,
     };
 
-    use super::{collect_coverage, evaluate_coverage_gate, render_coverage_json};
+    use super::{
+        collect_coverage, evaluate_coverage_gate, render_coverage_json, validate_coverage_report,
+    };
 
     #[test]
     fn computes_transition_coverage() {
@@ -177,5 +187,6 @@ mod tests {
         assert!(report.guard_false_actions.contains("A_DEC"));
         assert!(!evaluate_coverage_gate(&report, 60));
         assert!(render_coverage_json(&report).contains("\"summary\""));
+        validate_coverage_report(&report).unwrap();
     }
 }
