@@ -7,6 +7,12 @@ These fixtures are a temporary compatibility harness. The intended primary
 modeling path is Rust-native (`Finite` + `VerifiedMachine`), not a project-
 specific DSL.
 
+Rust-native authorization example:
+
+- `iam_like_authz.rs`
+  - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented
+    authorization reasoning without `.valid`
+
 ## Models
 
 - `models/safe_counter.valid`
@@ -33,6 +39,7 @@ cargo run -- explain examples/models/failing_counter.valid --json
 cargo run -- coverage examples/models/failing_counter.valid --json
 cargo run -- orchestrate examples/models/multi_property.valid --json
 cargo run -- inspect examples/models/safe_counter.valid --json
+cargo run --example iam_like_authz
 ```
 
 ## Current capability boundary

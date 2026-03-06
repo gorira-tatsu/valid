@@ -3,6 +3,8 @@
 //! This module provides a Rust-first verification surface without relying on
 //! the temporary `.valid` fixture frontend.
 
+pub mod authz;
+
 use std::{
     collections::{HashSet, VecDeque},
     fmt::Debug,
