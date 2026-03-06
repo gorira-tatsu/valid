@@ -1,4 +1,6 @@
-//! IAM-like authorization semantics for mission-critical policy verification.
+#![allow(dead_code)]
+
+//! IAM-like authorization semantics as an example Rust model.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -6,7 +8,7 @@ use std::{
     hash::Hash,
 };
 
-use super::Finite;
+use valid::modeling::Finite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyEffect {
@@ -489,7 +491,7 @@ mod tests {
         AuthorizationRequest, Matcher, PolicyCondition, PolicyDomain, PolicyEffect, PolicySet,
         PolicyStatement, RequestContext,
     };
-    use crate::native::Finite;
+    use valid::modeling::Finite;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
     enum Principal {

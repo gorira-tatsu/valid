@@ -49,7 +49,7 @@ Alloyは有限スコープにおける関係制約記述と、具体例生成能
 
 - 有界具体例生成の思想を採用する。
 - `Facts` と `witness/counterexample` 生成の考え方をIRへ取り込む。
-- 別 DSL を主言語にはせず、Rust-native model syntax を一次経路とする。
+- 別 DSL を主言語にはせず、Rust model syntax を一次経路とする。
 
 ### 3.4 採用しない点
 

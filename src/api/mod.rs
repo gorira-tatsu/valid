@@ -6,7 +6,6 @@ use crate::{
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
-    native::demo::{run_demo, NativeDemoKind, NativeDemoReport},
     orchestrator::run_all_properties_with_backend,
     solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
@@ -153,23 +152,6 @@ pub struct OrchestrateResponse {
     pub aggregate_coverage: Option<CoverageReport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeDemoRequest {
-    pub request_id: String,
-    pub demo_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeDemoResponse {
-    pub schema_version: String,
-    pub request_id: String,
-    pub status: String,
-    pub demo_id: String,
-    pub summary: String,
-    pub checks: Vec<String>,
-    pub highlights: Vec<String>,
-}
-
 pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
     let model = frontend::compile_model(&request.source)?;
     Ok(InspectResponse {
@@ -300,27 +282,6 @@ pub fn orchestrate_source(
         request_id: request.request_id.clone(),
         runs,
         aggregate_coverage,
-    })
-}
-
-pub fn native_demo_response(request: &NativeDemoRequest) -> Result<NativeDemoResponse, String> {
-    let kind = NativeDemoKind::parse(&request.demo_id)
-        .ok_or_else(|| format!("unsupported native demo `{}`", request.demo_id))?;
-    let NativeDemoReport {
-        schema_version,
-        demo_id,
-        summary,
-        checks,
-        highlights,
-    } = run_demo(kind);
-    Ok(NativeDemoResponse {
-        schema_version,
-        request_id: request.request_id.clone(),
-        status: "ok".to_string(),
-        demo_id,
-        summary,
-        checks,
-        highlights,
     })
 }
 
@@ -882,36 +843,16 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
     Ok(())
 }
 
-pub fn validate_native_demo_request(request: &NativeDemoRequest) -> Result<(), String> {
-    require_schema_version("1.0.0")?;
-    require_non_empty(&request.request_id, "request_id")?;
-    require_non_empty(&request.demo_id, "demo_id")?;
-    if NativeDemoKind::parse(&request.demo_id).is_none() {
-        return Err(format!("unsupported native demo `{}`", request.demo_id));
-    }
-    Ok(())
-}
-
-pub fn validate_native_demo_response(response: &NativeDemoResponse) -> Result<(), String> {
-    require_schema_version(&response.schema_version)?;
-    require_non_empty(&response.request_id, "request_id")?;
-    require_non_empty(&response.status, "status")?;
-    require_non_empty(&response.demo_id, "demo_id")?;
-    require_non_empty(&response.summary, "summary")?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        native_demo_response, orchestrate_source, testgen_source, validate_capabilities_request,
+        orchestrate_source, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_request,
         validate_explain_response, validate_inspect_request, validate_inspect_response,
-        validate_minimize_request, validate_minimize_response, validate_native_demo_request,
-        validate_native_demo_response, validate_orchestrate_response, validate_testgen_request,
-        validate_testgen_response, CapabilitiesRequest, CheckRequest, InspectRequest,
-        MinimizeRequest, NativeDemoRequest, OrchestrateRequest, TestgenRequest,
+        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
+        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
+        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
     use crate::engine::CheckOutcome;
 
@@ -1140,20 +1081,6 @@ mod tests {
         validate_orchestrate_response(&response).unwrap();
         assert_eq!(response.runs.len(), 2);
         assert!(response.aggregate_coverage.is_some());
-    }
-
-    #[test]
-    fn native_demo_returns_realistic_report() {
-        let request = NativeDemoRequest {
-            request_id: "req-native-demo".to_string(),
-            demo_id: "iam-authz".to_string(),
-        };
-        validate_native_demo_request(&request).unwrap();
-        let response = native_demo_response(&request).unwrap();
-        validate_native_demo_response(&response).unwrap();
-        assert_eq!(response.demo_id, "iam-authz");
-        assert!(!response.summary.is_empty());
-        assert!(!response.highlights.is_empty());
     }
 }
 

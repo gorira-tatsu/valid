@@ -3,9 +3,9 @@
 This directory contains runnable examples that show the current implementation
 boundary.
 
-The intended primary modeling path is Rust-native, not a project-specific DSL.
+The intended primary modeling path is Rust-defined models, not a project-specific DSL.
 
-## Rust-native examples
+## Rust model examples
 
 - `iam_like_authz.rs`
   - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented
@@ -29,16 +29,12 @@ cargo run --example iam_like_authz
 cargo run --example iam_policy_diff
 cargo run --example train_fare
 cargo run --example saas_entitlements
-valid native-demo iam-authz --json
-valid native-demo iam-policy-diff --json
-valid native-demo train-fare --json
-valid native-demo saas-entitlements --json
 ```
 
 ## Legacy compatibility fixtures
 
 These `.valid` files remain as a temporary compatibility harness while the
-Rust-native path becomes the primary route.
+Rust model definitions become the primary route.
 
 ## Models
 

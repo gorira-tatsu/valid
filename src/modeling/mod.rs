@@ -1,12 +1,7 @@
-//! Rust-native finite-state modeling entrypoint.
+//! Rust-based modeling contracts.
 //!
-//! This module provides a Rust-first verification surface without relying on
-//! the temporary `.valid` fixture frontend.
-
-pub mod authz;
-pub mod demo;
-pub mod entitlements;
-pub mod fare;
+//! This module exposes only generic system-side contracts. Concrete domain
+//! models belong in user code, examples, or tests rather than inside `src/`.
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -15,13 +10,13 @@ use std::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NativeRunStatus {
+pub enum ModelingRunStatus {
     Pass,
     Fail,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeTraceStep<S, A> {
+pub struct ModelingTraceStep<S, A> {
     pub index: usize,
     pub action: A,
     pub state_before: S,
@@ -29,13 +24,13 @@ pub struct NativeTraceStep<S, A> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NativeCheckResult<S, A> {
+pub struct ModelingCheckResult<S, A> {
     pub model_id: &'static str,
     pub property_id: &'static str,
-    pub status: NativeRunStatus,
+    pub status: ModelingRunStatus,
     pub explored_states: usize,
     pub explored_transitions: usize,
-    pub trace: Vec<NativeTraceStep<S, A>>,
+    pub trace: Vec<ModelingTraceStep<S, A>>,
 }
 
 pub trait Finite: Sized {
@@ -54,13 +49,13 @@ pub trait VerifiedMachine {
 }
 
 #[derive(Debug, Clone)]
-struct NativeNode<S, A> {
+struct ModelingNode<S, A> {
     state: S,
     parent: Option<usize>,
     via_action: Option<A>,
 }
 
-pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Action> {
+pub fn check_machine<M: VerifiedMachine>() -> ModelingCheckResult<M::State, M::Action> {
     let actions = M::Action::all();
     let init_states = M::init_states();
     assert!(
@@ -76,7 +71,7 @@ pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Act
     for state in init_states {
         if visited.insert(state.clone()) {
             let index = nodes.len();
-            nodes.push(NativeNode {
+            nodes.push(ModelingNode {
                 state,
                 parent: None,
                 via_action: None,
@@ -88,10 +83,10 @@ pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Act
     while let Some(node_index) = frontier.pop_front() {
         let node = nodes[node_index].clone();
         if !M::holds(&node.state) {
-            return NativeCheckResult {
+            return ModelingCheckResult {
                 model_id: M::model_id(),
                 property_id: M::property_id(),
-                status: NativeRunStatus::Fail,
+                status: ModelingRunStatus::Fail,
                 explored_states: visited.len(),
                 explored_transitions,
                 trace: build_trace::<M>(&nodes, node_index),
@@ -104,7 +99,7 @@ pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Act
             for next_state in next_states {
                 if visited.insert(next_state.clone()) {
                     let child_index = nodes.len();
-                    nodes.push(NativeNode {
+                    nodes.push(ModelingNode {
                         state: next_state,
                         parent: Some(node_index),
                         via_action: Some(action.clone()),
@@ -115,10 +110,10 @@ pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Act
         }
     }
 
-    NativeCheckResult {
+    ModelingCheckResult {
         model_id: M::model_id(),
         property_id: M::property_id(),
-        status: NativeRunStatus::Pass,
+        status: ModelingRunStatus::Pass,
         explored_states: visited.len(),
         explored_transitions,
         trace: Vec::new(),
@@ -126,9 +121,9 @@ pub fn check_machine<M: VerifiedMachine>() -> NativeCheckResult<M::State, M::Act
 }
 
 fn build_trace<M: VerifiedMachine>(
-    nodes: &[NativeNode<M::State, M::Action>],
+    nodes: &[ModelingNode<M::State, M::Action>],
     end_index: usize,
-) -> Vec<NativeTraceStep<M::State, M::Action>> {
+) -> Vec<ModelingTraceStep<M::State, M::Action>> {
     let mut indices = Vec::new();
     let mut cursor = Some(end_index);
     while let Some(index) = cursor {
@@ -141,7 +136,7 @@ fn build_trace<M: VerifiedMachine>(
     for (step_index, pair) in indices.windows(2).enumerate() {
         let before = &nodes[pair[0]];
         let after = &nodes[pair[1]];
-        trace.push(NativeTraceStep {
+        trace.push(ModelingTraceStep {
             index: step_index,
             action: after
                 .via_action
@@ -156,7 +151,7 @@ fn build_trace<M: VerifiedMachine>(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_machine, Finite, NativeRunStatus, VerifiedMachine};
+    use super::{check_machine, Finite, ModelingRunStatus, VerifiedMachine};
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct State {
@@ -251,14 +246,14 @@ mod tests {
     #[test]
     fn rust_native_model_can_pass() {
         let result = check_machine::<CounterModel>();
-        assert_eq!(result.status, NativeRunStatus::Pass);
+        assert_eq!(result.status, ModelingRunStatus::Pass);
         assert!(result.trace.is_empty());
     }
 
     #[test]
     fn rust_native_model_can_fail_with_shortest_trace() {
         let result = check_machine::<FailingCounterModel>();
-        assert_eq!(result.status, NativeRunStatus::Fail);
+        assert_eq!(result.status, ModelingRunStatus::Fail);
         assert_eq!(result.trace.len(), 2);
     }
 }

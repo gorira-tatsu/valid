@@ -1,10 +1,10 @@
-use valid::native::{
-    authz::{
-        find_newly_allowed_requests, Matcher, PolicyDomain, PolicyEffect, PolicySet,
-        PolicyStatement,
-    },
-    Finite,
+#[path = "support/authz.rs"]
+mod authz;
+
+use authz::{
+    find_newly_allowed_requests, Matcher, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement,
 };
+use valid::modeling::Finite;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Principal {

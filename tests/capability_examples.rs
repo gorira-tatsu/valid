@@ -210,29 +210,3 @@ fn rust_native_examples_run_successfully() {
         );
     }
 }
-
-#[test]
-fn native_demo_cli_reports_realistic_systems() {
-    for demo in [
-        "iam-authz",
-        "iam-policy-diff",
-        "train-fare",
-        "saas-entitlements",
-    ] {
-        let output = Command::new(binary_path())
-            .arg("native-demo")
-            .arg(demo)
-            .arg("--json")
-            .output()
-            .expect("native-demo should run");
-        assert!(
-            output.status.success(),
-            "native-demo {} failed: {}",
-            demo,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("\"schema_version\""));
-        assert!(stdout.contains("\"demo_id\""));
-    }
-}

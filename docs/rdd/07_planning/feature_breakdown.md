@@ -641,13 +641,13 @@
 
 本章でやりたいのは、抽象的な要件を「実際に何を作るか」へ落とすことである。今後はこの章をベースに、各機能をさらに `API契約`, `入出力例`, `エラーパターン`, `テスト戦略` まで掘り下げていくのが自然な次の段階になる。
 
-## 24. Rust-native 現実例トラック
+## 24. Rust model 現実例トラック
 
-主要実装とは別に、repo 内で維持し続ける Rust-native の現実例を継続追加する。少なくとも以下を維持対象とする。
+主要実装とは別に、repo 内で維持し続ける Rust で書かれた現実例を継続追加する。少なくとも以下を維持対象とする。
 
 - IAM-like authorization verification
 - policy diff / newly allowed request detection
 - train fare calculation invariants
 - SaaS entitlement gating
 
-これらは `.valid` ではなく Rust-native module / example / test として維持し、mission-critical な利用例の回帰セットとして扱う。
+これらは `.valid` ではなく Rust model module / example / test として維持し、mission-critical な利用例の回帰セットとして扱う。

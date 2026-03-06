@@ -1,8 +1,10 @@
-//! Rust-native train fare verification examples.
+#![allow(dead_code)]
+
+//! Train fare verification as an example Rust model.
 
 use std::collections::BTreeMap;
 
-use super::Finite;
+use valid::modeling::Finite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StationZone {

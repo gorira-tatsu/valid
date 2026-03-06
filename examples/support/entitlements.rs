@@ -1,8 +1,10 @@
-//! Rust-native SaaS entitlement verification examples.
+#![allow(dead_code)]
+
+//! SaaS entitlement verification as an example Rust model.
 
 use std::collections::BTreeMap;
 
-use super::Finite;
+use valid::modeling::Finite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Plan {
