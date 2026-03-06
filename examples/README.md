@@ -3,6 +3,10 @@
 This directory contains reproducible `.valid` models that show the current
 implementation boundary.
 
+These fixtures are a temporary compatibility harness. The intended primary
+modeling path is Rust-native (`Finite` + `VerifiedMachine`), not a project-
+specific DSL.
+
 ## Models
 
 - `models/safe_counter.valid`

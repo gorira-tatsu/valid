@@ -11,6 +11,7 @@
 - [../07_planning/feature_breakdown.md](../07_planning/feature_breakdown.md)
 
 - [mvp_frontend_and_kernel_specs.md](mvp_frontend_and_kernel_specs.md)
+- [rust_native_modeling_specs.md](rust_native_modeling_specs.md)
 - [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
 - [testgen_contract_coverage_specs.md](testgen_contract_coverage_specs.md)
 - [ai_solver_selfcheck_specs.md](ai_solver_selfcheck_specs.md)
@@ -28,11 +29,12 @@
 読む順序:
 
 1. `mvp_frontend_and_kernel_specs.md`
-2. `explicit_engine_and_evidence_specs.md`
-3. `testgen_contract_coverage_specs.md`
-4. `ai_solver_selfcheck_specs.md`
-5. `full_technology_usage_plan.md`
-6. `../09_reference`
+2. `rust_native_modeling_specs.md`
+3. `explicit_engine_and_evidence_specs.md`
+4. `testgen_contract_coverage_specs.md`
+5. `ai_solver_selfcheck_specs.md`
+6. `full_technology_usage_plan.md`
+7. `../09_reference`
 
 実装との接続先:
 

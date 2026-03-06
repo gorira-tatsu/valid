@@ -28,7 +28,7 @@
 - `B-2`: ガード評価
 - `B-3`: 遷移適用
 
-この範囲を先に固める理由は、以降の engine、trace、testgen、contract のすべてがこの土台に依存するためである。
+この範囲を先に固める理由は、以降の engine、trace、testgen、contract のすべてがこの土台に依存するためである。frontend は恒久的に独自 DSL を持つことを目標とせず、Rust-native model 定義から統一 IR を得ることを主目的とする。
 
 ## 2. 共通設計方針
 
@@ -48,10 +48,10 @@
 
 ### 3.2 入力
 
-- Rust macro入力
-- 将来のspec block
+- Rust trait / Rust macro によるモデル定義
+- 移行期のみ `.valid` 形式の fixture 入力を許可する
 
-MVPでは、内部共通の `RawSourceUnit` に正規化する。
+MVP では、Rust-native 定義を正規経路とし、`.valid` は parser / engine / reporter の早期検証用ハーネスとしてのみ維持する。入力は内部共通の `RawSourceUnit` に正規化する。
 
 ### 3.3 出力
 
