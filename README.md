@@ -83,6 +83,8 @@ cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs check counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=boundary --json
+cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
 ```
 

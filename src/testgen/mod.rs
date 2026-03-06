@@ -1,6 +1,6 @@
 //! Test vector generation and rendering.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use crate::{
     evidence::EvidenceTrace,
@@ -9,6 +9,7 @@ use crate::{
         eval::eval_expr,
         replay::replay_actions,
         transition::{apply_action, build_initial_state},
+        MachineState,
     },
     support::{artifact::generated_test_path, hash::stable_hash_hex, io::write_text_file},
 };
@@ -27,6 +28,10 @@ pub struct TestVector {
     pub expected_states: Vec<String>,
     pub property_id: String,
     pub minimized: bool,
+    pub focus_action_id: Option<String>,
+    pub focus_field: Option<String>,
+    pub expected_guard_enabled: Option<bool>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +84,10 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         expected_states,
         property_id: trace.property_id.clone(),
         minimized: false,
+        focus_action_id: None,
+        focus_field: None,
+        expected_guard_enabled: None,
+        notes: Vec::new(),
     })
 }
 
@@ -208,6 +217,27 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
     }
 
     vectors
+}
+
+pub fn build_model_test_vectors_for_strategy(
+    model: &ModelIr,
+    property_id: &str,
+    strategy: &str,
+) -> Result<Vec<TestVector>, String> {
+    match strategy {
+        "transition" | "witness" => {
+            let vectors = build_synthetic_witness_vectors(model, property_id);
+            if vectors.is_empty() {
+                Ok(build_model_random_vectors(model, property_id, 3)?)
+            } else {
+                Ok(vectors)
+            }
+        }
+        "guard" => build_model_guard_vectors(model, property_id),
+        "boundary" => build_model_boundary_vectors(model, property_id),
+        "random" => build_model_random_vectors(model, property_id, 5),
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn synthetic_trace_from_states(
@@ -372,11 +402,41 @@ pub fn render_rust_test(vector: &TestVector) -> String {
         "    let property_id = \"{}\";\n",
         vector.property_id
     ));
+    out.push_str(&format!(
+        "    let source_kind = \"{}\";\n",
+        vector.source_kind
+    ));
+    out.push_str(&format!("    let strategy = \"{}\";\n", vector.strategy));
+    if let Some(action_id) = &vector.focus_action_id {
+        out.push_str(&format!("    let focus_action_id = Some(\"{}\");\n", action_id));
+    } else {
+        out.push_str("    let focus_action_id: Option<&str> = None;\n");
+    }
+    if let Some(field) = &vector.focus_field {
+        out.push_str(&format!("    let focus_field = Some(\"{}\");\n", field));
+    } else {
+        out.push_str("    let focus_field: Option<&str> = None;\n");
+    }
+    if let Some(enabled) = vector.expected_guard_enabled {
+        out.push_str(&format!(
+            "    let expected_guard_enabled = Some({enabled});\n"
+        ));
+    } else {
+        out.push_str("    let expected_guard_enabled: Option<bool> = None;\n");
+    }
     out.push_str("    let mut actions = Vec::new();\n");
     for action in &vector.actions {
         out.push_str(&format!("    actions.push(\"{}\");\n", action.action_id));
     }
-    out.push_str("    assert!(!actions.is_empty(), \"vector_id={} property_id={}\", vector_id, property_id);\n");
+    out.push_str("    let mut expected_states = Vec::new();\n");
+    for state in &vector.expected_states {
+        out.push_str(&format!("    expected_states.push({state:?});\n"));
+    }
+    out.push_str("    assert!(!vector_id.is_empty());\n");
+    out.push_str("    assert!(!property_id.is_empty());\n");
+    out.push_str("    assert!(!source_kind.is_empty());\n");
+    out.push_str("    assert!(!strategy.is_empty());\n");
+    out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
     out
 }
@@ -394,6 +454,339 @@ pub fn write_generated_test_files(vectors: &[TestVector]) -> Result<Vec<String>,
         generated_files.push(path);
     }
     Ok(generated_files)
+}
+
+#[derive(Debug, Clone)]
+struct ModelNode {
+    state: MachineState,
+    parent: Option<usize>,
+    via_action_id: Option<String>,
+    via_action_label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ModelEdge {
+    action_id: String,
+    to_index: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ModelExploration {
+    nodes: Vec<ModelNode>,
+    edges_by_node: Vec<Vec<ModelEdge>>,
+}
+
+fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
+    let initial = build_initial_state(model).map_err(|diagnostic| diagnostic.message.clone())?;
+    let mut nodes = vec![ModelNode {
+        state: initial.clone(),
+        parent: None,
+        via_action_id: None,
+        via_action_label: None,
+    }];
+    let mut edges_by_node = vec![Vec::new()];
+    let mut frontier = VecDeque::from([0usize]);
+    let mut visited = HashSet::from([initial]);
+
+    while let Some(node_index) = frontier.pop_front() {
+        let state = nodes[node_index].state.clone();
+        for action in &model.actions {
+            let next = apply_action(model, &state, &action.action_id)
+                .map_err(|diagnostic| diagnostic.message.clone())?;
+            let Some(next_state) = next else {
+                continue;
+            };
+            let to_index = if visited.insert(next_state.clone()) {
+                let index = nodes.len();
+                nodes.push(ModelNode {
+                    state: next_state,
+                    parent: Some(node_index),
+                    via_action_id: Some(action.action_id.clone()),
+                    via_action_label: Some(action.label.clone()),
+                });
+                edges_by_node.push(Vec::new());
+                frontier.push_back(index);
+                index
+            } else {
+                nodes.iter()
+                    .position(|node| node.state == next_state)
+                    .expect("visited state must be present")
+            };
+            edges_by_node[node_index].push(ModelEdge {
+                action_id: action.action_id.clone(),
+                to_index,
+            });
+        }
+    }
+
+    Ok(ModelExploration { nodes, edges_by_node })
+}
+
+fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<TestVector>, String> {
+    let exploration = explore_model(model)?;
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for action in &model.actions {
+        if let Some((node_index, edge)) = exploration
+            .edges_by_node
+            .iter()
+            .enumerate()
+            .find_map(|(node_index, edges)| {
+                edges.iter()
+                    .find(|edge| edge.action_id == action.action_id)
+                    .map(|edge| (node_index, edge))
+            })
+        {
+            if let Some(vector) = build_model_vector_for_node(
+                model,
+                &exploration.nodes,
+                edge.to_index,
+                property_id,
+                "guard",
+                "guard",
+                Some(action.action_id.clone()),
+                None,
+                Some(true),
+                vec![format!("guard_true:{:?}", action.guard)],
+            ) {
+                let signature = (
+                    vector.focus_action_id.clone(),
+                    vector.expected_guard_enabled,
+                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+            let _ = node_index;
+        }
+
+        if let Some((node_index, _)) = exploration
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, node)| {
+                apply_action(model, &node.state, &action.action_id)
+                    .ok()
+                    .flatten()
+                    .is_none()
+            })
+        {
+            if let Some(vector) = build_model_vector_for_node(
+                model,
+                &exploration.nodes,
+                node_index,
+                property_id,
+                "guard",
+                "guard",
+                Some(action.action_id.clone()),
+                None,
+                Some(false),
+                vec![format!("guard_false:{:?}", action.guard)],
+            ) {
+                let signature = (
+                    vector.focus_action_id.clone(),
+                    vector.expected_guard_enabled,
+                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+        }
+    }
+
+    Ok(vectors)
+}
+
+fn build_model_boundary_vectors(
+    model: &ModelIr,
+    property_id: &str,
+) -> Result<Vec<TestVector>, String> {
+    let exploration = explore_model(model)?;
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for (field_index, field) in model.state_fields.iter().enumerate() {
+        let crate::ir::FieldType::BoundedU8 { min, max } = field.ty else {
+            continue;
+        };
+        for target in [min as u64, max as u64] {
+            if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
+                matches!(node.state.values.get(field_index), Some(Value::UInt(value)) if *value == target)
+            }) {
+                if let Some(vector) = build_model_vector_for_node(
+                    model,
+                    &exploration.nodes,
+                    node_index,
+                    property_id,
+                    "boundary",
+                    "boundary",
+                    None,
+                    Some(field.name.clone()),
+                    None,
+                    vec![format!("boundary_target:{target}")],
+                ) {
+                    let signature = (
+                        vector.focus_field.clone(),
+                        vector.notes.clone(),
+                        vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                    );
+                    if seen.insert(signature) {
+                        vectors.push(vector);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(vectors)
+}
+
+fn build_model_random_vectors(
+    model: &ModelIr,
+    property_id: &str,
+    limit: usize,
+) -> Result<Vec<TestVector>, String> {
+    let exploration = explore_model(model)?;
+    let mut candidates = exploration
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index > 0)
+        .map(|(index, _)| {
+            let signature = build_model_path(model, &exploration.nodes, index)
+                .into_iter()
+                .map(|step| step.action_id)
+                .collect::<Vec<_>>()
+                .join(",");
+            (stable_hash_hex(&(model.model_id.clone() + &signature)), index)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let seed = stable_hash_hex(&model.model_id);
+    Ok(candidates
+        .into_iter()
+        .take(limit)
+        .filter_map(|(_, index)| {
+            let mut vector = build_model_vector_for_node(
+                model,
+                &exploration.nodes,
+                index,
+                property_id,
+                "random",
+                "random",
+                None,
+                None,
+                None,
+                vec!["deterministic_randomized_sample".to_string()],
+            )?;
+            vector.seed = Some(
+                seed.bytes()
+                    .fold(0u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(byte as u64)),
+            );
+            Some(vector)
+        })
+        .collect())
+}
+
+fn build_model_vector_for_node(
+    model: &ModelIr,
+    nodes: &[ModelNode],
+    end_index: usize,
+    property_id: &str,
+    source_kind: &str,
+    strategy: &str,
+    focus_action_id: Option<String>,
+    focus_field: Option<String>,
+    expected_guard_enabled: Option<bool>,
+    notes: Vec<String>,
+) -> Option<TestVector> {
+    let steps = build_model_path(model, nodes, end_index);
+    let actions = steps
+        .iter()
+        .enumerate()
+        .map(|(index, step)| VectorActionStep {
+            index,
+            action_id: step.action_id.clone(),
+            action_label: step.action_label.clone(),
+        })
+        .collect::<Vec<_>>();
+    let expected_states = if steps.is_empty() {
+        vec![format!("{:?}", nodes.get(end_index)?.state.as_named_map(model))]
+    } else {
+        steps.iter().map(|step| format!("{:?}", step.state_after)).collect()
+    };
+    let signature = actions
+        .iter()
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(TestVector {
+        schema_version: "1.0.0".to_string(),
+        vector_id: format!(
+            "vec-{}",
+            stable_hash_hex(
+                &(model.model_id.clone()
+                    + property_id
+                    + source_kind
+                    + strategy
+                    + &signature
+                    + &format!("{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"))
+            )
+            .replace("sha256:", "")
+        ),
+        source_kind: source_kind.to_string(),
+        evidence_id: None,
+        strategy: strategy.to_string(),
+        generator_version: env!("CARGO_PKG_VERSION").to_string(),
+        seed: None,
+        actions,
+        initial_state: Some(nodes.first()?.state.as_named_map(model)),
+        expected_states,
+        property_id: property_id.to_string(),
+        minimized: false,
+        focus_action_id,
+        focus_field,
+        expected_guard_enabled,
+        notes,
+    })
+}
+
+struct ModelPathStep {
+    action_id: String,
+    action_label: String,
+    state_after: BTreeMap<String, Value>,
+}
+
+fn build_model_path(model: &ModelIr, nodes: &[ModelNode], end_index: usize) -> Vec<ModelPathStep> {
+    let mut indices = Vec::new();
+    let mut cursor = Some(end_index);
+    while let Some(index) = cursor {
+        indices.push(index);
+        cursor = nodes[index].parent;
+    }
+    indices.reverse();
+
+    indices
+        .windows(2)
+        .map(|pair| {
+            let after = &nodes[pair[1]];
+            ModelPathStep {
+                action_id: after
+                    .via_action_id
+                    .clone()
+                    .expect("non-root node must have an action id"),
+                action_label: after
+                    .via_action_label
+                    .clone()
+                    .expect("non-root node must have an action label"),
+                state_after: after.state.as_named_map(model),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

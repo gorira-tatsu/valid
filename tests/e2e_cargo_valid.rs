@@ -163,3 +163,24 @@ fn cargo_valid_testgen_witness_generates_files() {
     assert!(stdout.contains("tests/generated/"));
     cleanup_generated_files(&stdout);
 }
+
+#[test]
+fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(manifest_path())
+        .arg("--file")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("iam_transition_registry.rs"))
+        .arg("testgen")
+        .arg("iam-access")
+        .arg("--strategy=guard")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid guard testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"generated_files\":["));
+    assert!(stdout.contains("tests/generated/"));
+    cleanup_generated_files(&stdout);
+}

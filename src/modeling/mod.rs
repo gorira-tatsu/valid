@@ -768,6 +768,10 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
                 expected_states: vec![format!("{:?}", edge.state_after.snapshot())],
                 property_id: property.property_id.to_string(),
                 minimized: false,
+                focus_action_id: Some(edge.action.action_id()),
+                focus_field: None,
+                expected_guard_enabled: Some(true),
+                notes: Vec::new(),
             });
         }
     }
@@ -777,18 +781,260 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
 pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
     strategy: &str,
 ) -> Vec<TestVector> {
-    let vectors = build_machine_test_vectors::<M>();
     match strategy {
-        "counterexample" => vectors
+        "counterexample" => build_machine_test_vectors::<M>()
             .into_iter()
             .filter(|vector| vector.strategy == "counterexample")
             .collect(),
-        "transition" | "witness" => vectors
-            .into_iter()
-            .filter(|vector| vector.source_kind == "witness")
-            .collect(),
-        _ => vectors,
+        "transition" | "witness" => build_transition_witness_vectors::<M>(),
+        "guard" => build_guard_coverage_vectors::<M>(),
+        "boundary" => build_boundary_focus_vectors::<M>(),
+        "random" => build_randomized_vectors::<M>(5),
+        _ => build_machine_test_vectors::<M>(),
     }
+}
+
+fn build_transition_witness_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
+    build_machine_test_vectors::<M>()
+        .into_iter()
+        .filter(|vector| vector.source_kind == "witness")
+        .collect()
+}
+
+fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
+    let property = primary_property::<M>();
+    let exploration = explore_machine::<M>(property.holds);
+    let descriptors = M::transitions();
+    if descriptors.is_empty() {
+        return build_transition_witness_vectors::<M>();
+    }
+
+    let actions = M::Action::all()
+        .into_iter()
+        .map(|action| (action.action_id(), action))
+        .collect::<BTreeMap<_, _>>();
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for descriptor in descriptors {
+        if let Some(edge) = exploration
+            .edges
+            .iter()
+            .find(|edge| edge.action.action_id() == descriptor.action_id)
+        {
+            if let Some(vector) = build_machine_vector_for_node::<M>(
+                &exploration.nodes,
+                edge.to_index,
+                property.property_id,
+                "guard",
+                "guard",
+                Some(descriptor.action_id.to_string()),
+                None,
+                Some(true),
+                vec![format!("guard_true: {}", descriptor.guard)],
+            ) {
+                let signature = (
+                    vector.focus_action_id.clone(),
+                    vector.expected_guard_enabled,
+                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+        }
+
+        let Some(action) = actions.get(descriptor.action_id) else {
+            continue;
+        };
+        if let Some((node_index, _)) = exploration
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, node)| M::step(&node.state, action).is_empty())
+        {
+            if let Some(vector) = build_machine_vector_for_node::<M>(
+                &exploration.nodes,
+                node_index,
+                property.property_id,
+                "guard",
+                "guard",
+                Some(descriptor.action_id.to_string()),
+                None,
+                Some(false),
+                vec![format!("guard_false: {}", descriptor.guard)],
+            ) {
+                let signature = (
+                    vector.focus_action_id.clone(),
+                    vector.expected_guard_enabled,
+                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+        }
+    }
+
+    vectors
+}
+
+fn build_boundary_focus_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
+    let property = primary_property::<M>();
+    let exploration = explore_machine::<M>(property.holds);
+    let fields = M::State::state_fields();
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for field in fields {
+        let Some((min, max)) = parse_inclusive_range(field.range) else {
+            continue;
+        };
+        for target in [min, max] {
+            if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
+                matches!(
+                    node.state.snapshot().get(field.name),
+                    Some(Value::UInt(value)) if *value == target
+                )
+            }) {
+                if let Some(vector) = build_machine_vector_for_node::<M>(
+                    &exploration.nodes,
+                    node_index,
+                    property.property_id,
+                    "boundary",
+                    "boundary",
+                    None,
+                    Some(field.name.to_string()),
+                    None,
+                    vec![format!("boundary_target:{target}")],
+                ) {
+                    let signature = (
+                        vector.focus_field.clone(),
+                        vector.notes.clone(),
+                        vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                    );
+                    if seen.insert(signature) {
+                        vectors.push(vector);
+                    }
+                }
+            }
+        }
+    }
+
+    vectors
+}
+
+fn build_randomized_vectors<M: VerifiedMachine>(limit: usize) -> Vec<TestVector> {
+    let property = primary_property::<M>();
+    let exploration = explore_machine::<M>(property.holds);
+    let mut candidates = exploration
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index > 0)
+        .map(|(index, _)| {
+            let steps = build_trace::<M>(&exploration.nodes, index)
+                .into_iter()
+                .map(|step| step.action.action_id())
+                .collect::<Vec<_>>();
+            let key = stable_hash_hex(&(M::model_id().to_string() + &steps.join(",")));
+            (key, index)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut vectors = Vec::new();
+    let seed = stable_hash_hex(M::model_id());
+    for (_, index) in candidates.into_iter().take(limit) {
+        if let Some(mut vector) = build_machine_vector_for_node::<M>(
+            &exploration.nodes,
+            index,
+            property.property_id,
+            "random",
+            "random",
+            None,
+            None,
+            None,
+            vec!["deterministic_randomized_sample".to_string()],
+        ) {
+            vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(byte as u64)));
+            vectors.push(vector);
+        }
+    }
+    vectors
+}
+
+fn build_machine_vector_for_node<M: VerifiedMachine>(
+    nodes: &[ModelingNode<M::State, M::Action>],
+    end_index: usize,
+    property_id: &str,
+    source_kind: &str,
+    strategy: &str,
+    focus_action_id: Option<String>,
+    focus_field: Option<String>,
+    expected_guard_enabled: Option<bool>,
+    notes: Vec<String>,
+) -> Option<TestVector> {
+    let trace = build_trace::<M>(nodes, end_index);
+    let actions = trace
+        .iter()
+        .enumerate()
+        .map(|(index, step)| VectorActionStep {
+            index,
+            action_id: step.action.action_id(),
+            action_label: step.action.action_label(),
+        })
+        .collect::<Vec<_>>();
+    let expected_states = if trace.is_empty() {
+        vec![format!("{:?}", nodes.get(end_index)?.state.snapshot())]
+    } else {
+        trace
+            .iter()
+            .map(|step| format!("{:?}", step.state_after.snapshot()))
+            .collect::<Vec<_>>()
+    };
+    let signature = actions
+        .iter()
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(TestVector {
+        schema_version: "1.0.0".to_string(),
+        vector_id: format!(
+            "vec-{}",
+            stable_hash_hex(
+                &(M::model_id().to_string()
+                    + property_id
+                    + source_kind
+                    + strategy
+                    + &signature
+                    + &format!("{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"))
+            )
+            .replace("sha256:", "")
+        ),
+        source_kind: source_kind.to_string(),
+        evidence_id: None,
+        strategy: strategy.to_string(),
+        generator_version: env!("CARGO_PKG_VERSION").to_string(),
+        seed: None,
+        actions,
+        initial_state: Some(nodes.first()?.state.snapshot()),
+        expected_states,
+        property_id: property_id.to_string(),
+        minimized: false,
+        focus_action_id,
+        focus_field,
+        expected_guard_enabled,
+        notes,
+    })
+}
+
+fn parse_inclusive_range(range: Option<&'static str>) -> Option<(u64, u64)> {
+    let range = range?;
+    let (min, max) = range.split_once("..=")?;
+    let min = min.parse::<u64>().ok()?;
+    let max = max.parse::<u64>().ok()?;
+    Some((min, max))
 }
 
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {

@@ -18,8 +18,9 @@ use crate::{
         schema::{require_len_match, require_non_empty, require_schema_version},
     },
     testgen::{
-        build_counterexample_vector, build_synthetic_witness_vectors,
-        minimize_counterexample_vector, MinimizeResult,
+        build_counterexample_vector, build_model_test_vectors_for_strategy,
+        build_synthetic_witness_vectors, minimize_counterexample_vector,
+        write_generated_test_files, MinimizeResult,
     },
 };
 
@@ -812,28 +813,47 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         CheckOutcome::Errored(error) => return Err(error),
     };
     let traces = result.trace.into_iter().collect::<Vec<_>>();
-    let vectors = if request.strategy == "transition" || request.strategy == "witness" {
-        let action_ids = model
-            .actions
-            .iter()
-            .map(|action| action.action_id.clone())
-            .collect::<Vec<_>>();
-        let mut vectors = crate::testgen::build_transition_coverage_vectors(&traces, &action_ids);
-        if vectors.is_empty() {
-            let fallback_property_id = model
-                .properties
-                .first()
-                .map(|property| property.property_id.as_str())
-                .unwrap_or("P_SAFE");
-            vectors = build_synthetic_witness_vectors(&model, fallback_property_id);
-        }
-        vectors
-    } else {
+    let vectors = if request.strategy == "counterexample" {
         traces
             .iter()
             .filter_map(|trace| build_counterexample_vector(trace).ok())
             .collect::<Vec<_>>()
+    } else {
+        let fallback_property_id = model
+            .properties
+            .first()
+            .map(|property| property.property_id.as_str())
+            .unwrap_or("P_SAFE");
+        let mut vectors = build_model_test_vectors_for_strategy(
+            &model,
+            fallback_property_id,
+            &request.strategy,
+        )
+        .map_err(|message| CheckErrorEnvelope {
+            manifest: result.manifest.clone(),
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        })?;
+        if vectors.is_empty() && matches!(request.strategy.as_str(), "transition" | "witness") {
+            vectors = build_synthetic_witness_vectors(&model, fallback_property_id);
+        }
+        vectors
     };
+    let generated_files = write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
+        manifest: result.manifest.clone(),
+        status: crate::engine::ErrorStatus::Error,
+        assurance_level: crate::engine::AssuranceLevel::Incomplete,
+        diagnostics: vec![Diagnostic::new(
+            crate::support::diagnostics::ErrorCode::SearchError,
+            crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+            message,
+        )],
+    })?;
     Ok(TestgenResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request.request_id.clone(),
@@ -842,10 +862,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .map(|vector| vector.vector_id.clone())
             .collect(),
-        generated_files: vectors
-            .iter()
-            .map(crate::testgen::generated_test_output_path)
-            .collect(),
+        generated_files,
     })
 }
 
@@ -954,9 +971,9 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
         require_non_empty(&request.source, "source")?;
     }
     match request.strategy.as_str() {
-        "counterexample" | "transition" | "witness" => Ok(()),
+        "counterexample" | "transition" | "witness" | "guard" | "boundary" | "random" => Ok(()),
         other => Err(format!(
-            "strategy must be one of counterexample, transition, witness, got `{other}`"
+            "strategy must be one of counterexample, transition, witness, guard, boundary, random, got `{other}`"
         )),
     }
 }
@@ -987,6 +1004,8 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
         orchestrate_source, testgen_source, validate_capabilities_request,
@@ -996,6 +1015,12 @@ mod tests {
         validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
         InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
+
+    fn cleanup_generated_files(paths: &[String]) {
+        for path in paths {
+            let _ = fs::remove_file(path);
+        }
+    }
     use crate::engine::CheckOutcome;
 
     #[test]
@@ -1103,6 +1128,7 @@ mod tests {
         .unwrap();
         assert_eq!(response.vector_ids.len(), 1);
         validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
     }
 
     #[test]
@@ -1120,6 +1146,25 @@ mod tests {
         .unwrap();
         assert!(response.vector_ids.len() >= 1);
         validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
+    }
+
+    #[test]
+    fn guard_testgen_can_emit_vectors() {
+        let source = "model A\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Inc:\n  pre: x <= 1\n  post:\n    x = x + 1\nproperty P_SAFE:\n  invariant: x <= 2\n";
+        let response = testgen_source(&TestgenRequest {
+            request_id: "req-guard".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+            strategy: "guard".to_string(),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        assert!(!response.vector_ids.is_empty());
+        validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::{
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -19,6 +20,12 @@ fn read_fixture(relative: &str) -> String {
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_valid"))
+}
+
+fn cleanup_generated_files(paths: &[String]) {
+    for path in paths {
+        let _ = fs::remove_file(path);
+    }
 }
 
 #[test]
@@ -86,6 +93,7 @@ fn failing_counter_explains_and_generates_vectors() {
     })
     .expect("testgen should succeed");
     assert!(!testgen.vector_ids.is_empty());
+    cleanup_generated_files(&testgen.generated_files);
 }
 
 #[test]

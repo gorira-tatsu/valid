@@ -19,15 +19,10 @@ use valid::{
     engine::CheckOutcome,
     evidence::{
         render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts,
-        write_vector_artifact,
     },
     frontend::compile_model,
     reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
-    testgen::{
-        build_counterexample_vector, build_transition_coverage_vectors, generated_test_output_path,
-        render_rust_test,
-    },
 };
 
 fn main() {
@@ -356,7 +351,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--strategy=<counterexample|transition|witness>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let strategy = parsed
         .extra
@@ -382,42 +377,6 @@ fn cmd_testgen(args: Vec<String>) {
                 eprintln!("{message}");
                 process::exit(3);
             }
-            let outcome = check_source(&CheckRequest {
-                request_id: request.request_id.clone(),
-                source_name: request.source_name.clone(),
-                source,
-                property_id: None,
-                backend: parsed.backend.clone(),
-                solver_executable: parsed.solver_executable.clone(),
-                solver_args: parsed.solver_args.clone(),
-            });
-            let run_id = match &outcome {
-                CheckOutcome::Completed(result) => result.manifest.run_id.clone(),
-                CheckOutcome::Errored(error) => error.manifest.run_id.clone(),
-            };
-            let traces = match outcome {
-                CheckOutcome::Completed(result) => result.trace.into_iter().collect::<Vec<_>>(),
-                CheckOutcome::Errored(error) => {
-                    print_diagnostics(&error.diagnostics);
-                    process::exit(3);
-                }
-            };
-            let vectors = if request.strategy == "transition" {
-                build_transition_coverage_vectors(
-                    &traces,
-                    &compile_model(&read_source(&parsed.path))
-                        .unwrap()
-                        .actions
-                        .iter()
-                        .map(|a| a.action_id.clone())
-                        .collect::<Vec<_>>(),
-                )
-            } else {
-                traces
-                    .iter()
-                    .filter_map(|trace| build_counterexample_vector(trace).ok())
-                    .collect::<Vec<_>>()
-            };
             if parsed.json {
                 println!(
                     "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
@@ -437,15 +396,10 @@ fn cmd_testgen(args: Vec<String>) {
                         .collect::<Vec<_>>()
                         .join(",")
                 );
-            }
-            for vector in vectors {
-                let rendered = render_rust_test(&vector);
-                let _ = write_vector_artifact(&run_id, &vector.vector_id, &rendered);
-                write_generated_test_file(&vector, &rendered);
-                if !parsed.json {
-                    println!("vector_id: {}", vector.vector_id);
-                    println!("output_path: {}", generated_test_output_path(&vector));
-                    println!("{}", rendered);
+            } else {
+                println!("generated {} vector(s)", response.vector_ids.len());
+                for path in &response.generated_files {
+                    println!("  {path}");
                 }
             }
         }
@@ -698,14 +652,6 @@ fn read_source(path: &str) -> String {
         eprintln!("error [frontend.parse]: failed to read `{path}`: {err}");
         process::exit(3);
     })
-}
-
-fn write_generated_test_file(vector: &valid::testgen::TestVector, body: &str) {
-    let path = generated_test_output_path(vector);
-    if let Err(err) = valid::support::io::write_text_file(&path, body) {
-        eprintln!("failed to write generated test `{path}`: {err}");
-        process::exit(3);
-    }
 }
 
 fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
