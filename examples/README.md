@@ -59,6 +59,23 @@ Command meanings:
 - `check <model>`: verify one model
 - `all`: run `check` for every model exported by the registry file
 
+`iam_transition_registry.rs` shows the declarative transition mode, where
+action/guard/effect structure is written as:
+
+```rust
+valid_model! {
+    model IamAccessModel<AccessState, AccessAction>;
+    init [/* ... */];
+    transitions {
+        transition AttachBoundary when |state| !state.boundary_attached => [/* next state */];
+        transition AssumeSession when |state| state.boundary_attached && !state.session_active => [/* next state */];
+    }
+    properties {
+        invariant P_BILLING_READ_REQUIRES_BOUNDARY |state| !state.billing_read_allowed || state.boundary_attached;
+    }
+}
+```
+
 ## Rust model examples
 
 - `iam_like_authz.rs`

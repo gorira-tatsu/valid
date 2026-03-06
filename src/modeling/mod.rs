@@ -112,6 +112,16 @@ pub struct ActionDescriptor {
     pub writes: &'static [&'static str],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionDescriptor {
+    pub action_variant: &'static str,
+    pub action_id: &'static str,
+    pub guard: &'static str,
+    pub effect: &'static str,
+    pub reads: &'static [&'static str],
+    pub writes: &'static [&'static str],
+}
+
 pub trait StateSpec: ModelingState {
     fn state_fields() -> Vec<StateFieldDescriptor>;
 }
@@ -145,6 +155,9 @@ pub trait ModelSpec {
     fn init_states() -> Vec<Self::State>;
     fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State>;
     fn properties() -> Vec<ModelProperty<Self::State>>;
+    fn transitions() -> Vec<TransitionDescriptor> {
+        Vec::new()
+    }
 
     fn observe(state: &Self::State) -> BTreeMap<String, Value> {
         state.snapshot()
@@ -194,6 +207,18 @@ pub fn state_field_descriptors<S: StateSpec>() -> Vec<StateFieldDescriptor> {
 
 pub fn action_descriptors<A: ActionSpec>() -> Vec<ActionDescriptor> {
     A::action_descriptors()
+}
+
+pub fn transition_descriptors<M: ModelSpec>() -> Vec<TransitionDescriptor> {
+    M::transitions()
+}
+
+#[doc(hidden)]
+pub fn action_descriptor_by_variant<A: ActionSpec>(variant: &str) -> ActionDescriptor {
+    A::action_descriptors()
+        .into_iter()
+        .find(|descriptor| descriptor.variant == variant)
+        .unwrap_or_else(|| panic!("unknown action variant `{variant}`"))
 }
 
 #[macro_export]
@@ -297,6 +322,98 @@ macro_rules! valid_actions {
 
 #[macro_export]
 macro_rules! valid_model {
+    (
+        model $model:ident;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
+            $(transition $transition_action:ident when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        $crate::valid_model! {
+            model $model<State, Action>;
+            init [$($init_state),*];
+            transitions {
+                $(transition $transition_action when |$guard_state| $guard_expr => [$($next_state),*];)+
+            }
+            properties {
+                $(invariant $property |$holds_state| $holds_expr;)+
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
+            $(transition $transition_action:ident when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        struct $model;
+
+        impl $crate::modeling::ModelSpec for $model {
+            type State = $state_ty;
+            type Action = $action_ty;
+
+            fn model_id() -> &'static str {
+                stringify!($model)
+            }
+
+            fn init_states() -> Vec<Self::State> {
+                vec![$($init_state),*]
+            }
+
+            fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
+                match action {
+                    $(
+                        <$action_ty>::$transition_action => {
+                            let $guard_state = state;
+                            if $guard_expr {
+                                vec![$($next_state),*]
+                            } else {
+                                Vec::new()
+                            }
+                        },
+                    )+
+                }
+            }
+
+            fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
+                vec![
+                    $(
+                        $crate::modeling::ModelProperty::invariant(
+                            stringify!($property),
+                            |$holds_state: &Self::State| $holds_expr,
+                        )
+                    ),+
+                ]
+            }
+
+            fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
+                vec![
+                    $(
+                        {
+                            let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+                                stringify!($transition_action)
+                            );
+                            $crate::modeling::TransitionDescriptor {
+                                action_variant: descriptor.variant,
+                                action_id: descriptor.action_id,
+                                guard: stringify!($guard_expr),
+                                effect: stringify!([$($next_state),*]),
+                                reads: descriptor.reads,
+                                writes: descriptor.writes,
+                            }
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
     (
         model $model:ident;
         init [$($init_state:expr),* $(,)?];
@@ -938,7 +1055,7 @@ mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
         check_machine_outcomes, collect_machine_coverage, explain_machine, property_ids,
-        state_field_descriptors, ModelingRunStatus,
+        state_field_descriptors, transition_descriptors, ModelingRunStatus,
     };
     use crate::{engine::CheckOutcome, valid_actions, valid_state};
 
@@ -1069,6 +1186,51 @@ mod tests {
         assert_eq!(actions[0].action_id, "INC");
         assert_eq!(actions[0].reads, &["x", "locked"]);
         assert_eq!(actions[0].writes, &["x"]);
+    }
+
+    valid_state! {
+        struct AccessState {
+            attached: bool,
+            allowed: bool,
+        }
+    }
+
+    valid_actions! {
+        enum AccessAction {
+            AttachPolicy => "ATTACH_POLICY" [reads = ["attached"], writes = ["attached"]],
+            EvaluateRead => "EVAL_READ" [reads = ["attached"], writes = ["allowed"]],
+        }
+    }
+
+    crate::valid_model! {
+        model AccessModel<AccessState, AccessAction>;
+        init [AccessState {
+            attached: false,
+            allowed: false,
+        }];
+        transitions {
+            transition AttachPolicy when |state| !state.attached => [AccessState {
+                attached: true,
+                allowed: state.allowed,
+            }];
+            transition EvaluateRead when |state| state.attached => [AccessState {
+                attached: state.attached,
+                allowed: true,
+            }];
+        }
+        properties {
+            invariant P_ACCESS_REQUIRES_ATTACHMENT |state| !state.allowed || state.attached;
+        }
+    }
+
+    #[test]
+    fn declarative_transition_models_expose_transition_metadata() {
+        let transitions = transition_descriptors::<AccessModel>();
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].action_id, "ATTACH_POLICY");
+        assert_eq!(transitions[0].reads, &["attached"]);
+        assert_eq!(transitions[1].writes, &["allowed"]);
+        assert!(transitions[1].guard.contains("state.attached"));
     }
 
     #[test]

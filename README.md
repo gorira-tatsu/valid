@@ -24,7 +24,9 @@ Still limited:
 ## Rust-first flow
 
 Define state and action types in Rust, then declare models with `valid_model!`
-and export them with `valid_models!`.
+and export them with `valid_models!`. You can use either an imperative
+`step |state, action| { ... }` block or a declarative `transitions { ... }`
+block.
 
 ```rust
 use valid::{
@@ -94,6 +96,7 @@ Command meanings:
 ## Repository examples
 
 - [examples/valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs)
+- [examples/iam_transition_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_transition_registry.rs)
 - [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
 
 ## Verification
