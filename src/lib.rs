@@ -1,4 +1,5 @@
 pub mod api;
+pub mod bundled_models;
 pub mod contract;
 pub mod coverage;
 pub mod engine;

@@ -1,5 +1,7 @@
 //! Solver capability descriptions and adapter traits.
 
+pub mod smt;
+
 use crate::{
     engine::{
         check_explicit, AssuranceLevel, BackendKind, CheckErrorEnvelope, CheckOutcome, ErrorStatus,
@@ -15,6 +17,8 @@ use crate::{
     },
 };
 use std::process::Command;
+
+use self::smt::{run_bounded_invariant_check, SmtCliDialect, SmtSolveStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityMatrix {
@@ -42,6 +46,10 @@ pub trait SolverAdapter {
 
 pub struct ExplicitAdapter;
 pub struct MockBmcAdapter;
+pub struct Cvc5Adapter {
+    pub executable: String,
+    pub args: Vec<String>,
+}
 pub struct CommandSolverAdapter {
     pub backend_name: String,
     pub executable: String,
@@ -97,6 +105,10 @@ fn rebase_manifest(
 pub enum AdapterConfig {
     Explicit,
     MockBmc,
+    SmtCvc5 {
+        executable: String,
+        args: Vec<String>,
+    },
     Command {
         backend_name: String,
         executable: String,
@@ -125,6 +137,11 @@ pub fn capabilities_for_config(config: &AdapterConfig) -> CapabilityMatrix {
     match config {
         AdapterConfig::Explicit => ExplicitAdapter.capabilities(),
         AdapterConfig::MockBmc => MockBmcAdapter.capabilities(),
+        AdapterConfig::SmtCvc5 { executable, args } => Cvc5Adapter {
+            executable: executable.clone(),
+            args: args.clone(),
+        }
+        .capabilities(),
         AdapterConfig::Command {
             backend_name,
             executable,
@@ -152,6 +169,15 @@ pub fn run_with_adapter(
         }
         AdapterConfig::MockBmc => {
             let adapter = MockBmcAdapter;
+            let plan = adapter.build_plan(model, run_plan)?;
+            let raw = adapter.run(model, &plan)?;
+            adapter.normalize(model, run_plan, raw)
+        }
+        AdapterConfig::SmtCvc5 { executable, args } => {
+            let adapter = Cvc5Adapter {
+                executable: executable.clone(),
+                args: args.clone(),
+            };
             let plan = adapter.build_plan(model, run_plan)?;
             let raw = adapter.run(model, &plan)?;
             adapter.normalize(model, run_plan, raw)
@@ -336,6 +362,111 @@ impl SolverAdapter for MockBmcAdapter {
             }
             RawSolverResult::Protocol(_) => {
                 Err("mock-bmc adapter cannot normalize protocol results".to_string())
+            }
+        }
+    }
+}
+
+impl SolverAdapter for Cvc5Adapter {
+    fn backend_kind(&self) -> BackendKind {
+        BackendKind::SmtCvc5
+    }
+
+    fn capabilities(&self) -> CapabilityMatrix {
+        CapabilityMatrix {
+            backend_name: "smt-cvc5".to_string(),
+            supports_explicit: false,
+            supports_bmc: true,
+            supports_certificate: false,
+            supports_trace: true,
+            supports_witness: true,
+            selfcheck_compatible: false,
+        }
+    }
+
+    fn build_plan(&self, _model: &ModelIr, run_plan: &RunPlan) -> Result<SolverRunPlan, String> {
+        let target_property_ids = match &run_plan.property_selection {
+            crate::engine::PropertySelection::ExactlyOne(id) => vec![id.clone()],
+        };
+        Ok(SolverRunPlan {
+            run_id: format!("{}-cvc5", run_plan.manifest.run_id),
+            backend: BackendKind::SmtCvc5,
+            target_property_ids,
+            horizon: run_plan
+                .search_bounds
+                .max_depth
+                .map(|value| value as u32)
+                .or(Some(16)),
+            encoded_model_hash: format!("cvc5:{}", run_plan.manifest.source_hash),
+        })
+    }
+
+    fn run(&self, _model: &ModelIr, plan: &SolverRunPlan) -> Result<RawSolverResult, String> {
+        let horizon = plan.horizon.unwrap_or(16) as usize;
+        match run_bounded_invariant_check(
+            &self.executable,
+            &self.args,
+            &plan.run_id,
+            SmtCliDialect::Cvc5,
+            _model,
+            &plan.target_property_ids,
+            horizon,
+        )? {
+            SmtSolveStatus::Sat(actions) => Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                status: "FAIL".to_string(),
+                actions,
+                assurance_level: Some("BOUNDED".to_string()),
+                reason_code: Some("CVC5_COUNTEREXAMPLE".to_string()),
+                summary: Some(format!(
+                    "cvc5 found a counterexample within depth {}",
+                    horizon
+                )),
+                unknown_reason: None,
+                raw_output: "sat".to_string(),
+            })),
+            SmtSolveStatus::Unsat => Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                status: "PASS".to_string(),
+                actions: Vec::new(),
+                assurance_level: Some("BOUNDED".to_string()),
+                reason_code: Some("CVC5_BOUNDED_NO_COUNTEREXAMPLE".to_string()),
+                summary: Some(format!(
+                    "cvc5 found no counterexample within depth {}",
+                    horizon
+                )),
+                unknown_reason: None,
+                raw_output: "unsat".to_string(),
+            })),
+            SmtSolveStatus::Unknown => Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                status: "UNKNOWN".to_string(),
+                actions: Vec::new(),
+                assurance_level: Some("INCOMPLETE".to_string()),
+                reason_code: Some("CVC5_UNKNOWN".to_string()),
+                summary: Some("cvc5 returned unknown".to_string()),
+                unknown_reason: Some("ENGINE_ABORTED".to_string()),
+                raw_output: "unknown".to_string(),
+            })),
+        }
+    }
+
+    fn normalize(
+        &self,
+        model: &ModelIr,
+        run_plan: &RunPlan,
+        raw: RawSolverResult,
+    ) -> Result<NormalizedRunResult, String> {
+        match raw {
+            RawSolverResult::Protocol(protocol) => {
+                let mut normalized = normalize_protocol_result(model, run_plan, protocol)?;
+                rebase_normalized_outcome(
+                    &mut normalized.outcome,
+                    run_plan,
+                    BackendKind::SmtCvc5,
+                    "external".to_string(),
+                );
+                Ok(normalized)
+            }
+            RawSolverResult::Explicit(_) => {
+                Err("smt-cvc5 adapter cannot normalize explicit results".to_string())
             }
         }
     }
@@ -635,6 +766,32 @@ fn normalize_protocol_result(
     Ok(NormalizedRunResult { outcome, trace })
 }
 
+fn rebase_normalized_outcome(
+    outcome: &mut CheckOutcome,
+    run_plan: &RunPlan,
+    backend_name: BackendKind,
+    backend_version: String,
+) {
+    match outcome {
+        CheckOutcome::Completed(result) => {
+            result.manifest = rebase_manifest(
+                run_plan,
+                result.manifest.run_id.clone(),
+                backend_name,
+                backend_version,
+            );
+        }
+        CheckOutcome::Errored(error) => {
+            error.manifest = rebase_manifest(
+                run_plan,
+                error.manifest.run_id.clone(),
+                backend_name,
+                backend_version,
+            );
+        }
+    }
+}
+
 fn parse_assurance_level(value: &str) -> Result<AssuranceLevel, String> {
     match value {
         "COMPLETE" => Ok(AssuranceLevel::Complete),
@@ -682,7 +839,7 @@ mod tests {
 
     use super::{
         render_capability_matrix_json, validate_capability_matrix, CommandSolverAdapter,
-        ExplicitAdapter, MockBmcAdapter, SolverAdapter,
+        Cvc5Adapter, ExplicitAdapter, MockBmcAdapter, SolverAdapter,
     };
 
     #[test]
@@ -746,5 +903,36 @@ mod tests {
             Some(UnknownReason::TimeLimitReached)
         );
         assert!(result.property_result.summary.contains("command"));
+    }
+
+    #[test]
+    fn cvc5_adapter_normalizes_protocol_result() {
+        let adapter = Cvc5Adapter {
+            executable: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "input=$(cat); if printf '%s' \"$input\" | grep -q '(declare-fun action_0 () Int)'; then printf 'sat\\n((action_0 0))\\n'; else printf 'unsat\\n'; fi".to_string(),
+            ],
+        };
+        let model = compile_model(
+            "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n",
+        )
+        .unwrap();
+        let mut run_plan = RunPlan::default();
+        run_plan.property_selection = PropertySelection::ExactlyOne("P_SAFE".to_string());
+        run_plan.search_bounds.max_depth = Some(1);
+        let plan = adapter.build_plan(&model, &run_plan).unwrap();
+        let raw = adapter.run(&model, &plan).unwrap();
+        let normalized = adapter.normalize(&model, &run_plan, raw).unwrap();
+        let crate::engine::CheckOutcome::Completed(result) = normalized.outcome else {
+            panic!("expected completed outcome");
+        };
+        assert_eq!(result.status, crate::engine::RunStatus::Fail);
+        assert_eq!(result.manifest.backend_name, crate::engine::BackendKind::SmtCvc5);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("CVC5_COUNTEREXAMPLE")
+        );
+        assert!(normalized.trace.is_some());
     }
 }

@@ -1,6 +1,10 @@
 //! Machine-readable API layer for AI and CLI integration.
 
 use crate::{
+    bundled_models::{
+        check_bundled_model, explain_bundled_model, inspect_bundled_model, is_bundled_model_ref,
+        orchestrate_bundled_model, testgen_bundled_model,
+    },
     contract::snapshot_model,
     coverage::{collect_coverage, validate_coverage_report, CoverageReport},
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
@@ -153,6 +157,15 @@ pub struct OrchestrateResponse {
 }
 
 pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
+    if is_bundled_model_ref(&request.source_name) {
+        return inspect_bundled_model(&request.request_id, &request.source_name).map_err(|message| {
+            vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )]
+        });
+    }
     let model = frontend::compile_model(&request.source)?;
     Ok(InspectResponse {
         schema_version: "1.0.0".to_string(),
@@ -179,6 +192,13 @@ pub fn capabilities_response(
     let config = match request.backend.as_deref() {
         None | Some("explicit") => AdapterConfig::Explicit,
         Some("mock-bmc") => AdapterConfig::MockBmc,
+        Some("smt-cvc5") => AdapterConfig::SmtCvc5 {
+            executable: request
+                .solver_executable
+                .clone()
+                .ok_or_else(|| "solver_executable is required when backend=smt-cvc5".to_string())?,
+            args: request.solver_args.clone(),
+        },
         Some("command") => AdapterConfig::Command {
             backend_name: "command".to_string(),
             executable: request
@@ -201,6 +221,33 @@ pub fn capabilities_response(
 pub fn orchestrate_source(
     request: &OrchestrateRequest,
 ) -> Result<OrchestrateResponse, CheckErrorEnvelope> {
+    if is_bundled_model_ref(&request.source_name) {
+        return orchestrate_bundled_model(&request.request_id, &request.source_name).map_err(
+            |message| CheckErrorEnvelope {
+                manifest: RunManifest {
+                    request_id: request.request_id.clone(),
+                    run_id: format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    schema_version: "1.0.0".to_string(),
+                    source_hash: stable_hash_hex(&request.source_name),
+                    contract_hash: stable_hash_hex(&request.source_name),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    backend_name: crate::engine::BackendKind::Explicit,
+                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: None,
+                },
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            },
+        );
+    }
     let backend_fallback =
         backend_config_from_orchestrate_request(request).unwrap_or(AdapterConfig::Explicit);
     let model =
@@ -286,6 +333,35 @@ pub fn orchestrate_source(
 }
 
 pub fn check_source(request: &CheckRequest) -> CheckOutcome {
+    if is_bundled_model_ref(&request.source_name) {
+        return check_bundled_model(&request.request_id, &request.source_name).unwrap_or_else(
+            |message| {
+                CheckOutcome::Errored(CheckErrorEnvelope {
+                    manifest: RunManifest {
+                        request_id: request.request_id.clone(),
+                        run_id: format!(
+                            "run-{}",
+                            stable_hash_hex(&request.request_id).replace("sha256:", "")
+                        ),
+                        schema_version: "1.0.0".to_string(),
+                        source_hash: stable_hash_hex(&request.source_name),
+                        contract_hash: stable_hash_hex(&request.source_name),
+                        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                        backend_name: crate::engine::BackendKind::Explicit,
+                        backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                        seed: None,
+                    },
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )],
+                })
+            },
+        );
+    }
     let source_hash = stable_hash_hex(&request.source);
     let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
     match frontend::compile_model(&request.source) {
@@ -355,6 +431,33 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
 }
 
 pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckErrorEnvelope> {
+    if is_bundled_model_ref(&request.source_name) {
+        return explain_bundled_model(&request.request_id, &request.source_name).map_err(
+            |message| CheckErrorEnvelope {
+                manifest: RunManifest {
+                    request_id: request.request_id.clone(),
+                    run_id: format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    schema_version: "1.0.0".to_string(),
+                    source_hash: stable_hash_hex(&request.source_name),
+                    contract_hash: stable_hash_hex(&request.source_name),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    backend_name: crate::engine::BackendKind::Explicit,
+                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: None,
+                },
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            },
+        );
+    }
     let compiled_model = frontend::compile_model(&request.source).ok();
     match check_source(request) {
         CheckOutcome::Completed(result) => {
@@ -648,6 +751,33 @@ fn build_minimize_response(
 }
 
 pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, CheckErrorEnvelope> {
+    if is_bundled_model_ref(&request.source_name) {
+        return testgen_bundled_model(&request.request_id, &request.source_name).map_err(
+            |message| CheckErrorEnvelope {
+                manifest: RunManifest {
+                    request_id: request.request_id.clone(),
+                    run_id: format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    schema_version: "1.0.0".to_string(),
+                    source_hash: stable_hash_hex(&request.source_name),
+                    contract_hash: stable_hash_hex(&request.source_name),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    backend_name: crate::engine::BackendKind::Explicit,
+                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: None,
+                },
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            },
+        );
+    }
     let outcome = check_source(&CheckRequest {
         request_id: request.request_id.clone(),
         source_name: request.source_name.clone(),
@@ -722,7 +852,9 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
 pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
-    require_non_empty(&request.source, "source")?;
+    if !is_bundled_model_ref(&request.source_name) {
+        require_non_empty(&request.source, "source")?;
+    }
     if let Some(backend) = &request.backend {
         require_non_empty(backend, "backend")?;
     }
@@ -732,7 +864,9 @@ pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
 pub fn validate_inspect_request(request: &InspectRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
-    require_non_empty(&request.source, "source")?;
+    if !is_bundled_model_ref(&request.source_name) {
+        require_non_empty(&request.source, "source")?;
+    }
     Ok(())
 }
 
@@ -761,7 +895,9 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
 pub fn validate_minimize_request(request: &MinimizeRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
-    require_non_empty(&request.source, "source")?;
+    if !is_bundled_model_ref(&request.source_name) {
+        require_non_empty(&request.source, "source")?;
+    }
     Ok(())
 }
 
@@ -791,8 +927,10 @@ pub fn validate_capabilities_request(request: &CapabilitiesRequest) -> Result<()
     require_non_empty(&request.request_id, "request_id")?;
     if let Some(backend) = request.backend.as_deref() {
         require_non_empty(backend, "backend")?;
-        if backend == "command" && request.solver_executable.is_none() {
-            return Err("solver_executable is required when backend=command".to_string());
+        if matches!(backend, "command" | "smt-cvc5") && request.solver_executable.is_none() {
+            return Err(format!(
+                "solver_executable is required when backend={backend}"
+            ));
         }
     }
     Ok(())
@@ -812,7 +950,9 @@ pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result
 pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
-    require_non_empty(&request.source, "source")?;
+    if !is_bundled_model_ref(&request.source_name) {
+        require_non_empty(&request.source, "source")?;
+    }
     match request.strategy.as_str() {
         "counterexample" | "transition" | "witness" => Ok(()),
         other => Err(format!(
@@ -824,7 +964,9 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
 pub fn validate_orchestrate_request(request: &OrchestrateRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
-    require_non_empty(&request.source, "source")?;
+    if !is_bundled_model_ref(&request.source_name) {
+        require_non_empty(&request.source, "source")?;
+    }
     Ok(())
 }
 
@@ -996,6 +1138,22 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_can_be_reported_for_cvc5_backend() {
+        let request = CapabilitiesRequest {
+            request_id: "req-cap-cvc5".to_string(),
+            backend: Some("smt-cvc5".to_string()),
+            solver_executable: Some("sh".to_string()),
+            solver_args: vec!["-c".to_string(), "true".to_string()],
+        };
+        validate_capabilities_request(&request).unwrap();
+        let response = capabilities_response(&request).unwrap();
+        validate_capabilities_response(&response).unwrap();
+        assert_eq!(response.backend, "smt-cvc5");
+        assert!(response.capabilities.supports_bmc);
+        assert!(response.capabilities.supports_witness);
+    }
+
+    #[test]
     fn request_validation_rejects_empty_source() {
         let error = validate_check_request(&CheckRequest {
             request_id: "req".to_string(),
@@ -1088,6 +1246,16 @@ fn backend_config_from_request(request: &CheckRequest) -> Result<AdapterConfig, 
     match request.backend.as_deref() {
         None | Some("explicit") => Ok(AdapterConfig::Explicit),
         Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("smt-cvc5") => {
+            let executable = request
+                .solver_executable
+                .clone()
+                .ok_or_else(|| "solver_executable is required when backend=smt-cvc5".to_string())?;
+            Ok(AdapterConfig::SmtCvc5 {
+                executable,
+                args: request.solver_args.clone(),
+            })
+        }
         Some("command") => {
             let executable = request
                 .solver_executable
@@ -1109,6 +1277,16 @@ fn backend_config_from_orchestrate_request(
     match request.backend.as_deref() {
         None | Some("explicit") => Ok(AdapterConfig::Explicit),
         Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("smt-cvc5") => {
+            let executable = request
+                .solver_executable
+                .clone()
+                .ok_or_else(|| "solver_executable is required when backend=smt-cvc5".to_string())?;
+            Ok(AdapterConfig::SmtCvc5 {
+                executable,
+                args: request.solver_args.clone(),
+            })
+        }
         Some("command") => {
             let executable = request
                 .solver_executable
@@ -1127,15 +1305,14 @@ fn backend_config_from_orchestrate_request(
 fn backend_kind_for_config(config: &AdapterConfig) -> crate::engine::BackendKind {
     match config {
         AdapterConfig::Explicit => crate::engine::BackendKind::Explicit,
-        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => {
-            crate::engine::BackendKind::MockBmc
-        }
+        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => crate::engine::BackendKind::MockBmc,
+        AdapterConfig::SmtCvc5 { .. } => crate::engine::BackendKind::SmtCvc5,
     }
 }
 
 fn backend_version_for_config(config: &AdapterConfig) -> String {
     match config {
-        AdapterConfig::Command { .. } => "external".to_string(),
+        AdapterConfig::Command { .. } | AdapterConfig::SmtCvc5 { .. } => "external".to_string(),
         _ => env!("CARGO_PKG_VERSION").to_string(),
     }
 }

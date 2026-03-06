@@ -9,7 +9,7 @@
     "source": { "type": "string", "minLength": 1 },
     "backend": {
       "type": ["string", "null"],
-      "enum": ["explicit", "mock-bmc", "command", null]
+      "enum": ["explicit", "mock-bmc", "smt-cvc5", "command", null]
     },
     "solver_executable": {
       "type": ["string", "null"]

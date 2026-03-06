@@ -41,6 +41,7 @@ pub enum RunStatus {
 pub enum BackendKind {
     Explicit,
     MockBmc,
+    SmtCvc5,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

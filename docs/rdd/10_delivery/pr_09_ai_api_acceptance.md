@@ -17,7 +17,7 @@
 2. response schema validation が通る。
 3. `error_code` が失敗時に必須。
 4. explain が構造化フィールドを返す。
-5. `backend=explicit|mock-bmc|command` を request に乗せられる。
+5. `backend=explicit|mock-bmc|smt-cvc5|command` を request に乗せられる。
 6. `backend=command` の場合は `solver_executable` と `solver_args[]` を request 契約に含める。
 
 ## 3. DoD

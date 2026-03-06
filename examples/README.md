@@ -67,13 +67,22 @@ cargo run --example iam_policy_diff
 cargo run --example train_fare
 ```
 
+Bundled Rust-native models exposed through the main CLI path:
+
+```sh
+cargo run -- inspect rust:counter --json
+cargo run -- check rust:failing-counter --json
+cargo run -- coverage rust:counter --json
+```
+
 ## Current capability boundary
 
 Implemented now:
 
 - parser / resolver / typechecker / lowering
 - explicit backend
-- `mock-bmc` and `command` backend normalization
+- `command` backend normalization
+- bounded `smt-cvc5` backend for the current MVP IR subset
 - evidence trace rendering
 - explain / minimize
 - witness and counterexample vector generation
@@ -83,9 +92,13 @@ Implemented now:
 
 Not fully implemented yet:
 
-- full external solver integrations beyond the generic command protocol
+- full SMT coverage beyond the current bounded invariant subset
 - complete JSON Schema validation against full schemas
 - richer witness synthesis beyond short synthetic traces
+
+Compatibility-only:
+
+- `mock-bmc` remains as a legacy compatibility backend alias for older tests and protocol assumptions
 
 ## Command backend demo
 

@@ -553,6 +553,7 @@ fn backend_label(kind: crate::engine::BackendKind) -> &'static str {
     match kind {
         crate::engine::BackendKind::Explicit => "explicit",
         crate::engine::BackendKind::MockBmc => "mock-bmc",
+        crate::engine::BackendKind::SmtCvc5 => "smt-cvc5",
     }
 }
 fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {

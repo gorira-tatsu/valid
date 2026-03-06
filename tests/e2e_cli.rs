@@ -157,7 +157,6 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
         .arg("orchestrate")
         .arg(&multi)
         .arg("--json")
-        .arg("--backend=mock-bmc")
         .output()
         .expect("orchestrate should run");
     assert!(orchestrate.status.success());
@@ -189,6 +188,30 @@ fn cli_command_backend_demo_script_normalizes_failures() {
 }
 
 #[test]
+fn cli_cvc5_backend_demo_script_normalizes_failures() {
+    let fail = repo_path("examples/models/failing_counter.valid");
+    let solver = repo_path("examples/solvers/mock_cvc5_solver.sh");
+
+    let output = Command::new(binary_path())
+        .arg("check")
+        .arg(&fail)
+        .arg("--json")
+        .arg("--backend=smt-cvc5")
+        .arg("--solver-exec")
+        .arg("sh")
+        .arg("--solver-arg")
+        .arg(solver)
+        .output()
+        .expect("cvc5 backend should run");
+    assert_eq!(output.status.code(), Some(2));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CVC5_COUNTEREXAMPLE"));
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"backend_name\":\"smt-cvc5\""));
+}
+
+#[test]
 fn rust_native_examples_run_successfully() {
     for example in [
         "iam_like_authz",
@@ -209,4 +232,34 @@ fn rust_native_examples_run_successfully() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn bundled_rust_models_run_via_main_cli_path() {
+    let inspect = Command::new(binary_path())
+        .arg("inspect")
+        .arg("rust:counter")
+        .arg("--json")
+        .output()
+        .expect("inspect should run");
+    assert!(inspect.status.success());
+    assert!(String::from_utf8_lossy(&inspect.stdout).contains("\"model_id\":\"CounterModel\""));
+
+    let check = Command::new(binary_path())
+        .arg("check")
+        .arg("rust:failing-counter")
+        .arg("--json")
+        .output()
+        .expect("check should run");
+    assert_eq!(check.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
+
+    let coverage = Command::new(binary_path())
+        .arg("coverage")
+        .arg("rust:counter")
+        .arg("--json")
+        .output()
+        .expect("coverage should run");
+    assert!(coverage.status.success());
+    assert!(String::from_utf8_lossy(&coverage.stdout).contains("\"model_id\":\"CounterModel\""));
 }
