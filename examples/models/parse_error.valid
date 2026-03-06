@@ -1,0 +1,7 @@
+model ParseErrorCounter
+state:
+  x u8[0..2]
+init:
+  x = 0
+property P_SAFE:
+  invariant: x <= 2

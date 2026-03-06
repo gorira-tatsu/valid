@@ -1,0 +1,17 @@
+model MultiPropertyCounter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Inc:
+  pre: x <= 1
+  post:
+    x = x + 1
+action Reset:
+  pre: x <= 2
+  post:
+    x = 0
+property P_SAFE:
+  invariant: x <= 2
+property P_STRICT:
+  invariant: x <= 1
