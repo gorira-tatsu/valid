@@ -846,6 +846,26 @@ mod tests {
     }
 
     #[test]
+    fn check_preserves_source_and_contract_hashes_in_manifest() {
+        let outcome = check_source(&CheckRequest {
+            request_id: "req-hash".to_string(),
+            source_name: "hash.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
+            property_id: Some("P_SAFE".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        match outcome {
+            CheckOutcome::Completed(result) => {
+                assert_ne!(result.manifest.source_hash, "sha256:unknown");
+                assert_ne!(result.manifest.contract_hash, "sha256:unknown");
+            }
+            CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error),
+        }
+    }
+
+    #[test]
     fn orchestrate_returns_one_entry_per_property() {
         let response = orchestrate_source(&OrchestrateRequest {
             request_id: "req-orch".to_string(),

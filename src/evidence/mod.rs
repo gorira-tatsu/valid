@@ -12,6 +12,7 @@ use crate::{
         artifact::{evidence_path, run_result_path, vector_path},
         diagnostics::Diagnostic,
         io::write_text_file,
+        schema::{require_non_empty, require_schema_version},
     },
 };
 
@@ -55,12 +56,14 @@ pub fn write_outcome_artifacts(
     if !should_emit_artifacts(policy, outcome) {
         return Ok(paths);
     }
+    validate_outcome(model_id, outcome)?;
     match outcome {
         CheckOutcome::Completed(result) => {
             let result_path = run_result_path(&result.manifest.run_id);
             write_text_file(&result_path, &render_outcome_json(model_id, outcome))?;
             paths.push(result_path);
             if let Some(trace) = &result.trace {
+                validate_trace(trace)?;
                 let trace_path = evidence_path(&trace.run_id, &trace.evidence_id);
                 write_text_file(&trace_path, &render_trace_json(trace))?;
                 paths.push(trace_path);
@@ -95,6 +98,59 @@ pub fn write_vector_artifact(run_id: &str, vector_id: &str, body: &str) -> Resul
     let path = vector_path(run_id, vector_id);
     write_text_file(&path, body)?;
     Ok(path)
+}
+
+pub fn validate_trace(trace: &EvidenceTrace) -> Result<(), String> {
+    require_schema_version(&trace.schema_version)?;
+    require_non_empty(&trace.evidence_id, "evidence_id")?;
+    require_non_empty(&trace.run_id, "run_id")?;
+    require_non_empty(&trace.property_id, "property_id")?;
+    require_non_empty(&trace.trace_hash, "trace_hash")?;
+    for (expected_index, step) in trace.steps.iter().enumerate() {
+        if step.index != expected_index {
+            return Err("trace step indexes must be contiguous and zero-based".to_string());
+        }
+        require_non_empty(&step.from_state_id, "steps[].from_state_id")?;
+        require_non_empty(&step.to_state_id, "steps[].to_state_id")?;
+    }
+    Ok(())
+}
+
+pub fn validate_outcome(model_id: &str, outcome: &CheckOutcome) -> Result<(), String> {
+    require_non_empty(model_id, "model_id")?;
+    match outcome {
+        CheckOutcome::Completed(result) => {
+            validate_manifest(&result.manifest)?;
+            validate_property_result(&result.property_result)?;
+            if let Some(trace) = &result.trace {
+                validate_trace(trace)?;
+            }
+        }
+        CheckOutcome::Errored(error) => {
+            validate_manifest(&error.manifest)?;
+            if error.diagnostics.is_empty() {
+                return Err("error outcome must contain at least one diagnostic".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_manifest(manifest: &crate::engine::RunManifest) -> Result<(), String> {
+    require_schema_version(&manifest.schema_version)?;
+    require_non_empty(&manifest.request_id, "manifest.request_id")?;
+    require_non_empty(&manifest.run_id, "manifest.run_id")?;
+    require_non_empty(&manifest.source_hash, "manifest.source_hash")?;
+    require_non_empty(&manifest.contract_hash, "manifest.contract_hash")?;
+    require_non_empty(&manifest.engine_version, "manifest.engine_version")?;
+    require_non_empty(&manifest.backend_version, "manifest.backend_version")?;
+    Ok(())
+}
+
+fn validate_property_result(result: &crate::engine::PropertyResult) -> Result<(), String> {
+    require_non_empty(&result.property_id, "property_result.property_id")?;
+    require_non_empty(&result.summary, "property_result.summary")?;
+    Ok(())
 }
 
 pub fn render_trace_json(trace: &EvidenceTrace) -> String {

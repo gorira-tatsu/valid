@@ -2,7 +2,11 @@
 
 use std::collections::BTreeSet;
 
-use crate::{evidence::EvidenceTrace, ir::ModelIr, support::schema::require_schema_version};
+use crate::{
+    evidence::EvidenceTrace,
+    ir::ModelIr,
+    support::schema::{require_non_empty, require_schema_version},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageReport {
@@ -133,8 +137,12 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
 
 pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     require_schema_version(&report.schema_version)?;
+    require_non_empty(&report.model_id, "model_id")?;
     if report.transition_coverage_percent > 100 {
         return Err("transition_coverage_percent must not exceed 100".to_string());
+    }
+    if report.covered_actions.len() > report.total_actions.len() {
+        return Err("covered_actions must be a subset of total_actions".to_string());
     }
     Ok(())
 }

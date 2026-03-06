@@ -92,6 +92,15 @@ pub fn validate_selfcheck_report(report: &SelfcheckReport) -> Result<(), String>
     if !matches!(report.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
         return Err("status must be PASS, FAIL, or UNKNOWN".to_string());
     }
+    if report.cases.is_empty() {
+        return Err("selfcheck report must contain at least one case".to_string());
+    }
+    for case in &report.cases {
+        require_non_empty(&case.case_id, "cases[].case_id")?;
+        if !matches!(case.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
+            return Err("case status must be PASS, FAIL, or UNKNOWN".to_string());
+        }
+    }
     Ok(())
 }
 

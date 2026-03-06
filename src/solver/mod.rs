@@ -76,6 +76,19 @@ pub struct NormalizedRunResult {
     pub trace: Option<EvidenceTrace>,
 }
 
+fn rebase_manifest(
+    base: &RunPlan,
+    run_id: String,
+    backend_name: BackendKind,
+    backend_version: String,
+) -> crate::engine::RunManifest {
+    let mut manifest = base.manifest.clone();
+    manifest.run_id = run_id;
+    manifest.backend_name = backend_name;
+    manifest.backend_version = backend_version;
+    manifest
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdapterConfig {
     Explicit,
@@ -200,11 +213,31 @@ impl SolverAdapter for ExplicitAdapter {
     fn normalize(
         &self,
         _model: &ModelIr,
-        _run_plan: &RunPlan,
+        run_plan: &RunPlan,
         raw: RawSolverResult,
     ) -> Result<NormalizedRunResult, String> {
         match raw {
             RawSolverResult::Explicit(outcome) => {
+                let outcome = match outcome {
+                    CheckOutcome::Completed(mut result) => {
+                        result.manifest = rebase_manifest(
+                            run_plan,
+                            result.manifest.run_id.clone(),
+                            BackendKind::Explicit,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                        );
+                        CheckOutcome::Completed(result)
+                    }
+                    CheckOutcome::Errored(mut error) => {
+                        error.manifest = rebase_manifest(
+                            run_plan,
+                            error.manifest.run_id.clone(),
+                            BackendKind::Explicit,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                        );
+                        CheckOutcome::Errored(error)
+                    }
+                };
                 let trace = match &outcome {
                     CheckOutcome::Completed(result) => result.trace.clone(),
                     CheckOutcome::Errored(_) => None,
@@ -266,11 +299,31 @@ impl SolverAdapter for MockBmcAdapter {
     fn normalize(
         &self,
         _model: &ModelIr,
-        _run_plan: &RunPlan,
+        run_plan: &RunPlan,
         raw: RawSolverResult,
     ) -> Result<NormalizedRunResult, String> {
         match raw {
             RawSolverResult::Explicit(outcome) => {
+                let outcome = match outcome {
+                    CheckOutcome::Completed(mut result) => {
+                        result.manifest = rebase_manifest(
+                            run_plan,
+                            result.manifest.run_id.clone(),
+                            BackendKind::MockBmc,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                        );
+                        CheckOutcome::Completed(result)
+                    }
+                    CheckOutcome::Errored(mut error) => {
+                        error.manifest = rebase_manifest(
+                            run_plan,
+                            error.manifest.run_id.clone(),
+                            BackendKind::MockBmc,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                        );
+                        CheckOutcome::Errored(error)
+                    }
+                };
                 let trace = match &outcome {
                     CheckOutcome::Completed(result) => result.trace.clone(),
                     CheckOutcome::Errored(_) => None,
