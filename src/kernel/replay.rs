@@ -3,7 +3,10 @@ use crate::{
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
 
-use super::{transition::{apply_action, build_initial_state}, MachineState};
+use super::{
+    transition::{apply_action, build_initial_state},
+    MachineState,
+};
 
 pub fn replay_actions(model: &ModelIr, action_ids: &[String]) -> Result<MachineState, Diagnostic> {
     let mut state = build_initial_state(model)?;
@@ -23,7 +26,8 @@ pub fn replay_actions(model: &ModelIr, action_ids: &[String]) -> Result<MachineS
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ActionIr, ExprIr, FieldType, InitAssignment, ModelIr, SourceSpan, StateField, UpdateIr, Value,
+        ActionIr, ExprIr, FieldType, InitAssignment, ModelIr, SourceSpan, StateField, UpdateIr,
+        Value,
     };
 
     use super::replay_actions;

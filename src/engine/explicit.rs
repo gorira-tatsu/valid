@@ -6,13 +6,15 @@ use std::{
 use crate::{
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::{ModelIr, PropertyIr, PropertyKind, Value},
-    kernel::{eval::eval_expr, transition::apply_action, transition::build_initial_state, MachineState},
+    kernel::{
+        eval::eval_expr, transition::apply_action, transition::build_initial_state, MachineState,
+    },
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
 
 use super::{
-    AssuranceLevel, ErrorStatus, PropertySelection, ResourceLimits, RunManifest, RunPlan, RunStatus,
-    SearchBounds, SearchStrategy, UnknownReason,
+    AssuranceLevel, ErrorStatus, PropertySelection, ResourceLimits, RunManifest, RunPlan,
+    RunStatus, SearchBounds, SearchStrategy, UnknownReason,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,7 +88,9 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
                 "init does not produce any well-typed initial state",
             )
             .with_help("make sure every field receives a valid init assignment")
-            .with_best_practice("treat empty or ill-typed init sections as model errors, not unknown outcomes"))
+            .with_best_practice(
+                "treat empty or ill-typed init sections as model errors, not unknown outcomes",
+            ))
         }
     };
 
@@ -103,8 +107,16 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
     let mut bounded_frontier_cut = false;
 
     while let Some(node_index) = pop_next(&mut frontier, plan.strategy) {
-        if resource_limits_hit(&plan.resource_limits, visited.len(), start) == Some(UnknownReason::TimeLimitReached) {
-            return Ok(unknown_result(model, plan, &nodes, explored_transitions, UnknownReason::TimeLimitReached));
+        if resource_limits_hit(&plan.resource_limits, visited.len(), start)
+            == Some(UnknownReason::TimeLimitReached)
+        {
+            return Ok(unknown_result(
+                model,
+                plan,
+                &nodes,
+                explored_transitions,
+                UnknownReason::TimeLimitReached,
+            ));
         }
 
         let node = nodes[node_index].clone();
@@ -198,24 +210,35 @@ fn pop_next(frontier: &mut VecDeque<usize>, strategy: SearchStrategy) -> Option<
 
 fn selected_property<'a>(model: &'a ModelIr, plan: &RunPlan) -> Result<&'a PropertyIr, Diagnostic> {
     let PropertySelection::ExactlyOne(id) = &plan.property_selection;
-    model.properties.iter().find(|item| item.property_id == *id).ok_or_else(|| {
-        Diagnostic::new(
-            ErrorCode::SearchError,
-            DiagnosticSegment::EngineSearch,
-            format!("unknown property `{id}`"),
-        )
-        .with_help("select one property id emitted by the frontend")
-    })
+    model
+        .properties
+        .iter()
+        .find(|item| item.property_id == *id)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                ErrorCode::SearchError,
+                DiagnosticSegment::EngineSearch,
+                format!("unknown property `{id}`"),
+            )
+            .with_help("select one property id emitted by the frontend")
+        })
 }
 
-fn property_holds(model: &ModelIr, state: &MachineState, property: &PropertyIr) -> Result<bool, Diagnostic> {
+fn property_holds(
+    model: &ModelIr,
+    state: &MachineState,
+    property: &PropertyIr,
+) -> Result<bool, Diagnostic> {
     match property.kind {
         PropertyKind::Invariant => match eval_expr(model, state, &property.expr)? {
             Value::Bool(value) => Ok(value),
             _ => Err(Diagnostic::new(
                 ErrorCode::EvalError,
                 DiagnosticSegment::EngineSearch,
-                format!("property `{}` did not evaluate to bool", property.property_id),
+                format!(
+                    "property `{}` did not evaluate to bool",
+                    property.property_id
+                ),
             )
             .with_help("keep invariant properties boolean after lowering")),
         },
@@ -248,11 +271,23 @@ fn fail_result(
             unknown_reason: None,
             terminal_state_id: Some(format!("s-{failing_index:06}")),
             evidence_id: Some(evidence_id.clone()),
-            summary: format!("property `{}` failed during explicit exploration", property.property_id),
+            summary: format!(
+                "property `{}` failed during explicit exploration",
+                property.property_id
+            ),
         },
         explored_states: nodes.len(),
         explored_transitions: nodes.len().saturating_sub(1),
-        trace: Some(build_trace(model, &evidence_id, &plan.manifest.run_id, &property.property_id, nodes, failing_index, None, assurance)),
+        trace: Some(build_trace(
+            model,
+            &evidence_id,
+            &plan.manifest.run_id,
+            &property.property_id,
+            nodes,
+            failing_index,
+            None,
+            assurance,
+        )),
     }
 }
 
@@ -286,7 +321,16 @@ fn deadlock_result(
         },
         explored_states: nodes.len(),
         explored_transitions: nodes.len().saturating_sub(1),
-        trace: Some(build_trace(model, &evidence_id, &plan.manifest.run_id, &property.property_id, nodes, deadlock_index, Some("deadlock detected".to_string()), assurance)),
+        trace: Some(build_trace(
+            model,
+            &evidence_id,
+            &plan.manifest.run_id,
+            &property.property_id,
+            nodes,
+            deadlock_index,
+            Some("deadlock detected".to_string()),
+            assurance,
+        )),
     }
 }
 
@@ -303,7 +347,9 @@ fn unknown_result(
         status: RunStatus::Unknown,
         assurance_level: AssuranceLevel::Incomplete,
         property_result: PropertyResult {
-            property_id: selected_property(model, plan).map(|p| p.property_id.clone()).unwrap_or_else(|_| "unknown".to_string()),
+            property_id: selected_property(model, plan)
+                .map(|p| p.property_id.clone())
+                .unwrap_or_else(|_| "unknown".to_string()),
             property_kind: PropertyKind::Invariant,
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
@@ -311,7 +357,10 @@ fn unknown_result(
             unknown_reason: Some(reason),
             terminal_state_id: Some(format!("s-{last_index:06}")),
             evidence_id: None,
-            summary: format!("search stopped before completion: {}", unknown_reason_label(reason)),
+            summary: format!(
+                "search stopped before completion: {}",
+                unknown_reason_label(reason)
+            ),
         },
         explored_states: nodes.len(),
         explored_transitions,
@@ -319,7 +368,9 @@ fn unknown_result(
             model,
             &format!("dbg-{}", plan.manifest.run_id),
             &plan.manifest.run_id,
-            &selected_property(model, plan).map(|p| p.property_id.clone()).unwrap_or_else(|_| "unknown".to_string()),
+            &selected_property(model, plan)
+                .map(|p| p.property_id.clone())
+                .unwrap_or_else(|_| "unknown".to_string()),
             nodes,
             last_index,
             Some(format!("search stopped: {}", unknown_reason_label(reason))),
@@ -335,7 +386,11 @@ fn hit_depth_bound(bounds: &SearchBounds, depth: usize) -> bool {
     }
 }
 
-fn resource_limits_hit(limits: &ResourceLimits, states_seen: usize, start: Instant) -> Option<UnknownReason> {
+fn resource_limits_hit(
+    limits: &ResourceLimits,
+    states_seen: usize,
+    start: Instant,
+) -> Option<UnknownReason> {
     if let Some(limit) = limits.time_limit_ms {
         if start.elapsed().as_millis() >= u128::from(limit) {
             return Some(UnknownReason::TimeLimitReached);
@@ -388,7 +443,11 @@ fn build_trace(
             depth: to.depth as u32,
             state_before: from.state.as_named_map(model),
             state_after: to.state.as_named_map(model),
-            note: if window[1] == end_index { final_note.clone().or_else(|| to.note.clone()) } else { to.note.clone() },
+            note: if window[1] == end_index {
+                final_note.clone().or_else(|| to.note.clone())
+            } else {
+                to.note.clone()
+            },
         });
     }
 
@@ -408,12 +467,12 @@ fn build_trace(
 mod tests {
     use crate::{
         engine::{
-            check_explicit, AssuranceLevel, CheckOutcome, PropertySelection, ResourceLimits, RunPlan,
-            RunStatus, SearchBounds, SearchStrategy, UnknownReason,
+            check_explicit, AssuranceLevel, CheckOutcome, PropertySelection, ResourceLimits,
+            RunPlan, RunStatus, SearchBounds, SearchStrategy, UnknownReason,
         },
         ir::{
-            ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, PropertyKind,
-            SourceSpan, StateField, UpdateIr, Value,
+            ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
+            PropertyKind, SourceSpan, StateField, UpdateIr, Value,
         },
     };
 
@@ -486,7 +545,9 @@ mod tests {
     fn bfs_returns_shortest_counterexample() {
         let model = counter_model();
         let outcome = check_explicit(&model, &default_plan());
-        let CheckOutcome::Completed(result) = outcome else { panic!("expected completed") };
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
         assert_eq!(result.status, RunStatus::Fail);
         let trace = result.trace.unwrap();
         assert_eq!(trace.steps.len(), 1);
@@ -507,9 +568,14 @@ mod tests {
                 ..default_plan()
             },
         );
-        let CheckOutcome::Completed(result) = outcome else { panic!("expected completed") };
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
         assert_eq!(result.status, RunStatus::Unknown);
-        assert_eq!(result.property_result.unknown_reason, Some(UnknownReason::StateLimitReached));
+        assert_eq!(
+            result.property_result.unknown_reason,
+            Some(UnknownReason::StateLimitReached)
+        );
     }
 
     #[test]
@@ -523,7 +589,9 @@ mod tests {
                 ..default_plan()
             },
         );
-        let CheckOutcome::Completed(result) = outcome else { panic!("expected completed") };
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
         assert_eq!(result.status, RunStatus::Pass);
         assert_eq!(result.assurance_level, AssuranceLevel::Bounded);
     }
@@ -542,9 +610,14 @@ mod tests {
                 ..default_plan()
             },
         );
-        let CheckOutcome::Completed(result) = outcome else { panic!("expected completed") };
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
         assert_eq!(result.status, RunStatus::Unknown);
-        assert_eq!(result.property_result.unknown_reason, Some(UnknownReason::TimeLimitReached));
+        assert_eq!(
+            result.property_result.unknown_reason,
+            Some(UnknownReason::TimeLimitReached)
+        );
     }
 
     #[test]
@@ -552,7 +625,9 @@ mod tests {
         let mut model = counter_model();
         model.init.clear();
         let outcome = check_explicit(&model, &default_plan());
-        let CheckOutcome::Errored(error) = outcome else { panic!("expected error") };
+        let CheckOutcome::Errored(error) = outcome else {
+            panic!("expected error")
+        };
         assert_eq!(error.assurance_level, AssuranceLevel::Incomplete);
     }
 }

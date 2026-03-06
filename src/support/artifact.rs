@@ -15,3 +15,7 @@ pub fn vector_path(run_id: &str, vector_id: &str) -> String {
 pub fn generated_test_path(vector_id: &str) -> String {
     format!("tests/generated/{vector_id}.rs")
 }
+
+pub fn selfcheck_report_path(suite_id: &str, run_id: &str) -> String {
+    format!("artifacts/selfcheck/{suite_id}/{run_id}/report.json")
+}

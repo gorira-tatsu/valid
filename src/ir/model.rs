@@ -1,4 +1,4 @@
-use crate::ir::{ActionIr, PropertyIr, value::Value};
+use crate::ir::{value::Value, ActionIr, PropertyIr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelIr {

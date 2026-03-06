@@ -190,7 +190,9 @@ fn lowering_error(message: String, line: usize) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
-    use crate::frontend::{compile_model, parser::parse_model, resolver::resolve_model, typecheck::typecheck_model};
+    use crate::frontend::{
+        compile_model, parser::parse_model, resolver::resolve_model, typecheck::typecheck_model,
+    };
 
     #[test]
     fn lowers_minimal_model_to_ir() {

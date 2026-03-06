@@ -20,7 +20,10 @@ impl MachineState {
     }
 
     pub fn get<'a>(&'a self, model: &'a ModelIr, field: &str) -> Option<&'a Value> {
-        let index = model.state_fields.iter().position(|item| item.id == field)?;
+        let index = model
+            .state_fields
+            .iter()
+            .position(|item| item.id == field)?;
         self.values.get(index)
     }
 

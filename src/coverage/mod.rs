@@ -9,18 +9,35 @@ pub struct CoverageReport {
     pub transition_coverage_percent: u32,
     pub covered_actions: BTreeSet<String>,
     pub total_actions: BTreeSet<String>,
+    pub visited_state_count: usize,
+    pub max_depth_observed: u32,
+    pub guard_true_actions: BTreeSet<String>,
+    pub guard_false_actions: BTreeSet<String>,
     pub step_count: usize,
 }
 
 pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageReport {
-    let total_actions = model.actions.iter().map(|a| a.action_id.clone()).collect::<BTreeSet<_>>();
+    let total_actions = model
+        .actions
+        .iter()
+        .map(|a| a.action_id.clone())
+        .collect::<BTreeSet<_>>();
     let mut covered_actions = BTreeSet::new();
+    let mut visited_states = BTreeSet::new();
+    let mut max_depth_observed = 0u32;
+    let mut guard_true_actions = BTreeSet::new();
+    let mut guard_false_actions = total_actions.clone();
     let mut step_count = 0usize;
     for trace in traces {
         for step in &trace.steps {
             step_count += 1;
+            max_depth_observed = max_depth_observed.max(step.depth);
+            visited_states.insert(step.from_state_id.clone());
+            visited_states.insert(step.to_state_id.clone());
             if let Some(action_id) = &step.action_id {
                 covered_actions.insert(action_id.clone());
+                guard_true_actions.insert(action_id.clone());
+                guard_false_actions.remove(action_id);
             }
         }
     }
@@ -33,6 +50,10 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         transition_coverage_percent,
         covered_actions,
         total_actions,
+        visited_state_count: visited_states.len(),
+        max_depth_observed,
+        guard_true_actions,
+        guard_false_actions,
         step_count,
     }
 }
@@ -43,16 +64,47 @@ pub fn evaluate_coverage_gate(report: &CoverageReport, minimum_percent: u32) -> 
 
 pub fn render_coverage_json(report: &CoverageReport) -> String {
     let mut out = String::from("{");
-    out.push_str(&format!("\"transition_coverage_percent\":{}", report.transition_coverage_percent));
+    out.push_str(&format!(
+        "\"transition_coverage_percent\":{}",
+        report.transition_coverage_percent
+    ));
     out.push_str(",\"covered_actions\":[");
     for (index, action) in report.covered_actions.iter().enumerate() {
-        if index > 0 { out.push(','); }
+        if index > 0 {
+            out.push(',');
+        }
         out.push_str(&format!("\"{}\"", action));
     }
     out.push(']');
     out.push_str(",\"total_actions\":[");
     for (index, action) in report.total_actions.iter().enumerate() {
-        if index > 0 { out.push(','); }
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", action));
+    }
+    out.push(']');
+    out.push_str(&format!(
+        ",\"visited_state_count\":{}",
+        report.visited_state_count
+    ));
+    out.push_str(&format!(
+        ",\"max_depth_observed\":{}",
+        report.max_depth_observed
+    ));
+    out.push_str(",\"guard_true_actions\":[");
+    for (index, action) in report.guard_true_actions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", action));
+    }
+    out.push(']');
+    out.push_str(",\"guard_false_actions\":[");
+    for (index, action) in report.guard_false_actions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
         out.push_str(&format!("\"{}\"", action));
     }
     out.push(']');
@@ -99,6 +151,10 @@ mod tests {
         };
         let report = collect_coverage(&model, &[trace]);
         assert_eq!(report.transition_coverage_percent, 50);
+        assert_eq!(report.visited_state_count, 2);
+        assert_eq!(report.max_depth_observed, 1);
+        assert!(report.guard_true_actions.contains("A_INC"));
+        assert!(report.guard_false_actions.contains("A_DEC"));
         assert!(!evaluate_coverage_gate(&report, 60));
     }
 }

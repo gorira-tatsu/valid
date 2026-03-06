@@ -46,7 +46,9 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
                     )
                     .with_span(Span::new(post.line, 1))
                     .with_help("rewrite the expression using literals, field refs, !, +, and <=")
-                    .with_best_practice("introduce complex expression forms only after IR support exists"),
+                    .with_best_practice(
+                        "introduce complex expression forms only after IR support exists",
+                    ),
                 );
             }
         }

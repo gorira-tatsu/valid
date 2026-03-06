@@ -1,6 +1,13 @@
 //! Test vector generation and rendering.
 
-use crate::{evidence::EvidenceTrace, support::artifact::generated_test_path};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::{
+    evidence::EvidenceTrace,
+    ir::{ModelIr, PropertyKind, Value},
+    kernel::{eval::eval_expr, replay::replay_actions, transition::build_initial_state},
+    support::artifact::generated_test_path,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestVector {
@@ -12,8 +19,10 @@ pub struct TestVector {
     pub generator_version: String,
     pub seed: Option<u64>,
     pub actions: Vec<VectorActionStep>,
+    pub initial_state: Option<BTreeMap<String, Value>>,
     pub expected_states: Vec<String>,
     pub property_id: String,
+    pub minimized: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +30,13 @@ pub struct VectorActionStep {
     pub index: usize,
     pub action_id: String,
     pub action_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinimizeResult {
+    pub original_steps: usize,
+    pub minimized_steps: usize,
+    pub vector: TestVector,
 }
 
 pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, String> {
@@ -34,7 +50,10 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
             step.action_id.as_ref().map(|action_id| VectorActionStep {
                 index: step.index,
                 action_id: action_id.clone(),
-                action_label: step.action_label.clone().unwrap_or_else(|| action_id.clone()),
+                action_label: step
+                    .action_label
+                    .clone()
+                    .unwrap_or_else(|| action_id.clone()),
             })
         })
         .collect::<Vec<_>>();
@@ -51,18 +70,146 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         strategy: "counterexample".to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        initial_state: trace.steps.first().map(|step| step.state_before.clone()),
         actions,
         expected_states,
         property_id: trace.property_id.clone(),
+        minimized: false,
     })
+}
+
+pub fn build_transition_coverage_vectors(
+    traces: &[EvidenceTrace],
+    all_action_ids: &[String],
+) -> Vec<TestVector> {
+    let mut uncovered = all_action_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut ordered = traces.to_vec();
+    ordered.sort_by_key(|trace| trace.steps.len());
+    let mut vectors = Vec::new();
+
+    for trace in ordered {
+        let covered = trace
+            .steps
+            .iter()
+            .filter_map(|step| step.action_id.clone())
+            .filter(|action_id| uncovered.contains(action_id))
+            .collect::<BTreeSet<_>>();
+        if covered.is_empty() {
+            continue;
+        }
+        if let Ok(vector) = build_witness_vector(&trace) {
+            for action_id in covered {
+                uncovered.remove(&action_id);
+            }
+            vectors.push(vector);
+        }
+        if uncovered.is_empty() {
+            break;
+        }
+    }
+
+    vectors
+}
+
+pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String> {
+    if trace.steps.is_empty() {
+        return Err("cannot build a witness vector from an empty trace".to_string());
+    }
+    let mut vector = build_counterexample_vector(trace)?;
+    vector.source_kind = "witness".to_string();
+    vector.strategy = "transition_coverage".to_string();
+    vector.minimized = false;
+    Ok(vector)
+}
+
+pub fn minimize_counterexample_vector(
+    model: &ModelIr,
+    vector: &TestVector,
+    property_id: &str,
+) -> Result<MinimizeResult, String> {
+    let property = model
+        .properties
+        .iter()
+        .find(|item| item.property_id == property_id)
+        .ok_or_else(|| format!("unknown property `{property_id}`"))?;
+    if property.kind != PropertyKind::Invariant {
+        return Err("only invariant minimization is supported in the MVP".to_string());
+    }
+
+    let original_steps = vector.actions.len();
+    let mut current = vector.clone();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let len = current.actions.len();
+        for start in 0..len {
+            let mut candidate = current.clone();
+            candidate.actions.remove(start);
+            if candidate.actions.is_empty() {
+                continue;
+            }
+            if reproduces_failure(model, property_id, &candidate)? {
+                candidate.vector_id = format!("{}-min", vector.vector_id);
+                candidate.minimized = true;
+                current = candidate;
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    Ok(MinimizeResult {
+        original_steps,
+        minimized_steps: current.actions.len(),
+        vector: current,
+    })
+}
+
+fn reproduces_failure(
+    model: &ModelIr,
+    property_id: &str,
+    vector: &TestVector,
+) -> Result<bool, String> {
+    let property = model
+        .properties
+        .iter()
+        .find(|item| item.property_id == property_id)
+        .ok_or_else(|| format!("unknown property `{property_id}`"))?;
+    let mut state = build_initial_state(model).map_err(|diagnostic| diagnostic.message.clone())?;
+    let initial_eval = eval_expr(model, &state, &property.expr)
+        .map_err(|diagnostic| diagnostic.message.clone())?;
+    if matches!(initial_eval, Value::Bool(false)) {
+        return Ok(true);
+    }
+    let action_ids = vector
+        .actions
+        .iter()
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>();
+    for end in 1..=action_ids.len() {
+        state = replay_actions(model, &action_ids[..end])
+            .map_err(|diagnostic| diagnostic.message.clone())?;
+        let value = eval_expr(model, &state, &property.expr)
+            .map_err(|diagnostic| diagnostic.message.clone())?;
+        if matches!(value, Value::Bool(false)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 pub fn render_rust_test(vector: &TestVector) -> String {
     let mut out = String::new();
     out.push_str("#[test]\n");
-    out.push_str(&format!("fn generated_{}() {{\n", vector.vector_id.replace('-', "_")));
+    out.push_str(&format!(
+        "fn generated_{}() {{\n",
+        vector.vector_id.replace('-', "_")
+    ));
     out.push_str(&format!("    let vector_id = \"{}\";\n", vector.vector_id));
-    out.push_str(&format!("    let property_id = \"{}\";\n", vector.property_id));
+    out.push_str(&format!(
+        "    let property_id = \"{}\";\n",
+        vector.property_id
+    ));
     out.push_str("    let mut actions = Vec::new();\n");
     for action in &vector.actions {
         out.push_str(&format!("    actions.push(\"{}\");\n", action.action_id));
@@ -80,9 +227,107 @@ pub fn generated_test_output_path(vector: &TestVector) -> String {
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::{engine::AssuranceLevel, evidence::{EvidenceKind, EvidenceTrace, TraceStep}, ir::Value};
+    use crate::{
+        engine::AssuranceLevel,
+        evidence::{EvidenceKind, EvidenceTrace, TraceStep},
+        ir::{
+            ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
+            PropertyKind, SourceSpan, StateField, UpdateIr, Value,
+        },
+    };
 
-    use super::{build_counterexample_vector, render_rust_test};
+    use super::{
+        build_counterexample_vector, build_transition_coverage_vectors, build_witness_vector,
+        minimize_counterexample_vector, render_rust_test,
+    };
+
+    fn trace_with_actions(actions: &[&str]) -> EvidenceTrace {
+        let mut x = 0u64;
+        let steps = actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| {
+                let before = BTreeMap::from([("x".to_string(), Value::UInt(x))]);
+                x += 1;
+                let after = BTreeMap::from([("x".to_string(), Value::UInt(x))]);
+                TraceStep {
+                    index,
+                    from_state_id: format!("s-{index:06}"),
+                    action_id: Some((*action).to_string()),
+                    action_label: Some((*action).to_string()),
+                    to_state_id: format!("s-{:06}", index + 1),
+                    depth: (index + 1) as u32,
+                    state_before: before,
+                    state_after: after,
+                    note: None,
+                }
+            })
+            .collect();
+        EvidenceTrace {
+            schema_version: "1.0.0".to_string(),
+            evidence_id: format!("ev-{}", actions.join("-")),
+            run_id: "run-1".to_string(),
+            property_id: "SAFE".to_string(),
+            evidence_kind: EvidenceKind::Trace,
+            assurance_level: AssuranceLevel::Complete,
+            trace_hash: "sha256:trace".to_string(),
+            steps,
+        }
+    }
+
+    fn minimization_model() -> ModelIr {
+        ModelIr {
+            model_id: "Mini".to_string(),
+            state_fields: vec![StateField {
+                id: "x".to_string(),
+                name: "x".to_string(),
+                ty: FieldType::BoundedU8 { min: 0, max: 7 },
+                span: SourceSpan { line: 1, column: 1 },
+            }],
+            init: vec![InitAssignment {
+                field: "x".to_string(),
+                value: Value::UInt(0),
+                span: SourceSpan { line: 2, column: 1 },
+            }],
+            actions: vec![
+                ActionIr {
+                    action_id: "Inc".to_string(),
+                    label: "Inc".to_string(),
+                    reads: vec!["x".to_string()],
+                    writes: vec!["x".to_string()],
+                    guard: ExprIr::Literal(Value::Bool(true)),
+                    updates: vec![UpdateIr {
+                        field: "x".to_string(),
+                        value: ExprIr::Binary {
+                            op: BinaryOp::Add,
+                            left: Box::new(ExprIr::FieldRef("x".to_string())),
+                            right: Box::new(ExprIr::Literal(Value::UInt(1))),
+                        },
+                    }],
+                },
+                ActionIr {
+                    action_id: "Jump".to_string(),
+                    label: "Jump".to_string(),
+                    reads: vec!["x".to_string()],
+                    writes: vec!["x".to_string()],
+                    guard: ExprIr::Literal(Value::Bool(true)),
+                    updates: vec![UpdateIr {
+                        field: "x".to_string(),
+                        value: ExprIr::Literal(Value::UInt(2)),
+                    }],
+                },
+            ],
+            properties: vec![PropertyIr {
+                property_id: "SAFE".to_string(),
+                kind: PropertyKind::Invariant,
+                expr: ExprIr::Binary {
+                    op: BinaryOp::LessThanOrEqual,
+                    left: Box::new(ExprIr::FieldRef("x".to_string())),
+                    right: Box::new(ExprIr::Literal(Value::UInt(1))),
+                },
+            }],
+        }
+    }
 
     #[test]
     fn builds_vector_from_trace() {
@@ -108,6 +353,31 @@ mod tests {
         };
         let vector = build_counterexample_vector(&trace).unwrap();
         assert_eq!(vector.vector_id, "vec-000001");
+        assert_eq!(
+            vector.initial_state,
+            Some(BTreeMap::from([("x".to_string(), Value::UInt(0))]))
+        );
         assert!(render_rust_test(&vector).contains("generated_vec_000001"));
+    }
+
+    #[test]
+    fn builds_witness_vectors_for_uncovered_actions() {
+        let traces = vec![trace_with_actions(&["Inc"]), trace_with_actions(&["Jump"])];
+        let vectors =
+            build_transition_coverage_vectors(&traces, &["Inc".to_string(), "Jump".to_string()]);
+        assert_eq!(vectors.len(), 2);
+        assert!(vectors.iter().all(|vector| vector.source_kind == "witness"));
+    }
+
+    #[test]
+    fn minimizes_counterexample_vector_while_preserving_failure() {
+        let trace = trace_with_actions(&["Inc", "Jump"]);
+        let vector = build_witness_vector(&trace).unwrap();
+        let result =
+            minimize_counterexample_vector(&minimization_model(), &vector, "SAFE").unwrap();
+        assert_eq!(result.original_steps, 2);
+        assert_eq!(result.minimized_steps, 1);
+        assert_eq!(result.vector.actions[0].action_id, "Jump");
+        assert!(result.vector.minimized);
     }
 }

@@ -8,15 +8,19 @@ use super::{eval::eval_expr, guard::evaluate_guard, MachineState};
 pub fn build_initial_state(model: &ModelIr) -> Result<MachineState, Diagnostic> {
     let mut values = Vec::with_capacity(model.state_fields.len());
     for field in &model.state_fields {
-        let assignment = model.init.iter().find(|item| item.field == field.id).ok_or_else(|| {
-            Diagnostic::new(
-                ErrorCode::InvalidState,
-                DiagnosticSegment::KernelTransition,
-                format!("missing init assignment for field `{}`", field.name),
-            )
-            .with_help("assign every declared state field in the init block")
-            .with_best_practice("keep the MVP init section fully explicit")
-        })?;
+        let assignment = model
+            .init
+            .iter()
+            .find(|item| item.field == field.id)
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    ErrorCode::InvalidState,
+                    DiagnosticSegment::KernelTransition,
+                    format!("missing init assignment for field `{}`", field.name),
+                )
+                .with_help("assign every declared state field in the init block")
+                .with_best_practice("keep the MVP init section fully explicit")
+            })?;
         validate_value_for_type(&field.ty, &assignment.value, &field.name)?;
         values.push(assignment.value.clone());
     }
@@ -28,14 +32,18 @@ pub fn apply_action(
     state: &MachineState,
     action_id: &str,
 ) -> Result<Option<MachineState>, Diagnostic> {
-    let action = model.actions.iter().find(|item| item.action_id == action_id).ok_or_else(|| {
-        Diagnostic::new(
-            ErrorCode::InvalidTransitionUpdate,
-            DiagnosticSegment::KernelTransition,
-            format!("unknown action `{action_id}`"),
-        )
-        .with_help("select an action id that exists in the model")
-    })?;
+    let action = model
+        .actions
+        .iter()
+        .find(|item| item.action_id == action_id)
+        .ok_or_else(|| {
+            Diagnostic::new(
+                ErrorCode::InvalidTransitionUpdate,
+                DiagnosticSegment::KernelTransition,
+                format!("unknown action `{action_id}`"),
+            )
+            .with_help("select an action id that exists in the model")
+        })?;
 
     if !evaluate_guard(model, state, action)? {
         return Ok(None);
@@ -63,10 +71,18 @@ pub fn apply_action(
     Ok(Some(MachineState::new(next_values)))
 }
 
-fn validate_value_for_type(ty: &FieldType, value: &Value, field_name: &str) -> Result<(), Diagnostic> {
+fn validate_value_for_type(
+    ty: &FieldType,
+    value: &Value,
+    field_name: &str,
+) -> Result<(), Diagnostic> {
     match (ty, value) {
         (FieldType::Bool, Value::Bool(_)) => Ok(()),
-        (FieldType::BoundedU8 { min, max }, Value::UInt(value)) if *value >= *min as u64 && *value <= *max as u64 => Ok(()),
+        (FieldType::BoundedU8 { min, max }, Value::UInt(value))
+            if *value >= *min as u64 && *value <= *max as u64 =>
+        {
+            Ok(())
+        }
         (FieldType::BoundedU8 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -87,8 +103,8 @@ fn validate_value_for_type(ty: &FieldType, value: &Value, field_name: &str) -> R
 #[cfg(test)]
 mod tests {
     use crate::ir::{
-        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, SourceSpan, StateField, UpdateIr,
-        Value,
+        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, SourceSpan, StateField,
+        UpdateIr, Value,
     };
 
     use super::{apply_action, build_initial_state};

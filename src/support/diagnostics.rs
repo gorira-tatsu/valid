@@ -91,7 +91,11 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(error_code: ErrorCode, segment: DiagnosticSegment, message: impl Into<String>) -> Self {
+    pub fn new(
+        error_code: ErrorCode,
+        segment: DiagnosticSegment,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             error_code,
             segment,

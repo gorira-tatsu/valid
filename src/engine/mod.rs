@@ -1,7 +1,9 @@
 //! Verification engines such as explicit BFS/DFS.
 
 pub mod explicit;
-pub use explicit::{check_explicit, CheckErrorEnvelope, CheckOutcome, ExplicitRunResult, PropertyResult};
+pub use explicit::{
+    check_explicit, CheckErrorEnvelope, CheckOutcome, ExplicitRunResult, PropertyResult,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchStrategy {

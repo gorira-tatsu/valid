@@ -5,7 +5,11 @@ use crate::{
 
 use super::MachineState;
 
-pub fn eval_expr(model: &ModelIr, state: &MachineState, expr: &ExprIr) -> Result<Value, Diagnostic> {
+pub fn eval_expr(
+    model: &ModelIr,
+    state: &MachineState,
+    expr: &ExprIr,
+) -> Result<Value, Diagnostic> {
     match expr {
         ExprIr::Literal(value) => Ok(value.clone()),
         ExprIr::FieldRef(field) => state
