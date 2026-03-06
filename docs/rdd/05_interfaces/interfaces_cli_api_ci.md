@@ -184,6 +184,7 @@ MVP の `strategy` は次を受け付ける。
 - 複数 property を `1 property = 1 run` に分解して実行する
 - backend adapter を維持したまま property ごとの結果を返す
 - explicit と non-explicit backend を同じ top-level 操作で扱う
+- 実行で得た trace を集約し、`aggregate_coverage` を返してよい
 
 ### 4.10 `capabilities`
 

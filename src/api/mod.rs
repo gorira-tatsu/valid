@@ -2,7 +2,7 @@
 
 use crate::{
     contract::snapshot_model,
-    coverage::collect_coverage,
+    coverage::{collect_coverage, validate_coverage_report, CoverageReport},
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
@@ -149,6 +149,7 @@ pub struct OrchestrateResponse {
     pub schema_version: String,
     pub request_id: String,
     pub runs: Vec<OrchestratedRunSummary>,
+    pub aggregate_coverage: Option<CoverageReport>,
 }
 
 pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
@@ -248,15 +249,21 @@ pub fn orchestrate_source(
             )],
         })?;
     let base_plan = RunPlan::default();
+    let mut traces = Vec::new();
     let runs = run_all_properties_with_backend(&model, &base_plan, &backend)
         .into_iter()
         .map(|run| match run.outcome {
-            CheckOutcome::Completed(result) => OrchestratedRunSummary {
-                property_id: run.property_id,
-                status: format!("{:?}", result.status),
-                assurance_level: format!("{:?}", result.assurance_level),
-                run_id: result.manifest.run_id,
-            },
+            CheckOutcome::Completed(result) => {
+                if let Some(trace) = result.trace.clone() {
+                    traces.push(trace);
+                }
+                OrchestratedRunSummary {
+                    property_id: run.property_id,
+                    status: format!("{:?}", result.status),
+                    assurance_level: format!("{:?}", result.assurance_level),
+                    run_id: result.manifest.run_id,
+                }
+            }
             CheckOutcome::Errored(error) => OrchestratedRunSummary {
                 property_id: run.property_id,
                 status: "ERROR".to_string(),
@@ -265,10 +272,16 @@ pub fn orchestrate_source(
             },
         })
         .collect();
+    let aggregate_coverage = if traces.is_empty() {
+        None
+    } else {
+        Some(collect_coverage(&model, &traces))
+    };
     Ok(OrchestrateResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request.request_id.clone(),
         runs,
+        aggregate_coverage,
     })
 }
 
@@ -814,6 +827,9 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
         require_non_empty(&run.assurance_level, "runs[].assurance_level")?;
         require_non_empty(&run.run_id, "runs[].run_id")?;
     }
+    if let Some(report) = &response.aggregate_coverage {
+        validate_coverage_report(report)?;
+    }
     Ok(())
 }
 
@@ -1054,6 +1070,7 @@ mod tests {
         .unwrap();
         validate_orchestrate_response(&response).unwrap();
         assert_eq!(response.runs.len(), 2);
+        assert!(response.aggregate_coverage.is_some());
     }
 }
 

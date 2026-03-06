@@ -475,6 +475,10 @@ function assignment_to_trace(assignment):
 
 `supports_trace = false` の backend は `FAIL` の本番ゲートに使わない。`command` backend は `ACTIONS` を返す限り `supports_trace = true` とみなす。
 
+## 11.4 Orchestrate aggregate coverage
+
+`orchestrate` は property ごとの run summary に加えて、取得できた trace 群から `aggregate_coverage` を返してよい。これは `coverage report` と同じ schema を再利用する。
+
 ### 11.3 request 例
 
 ```json

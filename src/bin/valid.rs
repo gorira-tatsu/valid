@@ -536,13 +536,22 @@ fn cmd_orchestrate(args: Vec<String>) {
                     })
                     .collect::<Vec<_>>()
                     .join(",");
+                let aggregate_coverage = response
+                    .aggregate_coverage
+                    .as_ref()
+                    .map(render_coverage_json)
+                    .unwrap_or_else(|| "null".to_string());
                 println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"runs\":[{}]}}",
-                    response.schema_version, response.request_id, body
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"runs\":[{}],\"aggregate_coverage\":{}}}",
+                    response.schema_version, response.request_id, body, aggregate_coverage
                 );
             } else {
-                for run in response.runs {
+                for run in &response.runs {
                     println!("property_id: {} status: {}", run.property_id, run.status);
+                }
+                if let Some(report) = &response.aggregate_coverage {
+                    println!();
+                    println!("{}", render_coverage_text(report));
                 }
             }
         }
