@@ -215,11 +215,11 @@ function build_transition_coverage_vectors(traces, all_actions):
       vectors.push(trace_to_vector(trace))
       uncovered -= actions_in(trace)
   if vectors is empty:
-    vectors = synthesize_one_step_witnesses_from_enabled_actions()
+    vectors = synthesize_short_witnesses_from_enabled_actions(max_len=2)
   return vectors
 ```
 
-MVP では `PASS` で trace が存在しない場合でも、初期状態から有効な action を 1 step 実行した synthetic witness を生成してよい。
+MVP では `PASS` で trace が存在しない場合でも、初期状態から有効な action を 1 step または 2 step 実行した synthetic witness を生成してよい。
 
 ### 6.2 guard coverage 戦略
 

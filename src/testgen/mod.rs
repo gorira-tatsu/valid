@@ -131,52 +131,141 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
         Ok(state) => state,
         Err(_) => return Vec::new(),
     };
-    model
-        .actions
-        .iter()
-        .filter_map(|action| {
-            let next = apply_action(model, &initial, &action.action_id)
+    let mut vectors = Vec::new();
+    let mut seen_sequences = BTreeSet::new();
+
+    for first_action in &model.actions {
+        let Some(first_state) = apply_action(model, &initial, &first_action.action_id)
+            .ok()
+            .flatten()
+        else {
+            continue;
+        };
+
+        let single = synthetic_trace_from_states(
+            model,
+            property_id,
+            &[(&initial, first_action.action_id.as_str(), first_action.label.as_str(), &first_state)],
+        );
+        if let Some(vector) = single
+            .as_ref()
+            .and_then(|trace| build_witness_vector(trace).ok())
+        {
+            let signature = vector
+                .actions
+                .iter()
+                .map(|step| step.action_id.clone())
+                .collect::<Vec<_>>();
+            if seen_sequences.insert(signature) {
+                vectors.push(vector);
+            }
+        }
+
+        for second_action in &model.actions {
+            let Some(second_state) = apply_action(model, &first_state, &second_action.action_id)
                 .ok()
-                .flatten()?;
-            let state_before = model
-                .state_fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| (field.name.clone(), initial.values[index].clone()))
-                .collect::<BTreeMap<_, _>>();
-            let state_after = model
-                .state_fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| (field.name.clone(), next.values[index].clone()))
-                .collect::<BTreeMap<_, _>>();
-            let trace = EvidenceTrace {
-                schema_version: "1.0.0".to_string(),
-                evidence_id: format!(
-                    "ev-witness-{}",
-                    stable_hash_hex(&(model.model_id.clone() + &action.action_id))
-                        .replace("sha256:", "")
-                ),
-                run_id: format!("run-witness-{}", action.action_id),
-                property_id: property_id.to_string(),
-                evidence_kind: crate::evidence::EvidenceKind::Trace,
-                assurance_level: crate::engine::AssuranceLevel::Complete,
-                trace_hash: format!("trace:witness:{}", action.action_id),
-                steps: vec![crate::evidence::TraceStep {
-                    index: 0,
-                    from_state_id: "s-init".to_string(),
-                    action_id: Some(action.action_id.clone()),
-                    action_label: Some(action.label.clone()),
-                    to_state_id: format!("s-{}", action.action_id),
-                    depth: 1,
-                    state_before,
-                    state_after,
-                    note: Some("synthetic witness from initial state".to_string()),
-                }],
+                .flatten()
+            else {
+                continue;
             };
-            build_witness_vector(&trace).ok()
+            let Some(trace) = synthetic_trace_from_states(
+                model,
+                property_id,
+                &[
+                    (&initial, first_action.action_id.as_str(), first_action.label.as_str(), &first_state),
+                    (
+                        &first_state,
+                        second_action.action_id.as_str(),
+                        second_action.label.as_str(),
+                        &second_state,
+                    ),
+                ],
+            ) else {
+                continue;
+            };
+            let Ok(vector) = build_witness_vector(&trace) else {
+                continue;
+            };
+            let signature = vector
+                .actions
+                .iter()
+                .map(|step| step.action_id.clone())
+                .collect::<Vec<_>>();
+            if seen_sequences.insert(signature) {
+                vectors.push(vector);
+            }
+        }
+    }
+
+    vectors
+}
+
+fn synthetic_trace_from_states(
+    model: &ModelIr,
+    property_id: &str,
+    transitions: &[(
+        &crate::kernel::MachineState,
+        &str,
+        &str,
+        &crate::kernel::MachineState,
+    )],
+) -> Option<EvidenceTrace> {
+    if transitions.is_empty() {
+        return None;
+    }
+    let steps = transitions
+        .iter()
+        .enumerate()
+        .map(|(index, (before, action_id, action_label, after))| crate::evidence::TraceStep {
+            index,
+            from_state_id: if index == 0 {
+                "s-init".to_string()
+            } else {
+                format!("s-{index}")
+            },
+            action_id: Some((*action_id).to_string()),
+            action_label: Some((*action_label).to_string()),
+            to_state_id: format!("s-{}", index + 1),
+            depth: (index + 1) as u32,
+            state_before: model
+                .state_fields
+                .iter()
+                .enumerate()
+                .map(|(field_index, field)| (field.name.clone(), before.values[field_index].clone()))
+                .collect::<BTreeMap<_, _>>(),
+            state_after: model
+                .state_fields
+                .iter()
+                .enumerate()
+                .map(|(field_index, field)| (field.name.clone(), after.values[field_index].clone()))
+                .collect::<BTreeMap<_, _>>(),
+            note: Some(if transitions.len() == 1 {
+                "synthetic witness from initial state".to_string()
+            } else {
+                "synthetic witness sequence".to_string()
+            }),
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    let action_signature = transitions
+        .iter()
+        .map(|(_, action_id, _, _)| *action_id)
+        .collect::<Vec<_>>()
+        .join("->");
+
+    Some(EvidenceTrace {
+        schema_version: "1.0.0".to_string(),
+        evidence_id: format!(
+            "ev-witness-{}",
+            stable_hash_hex(&(model.model_id.clone() + &action_signature)).replace("sha256:", "")
+        ),
+        run_id: format!("run-witness-{}", action_signature.replace("->", "-")),
+        property_id: property_id.to_string(),
+        evidence_kind: crate::evidence::EvidenceKind::Trace,
+        assurance_level: crate::engine::AssuranceLevel::Complete,
+        trace_hash: format!("trace:witness:{action_signature}"),
+        steps,
+    })
 }
 
 pub fn minimize_counterexample_vector(
@@ -430,8 +519,9 @@ mod tests {
     #[test]
     fn builds_synthetic_witness_vectors_from_model() {
         let vectors = build_synthetic_witness_vectors(&minimization_model(), "SAFE");
-        assert_eq!(vectors.len(), 2);
+        assert_eq!(vectors.len(), 6);
         assert!(vectors.iter().all(|vector| vector.source_kind == "witness"));
+        assert!(vectors.iter().any(|vector| vector.actions.len() == 2));
     }
 
     #[test]

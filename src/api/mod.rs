@@ -889,7 +889,7 @@ mod tests {
             solver_args: vec![],
         })
         .unwrap();
-        assert_eq!(response.vector_ids.len(), 1);
+        assert!(response.vector_ids.len() >= 1);
         validate_testgen_response(&response).unwrap();
     }
 
