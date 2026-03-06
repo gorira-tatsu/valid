@@ -341,6 +341,7 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
 }
 
 pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckErrorEnvelope> {
+    let compiled_model = frontend::compile_model(&request.source).ok();
     match check_source(request) {
         CheckOutcome::Completed(result) => {
             let trace = result.trace.ok_or_else(|| CheckErrorEnvelope {
@@ -375,6 +376,24 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     }
                 })
                 .collect::<Vec<_>>();
+            let action_metadata = compiled_model.as_ref().and_then(|model| {
+                failure_step.action_id.as_ref().and_then(|action_id| {
+                    model.actions
+                        .iter()
+                        .find(|action| &action.action_id == action_id)
+                        .map(|action| (action.action_id.clone(), action.reads.clone(), action.writes.clone()))
+                })
+            });
+            let write_overlap = action_metadata
+                .as_ref()
+                .map(|(_, _, writes)| {
+                    involved_fields
+                        .iter()
+                        .filter(|field| writes.contains(*field))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             let candidate_causes = if involved_fields.is_empty() {
                 vec![
                     ExplainCandidateCause {
@@ -394,22 +413,32 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     },
                 ]
             } else {
-                let mut causes = involved_fields
-                    .iter()
-                    .map(|field| ExplainCandidateCause {
-                        kind: "field_flip".to_string(),
-                        message: format!("{field} changed at step {}", failure_step.index),
-                    })
-                    .collect::<Vec<_>>();
-                if let Some(action_id) = &failure_step.action_id {
+                let mut causes = Vec::new();
+                if let Some((action_id, reads, writes)) = &action_metadata {
+                    if !write_overlap.is_empty() {
+                        causes.push(ExplainCandidateCause {
+                            kind: "write_set_overlap".to_string(),
+                            message: format!(
+                                "action {action_id} writes {} and overlaps with failing fields {}",
+                                writes.join(", "),
+                                write_overlap.join(", ")
+                            ),
+                        });
+                    }
                     causes.push(ExplainCandidateCause {
                         kind: "action_write_set".to_string(),
                         message: format!(
-                            "review writes and postconditions of action {action_id} at failing step {}",
-                            failure_step.index
+                            "review writes [{}] and reads [{}] of action {action_id} at failing step {}",
+                            writes.join(", "),
+                            reads.join(", "),
+                            failure_step.index,
                         ),
                     });
                 }
+                causes.extend(involved_fields.iter().map(|field| ExplainCandidateCause {
+                    kind: "field_flip".to_string(),
+                    message: format!("{field} changed at step {}", failure_step.index),
+                }));
                 causes
             };
             let mut repair_hints = vec![
@@ -421,6 +450,26 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     "inspect the postcondition or implementation of action {action_id}"
                 ));
             }
+            if !write_overlap.is_empty() {
+                repair_hints.push(format!(
+                    "check whether writes [{}] should be narrowed or guarded",
+                    write_overlap.join(", ")
+                ));
+            }
+            let mut confidence = 0.45f32;
+            if failure_step.action_id.is_some() {
+                confidence += 0.1;
+            }
+            if !involved_fields.is_empty() {
+                confidence += 0.1;
+            }
+            if !write_overlap.is_empty() {
+                confidence += 0.2;
+            }
+            if trace.steps.len() == 1 {
+                confidence += 0.1;
+            }
+            confidence = confidence.min(0.95);
             Ok(ExplainResponse {
                 schema_version: "1.0.0".to_string(),
                 request_id: request.request_id.clone(),
@@ -431,7 +480,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 involved_fields,
                 candidate_causes,
                 repair_hints,
-                confidence: 0.72,
+                confidence,
                 best_practices: vec![
                     "keep write sets explicit so involved fields stay explainable".to_string(),
                     "add witness vectors for critical actions so explain results stay reproducible"
@@ -781,7 +830,12 @@ mod tests {
         assert!(response
             .candidate_causes
             .iter()
+            .any(|cause| cause.kind == "write_set_overlap"));
+        assert!(response
+            .candidate_causes
+            .iter()
             .any(|cause| cause.kind == "action_write_set"));
+        assert!(response.confidence >= 0.8);
         validate_explain_response(&response).unwrap();
     }
 
