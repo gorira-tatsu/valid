@@ -4,6 +4,7 @@ use crate::{
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
+    orchestrator::run_all_properties_with_backend,
     solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
         diagnostics::Diagnostic,
@@ -105,6 +106,31 @@ pub struct CapabilitiesResponse {
     pub capabilities: CapabilityMatrix,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrchestrateRequest {
+    pub request_id: String,
+    pub source_name: String,
+    pub source: String,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrchestratedRunSummary {
+    pub property_id: String,
+    pub status: String,
+    pub assurance_level: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrchestrateResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub runs: Vec<OrchestratedRunSummary>,
+}
+
 pub fn inspect_source(request_id: &str, source: &str) -> Result<InspectResponse, Vec<Diagnostic>> {
     let model = frontend::compile_model(source)?;
     Ok(InspectResponse {
@@ -149,6 +175,84 @@ pub fn capabilities_response(
         request_id: request_id.to_string(),
         backend: capabilities.backend_name.clone(),
         capabilities,
+    })
+}
+
+pub fn orchestrate_source(
+    request: &OrchestrateRequest,
+) -> Result<OrchestrateResponse, CheckErrorEnvelope> {
+    let model =
+        frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
+            manifest: RunManifest {
+                request_id: request.request_id.clone(),
+                run_id: format!(
+                    "run-{}",
+                    stable_hash_hex(&request.request_id).replace("sha256:", "")
+                ),
+                schema_version: "1.0.0".to_string(),
+                source_hash: stable_hash_hex(&request.source),
+                contract_hash: "sha256:unknown".to_string(),
+                engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: backend_kind_for_config(
+                    &backend_config_from_orchestrate_request(request)
+                        .unwrap_or(AdapterConfig::Explicit),
+                ),
+                backend_version: backend_version_for_config(
+                    &backend_config_from_orchestrate_request(request)
+                        .unwrap_or(AdapterConfig::Explicit),
+                ),
+                seed: None,
+            },
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics,
+        })?;
+    let backend =
+        backend_config_from_orchestrate_request(request).map_err(|message| CheckErrorEnvelope {
+            manifest: RunManifest {
+                request_id: request.request_id.clone(),
+                run_id: format!(
+                    "run-{}",
+                    stable_hash_hex(&request.request_id).replace("sha256:", "")
+                ),
+                schema_version: "1.0.0".to_string(),
+                source_hash: stable_hash_hex(&request.source),
+                contract_hash: stable_hash_hex(&model.model_id),
+                engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: crate::engine::BackendKind::Explicit,
+                backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                seed: None,
+            },
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        })?;
+    let base_plan = RunPlan::default();
+    let runs = run_all_properties_with_backend(&model, &base_plan, &backend)
+        .into_iter()
+        .map(|run| match run.outcome {
+            CheckOutcome::Completed(result) => OrchestratedRunSummary {
+                property_id: run.property_id,
+                status: format!("{:?}", result.status),
+                assurance_level: format!("{:?}", result.assurance_level),
+                run_id: result.manifest.run_id,
+            },
+            CheckOutcome::Errored(error) => OrchestratedRunSummary {
+                property_id: run.property_id,
+                status: "ERROR".to_string(),
+                assurance_level: format!("{:?}", error.assurance_level),
+                run_id: error.manifest.run_id,
+            },
+        })
+        .collect();
+    Ok(OrchestrateResponse {
+        schema_version: "1.0.0".to_string(),
+        request_id: request.request_id.clone(),
+        runs,
     })
 }
 
@@ -502,13 +606,33 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
     }
 }
 
+pub fn validate_orchestrate_request(request: &OrchestrateRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
+    require_non_empty(&request.source, "source")?;
+    Ok(())
+}
+
+pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(), String> {
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
+    for run in &response.runs {
+        require_non_empty(&run.property_id, "runs[].property_id")?;
+        require_non_empty(&run.status, "runs[].status")?;
+        require_non_empty(&run.assurance_level, "runs[].assurance_level")?;
+        require_non_empty(&run.run_id, "runs[].run_id")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        testgen_source, validate_capabilities_response, validate_check_request,
-        validate_explain_response, validate_minimize_response, validate_testgen_request,
-        validate_testgen_response, CheckRequest, MinimizeRequest, TestgenRequest,
+        orchestrate_source, testgen_source, validate_capabilities_response, validate_check_request,
+        validate_explain_response, validate_minimize_response, validate_orchestrate_response,
+        validate_testgen_request, validate_testgen_response, CheckRequest, MinimizeRequest,
+        OrchestrateRequest, TestgenRequest,
     };
     use crate::engine::CheckOutcome;
 
@@ -654,9 +778,45 @@ mod tests {
             CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error),
         }
     }
+
+    #[test]
+    fn orchestrate_returns_one_entry_per_property() {
+        let response = orchestrate_source(&OrchestrateRequest {
+            request_id: "req-orch".to_string(),
+            source_name: "a.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P1:\n  invariant: x <= 1\nproperty P2:\n  invariant: x <= 7\n".to_string(),
+            backend: Some("mock-bmc".to_string()),
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        validate_orchestrate_response(&response).unwrap();
+        assert_eq!(response.runs.len(), 2);
+    }
 }
 
 fn backend_config_from_request(request: &CheckRequest) -> Result<AdapterConfig, String> {
+    match request.backend.as_deref() {
+        None | Some("explicit") => Ok(AdapterConfig::Explicit),
+        Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("command") => {
+            let executable = request
+                .solver_executable
+                .clone()
+                .ok_or_else(|| "solver_executable is required when backend=command".to_string())?;
+            Ok(AdapterConfig::Command {
+                backend_name: "command".to_string(),
+                executable,
+                args: request.solver_args.clone(),
+            })
+        }
+        Some(other) => Err(format!("unsupported backend `{other}`")),
+    }
+}
+
+fn backend_config_from_orchestrate_request(
+    request: &OrchestrateRequest,
+) -> Result<AdapterConfig, String> {
     match request.backend.as_deref() {
         None | Some("explicit") => Ok(AdapterConfig::Explicit),
         Some("mock-bmc") => Ok(AdapterConfig::MockBmc),

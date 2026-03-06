@@ -102,6 +102,12 @@
 - 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`
 - 本体: [schemas/ai_testgen_request.schema.json](schemas/ai_testgen_request.schema.json), [schemas/ai_testgen_response.schema.json](schemas/ai_testgen_response.schema.json)
 
+## 12.1 AI Orchestrate Request/Response
+
+- ID: `schema.ai.orchestrate`
+- 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`, `05_interfaces/interfaces_cli_api_ci.md`
+- 本体: [schemas/ai_orchestrate_request.schema.json](schemas/ai_orchestrate_request.schema.json), [schemas/ai_orchestrate_response.schema.json](schemas/ai_orchestrate_response.schema.json)
+
 ## 13. CapabilityMatrix
 
 - ID: `schema.capability_matrix`

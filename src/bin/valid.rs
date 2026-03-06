@@ -3,8 +3,9 @@ use std::{env, fs, process};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        testgen_source, validate_check_request, validate_testgen_request, CapabilitiesResponse,
-        CheckRequest, MinimizeRequest, TestgenRequest,
+        orchestrate_source, testgen_source, validate_check_request, validate_orchestrate_request,
+        validate_testgen_request, CapabilitiesResponse, CheckRequest, MinimizeRequest,
+        OrchestrateRequest, TestgenRequest,
     },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
@@ -468,54 +469,49 @@ fn cmd_orchestrate(args: Vec<String>) {
         "usage: valid orchestrate <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
-    let model = compile_model(&source).unwrap_or_else(|diagnostics| {
-        print_diagnostics(&diagnostics);
+    let request = OrchestrateRequest {
+        request_id: "req-local-orchestrate".to_string(),
+        source_name: parsed.path.clone(),
+        source,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
+    };
+    if let Err(message) = validate_orchestrate_request(&request) {
+        eprintln!("{message}");
         process::exit(3);
-    });
-    let mut base_plan = valid::engine::RunPlan::default();
-    if let Some(backend) = parsed.backend.as_deref() {
-        base_plan.manifest.backend_name = match backend {
-            "explicit" => valid::engine::BackendKind::Explicit,
-            _ => valid::engine::BackendKind::MockBmc,
-        };
     }
-    let backend =
-        parse_backend_config(parsed.backend, parsed.solver_executable, parsed.solver_args);
-    let runs = valid::orchestrator::run_all_properties_with_backend(&model, &base_plan, &backend);
-    if parsed.json {
-        let body = runs
-            .iter()
-            .map(|run| match &run.outcome {
-                CheckOutcome::Completed(result) => format!(
-                    "{{\"property_id\":\"{}\",\"status\":\"{:?}\",\"assurance_level\":\"{:?}\",\"run_id\":\"{}\"}}",
-                    run.property_id,
-                    result.status,
-                    result.assurance_level,
-                    result.manifest.run_id
-                ),
-                CheckOutcome::Errored(error) => format!(
-                    "{{\"property_id\":\"{}\",\"status\":\"ERROR\",\"assurance_level\":\"{:?}\",\"run_id\":\"{}\"}}",
-                    run.property_id,
-                    error.assurance_level,
-                    error.manifest.run_id
-                ),
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        println!("{{\"runs\":[{body}]}}");
-    } else {
-        for run in runs {
-            match run.outcome {
-                CheckOutcome::Completed(result) => {
-                    println!(
-                        "property_id: {} status: {:?}",
-                        run.property_id, result.status
-                    );
-                }
-                CheckOutcome::Errored(_) => {
-                    println!("property_id: {} status: ERROR", run.property_id);
+    match orchestrate_source(&request) {
+        Ok(response) => {
+            if parsed.json {
+                let body = response
+                    .runs
+                    .iter()
+                    .map(|run| {
+                        format!(
+                            "{{\"property_id\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
+                            run.property_id, run.status, run.assurance_level, run.run_id
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                println!(
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"runs\":[{}]}}",
+                    response.schema_version, response.request_id, body
+                );
+            } else {
+                for run in response.runs {
+                    println!("property_id: {} status: {}", run.property_id, run.status);
                 }
             }
+        }
+        Err(error) => {
+            if parsed.json {
+                println!("{}", render_diagnostics_json(&error.diagnostics));
+            } else {
+                print_diagnostics(&error.diagnostics);
+            }
+            process::exit(3);
         }
     }
 }
@@ -608,29 +604,6 @@ where
         process::exit(3);
     }
     parsed
-}
-
-fn parse_backend_config(
-    backend: Option<String>,
-    solver_executable: Option<String>,
-    solver_args: Vec<String>,
-) -> valid::solver::AdapterConfig {
-    match backend.as_deref() {
-        None | Some("explicit") => valid::solver::AdapterConfig::Explicit,
-        Some("mock-bmc") => valid::solver::AdapterConfig::MockBmc,
-        Some("command") => valid::solver::AdapterConfig::Command {
-            backend_name: "command".to_string(),
-            executable: solver_executable.unwrap_or_else(|| {
-                eprintln!("--solver-exec is required when --backend=command");
-                process::exit(3);
-            }),
-            args: solver_args,
-        },
-        Some(other) => {
-            eprintln!("unsupported backend `{other}`");
-            process::exit(3);
-        }
-    }
 }
 
 fn cmd_selfcheck() {

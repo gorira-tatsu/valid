@@ -277,6 +277,38 @@
 
 `strategy` は MVP では `counterexample | transition | witness` を受け付ける。
 
+## 7.3 H-4 Orchestrate API
+
+### 7.3.1 request 例
+
+```json
+{
+  "request_id": "req-orch-0001",
+  "source_name": "counterlock.valid",
+  "source": "model CounterLock\n...",
+  "backend": "mock-bmc",
+  "solver_executable": null,
+  "solver_args": []
+}
+```
+
+### 7.3.2 response 例
+
+```json
+{
+  "schema_version": "1.0.0",
+  "request_id": "req-orch-0001",
+  "runs": [
+    {
+      "property_id": "P_SAFE",
+      "status": "Fail",
+      "assurance_level": "Bounded",
+      "run_id": "run-local-0001-P_SAFE-bmc"
+    }
+  ]
+}
+```
+
 ## 8. I-1 Solver Adapter Interface
 
 ### 8.1 Rust trait案
