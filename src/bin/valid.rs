@@ -16,7 +16,6 @@ use valid::{
         write_vector_artifact,
     },
     frontend::compile_model,
-    orchestrator::run_all_properties,
     reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{
@@ -48,13 +47,19 @@ fn main() {
 }
 
 fn cmd_check(args: Vec<String>) {
-    let (json, path) = parse_json_and_path(args, "usage: valid check <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid check <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     let request = CheckRequest {
         request_id: "req-local-0001".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source,
         property_id: None,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
     };
     if let Err(message) = validate_check_request(&request) {
         eprintln!("{message}");
@@ -62,15 +67,15 @@ fn cmd_check(args: Vec<String>) {
     }
     let outcome = check_source(&request);
     let _ = write_outcome_artifacts(
-        &path,
+        &parsed.path,
         valid::engine::ArtifactPolicy::EmitOnFailure,
         &outcome,
     );
-    if json {
-        println!("{}", render_outcome_json(&path, &outcome));
+    if parsed.json {
+        println!("{}", render_outcome_json(&parsed.path, &outcome));
     } else {
         print!("{}", render_outcome_text(&outcome));
-        println!("model_ref: {}", path);
+        println!("model_ref: {}", parsed.path);
     }
     let code = match outcome {
         CheckOutcome::Completed(result) => match result.status {
@@ -84,16 +89,22 @@ fn cmd_check(args: Vec<String>) {
 }
 
 fn cmd_explain(args: Vec<String>) {
-    let (json, path) = parse_json_and_path(args, "usage: valid explain <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid explain <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     match explain_source(&CheckRequest {
         request_id: "req-local-explain".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source,
         property_id: None,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
     }) {
         Ok(response) => {
-            if json {
+            if parsed.json {
                 println!(
                     "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"involved_fields\":[{}],\"candidate_causes\":[{}],\"repair_hints\":[{}],\"confidence\":{},\"best_practices\":[{}]}}",
                     response.schema_version,
@@ -119,7 +130,7 @@ fn cmd_explain(args: Vec<String>) {
             }
         }
         Err(error) => {
-            if json {
+            if parsed.json {
                 println!("{}", render_diagnostics_json(&error.diagnostics));
             } else {
                 print_diagnostics(&error.diagnostics);
@@ -130,16 +141,22 @@ fn cmd_explain(args: Vec<String>) {
 }
 
 fn cmd_minimize(args: Vec<String>) {
-    let (json, path) = parse_json_and_path(args, "usage: valid minimize <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid minimize <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     match minimize_source(&MinimizeRequest {
         request_id: "req-local-minimize".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source,
         property_id: None,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
     }) {
         Ok(response) => {
-            if json {
+            if parsed.json {
                 println!(
                     "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"original_steps\":{},\"minimized_steps\":{},\"vector_id\":\"{}\"}}",
                     response.schema_version,
@@ -156,7 +173,7 @@ fn cmd_minimize(args: Vec<String>) {
             }
         }
         Err(error) => {
-            if json {
+            if parsed.json {
                 println!("{}", render_diagnostics_json(&error.diagnostics));
             } else {
                 print_diagnostics(&error.diagnostics);
@@ -167,11 +184,11 @@ fn cmd_minimize(args: Vec<String>) {
 }
 
 fn cmd_inspect(args: Vec<String>) {
-    let (json, path) = parse_json_and_path(args, "usage: valid inspect <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(args, "usage: valid inspect <model-file> [--json]");
+    let source = read_source(&parsed.path);
     match inspect_source("req-local-inspect", &source) {
         Ok(response) => {
-            if json {
+            if parsed.json {
                 println!("{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"state_fields\":[{}],\"actions\":[{}],\"properties\":[{}]}}",
                     response.schema_version,
                     response.request_id,
@@ -189,7 +206,7 @@ fn cmd_inspect(args: Vec<String>) {
             }
         }
         Err(diagnostics) => {
-            if json {
+            if parsed.json {
                 println!("{}", render_diagnostics_json(&diagnostics));
             } else {
                 print_diagnostics(&diagnostics);
@@ -256,13 +273,19 @@ fn cmd_contract(args: Vec<String>) {
 }
 
 fn cmd_testgen(args: Vec<String>) {
-    let (json, path) = parse_json_and_path(args, "usage: valid testgen <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid testgen <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     let request = TestgenRequest {
         request_id: "req-local-testgen".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source: source.clone(),
         strategy: "counterexample".to_string(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
     };
     match testgen_source(&request) {
         Ok(_) => {
@@ -271,6 +294,9 @@ fn cmd_testgen(args: Vec<String>) {
                 source_name: request.source_name.clone(),
                 source,
                 property_id: None,
+                backend: parsed.backend.clone(),
+                solver_executable: parsed.solver_executable.clone(),
+                solver_args: parsed.solver_args.clone(),
             });
             let run_id = match &outcome {
                 CheckOutcome::Completed(result) => result.manifest.run_id.clone(),
@@ -286,7 +312,7 @@ fn cmd_testgen(args: Vec<String>) {
             let vectors = if request.strategy == "transition" {
                 build_transition_coverage_vectors(
                     &traces,
-                    &compile_model(&read_source(&path))
+                    &compile_model(&read_source(&parsed.path))
                         .unwrap()
                         .actions
                         .iter()
@@ -303,7 +329,7 @@ fn cmd_testgen(args: Vec<String>) {
                 let rendered = render_rust_test(&vector);
                 let _ = write_vector_artifact(&run_id, &vector.vector_id, &rendered);
                 write_generated_test_file(&vector, &rendered);
-                if json {
+                if parsed.json {
                     println!(
                         "{{\"vector_id\":\"{}\",\"output_path\":\"{}\"}}",
                         vector.vector_id,
@@ -325,24 +351,30 @@ fn cmd_testgen(args: Vec<String>) {
 
 fn cmd_trace(args: Vec<String>) {
     let mut format = "mermaid-state".to_string();
-    let mut path = None;
-    for arg in args {
-        if let Some(value) = arg.strip_prefix("--format=") {
-            format = value.to_string();
-        } else {
-            path = Some(arg);
-        }
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        |arg, options| {
+            if let Some(value) = arg.strip_prefix("--format=") {
+                options.extra = Some(value.to_string());
+                true
+            } else {
+                false
+            }
+        },
+    );
+    if let Some(extra) = parsed.extra {
+        format = extra;
     }
-    let path = path.unwrap_or_else(|| {
-        eprintln!("usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json]");
-        process::exit(3);
-    });
-    let source = read_source(&path);
+    let source = read_source(&parsed.path);
     let outcome = check_source(&CheckRequest {
         request_id: "req-local-trace".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source,
         property_id: None,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
     });
     let trace = match outcome {
         CheckOutcome::Completed(result) => result.trace,
@@ -363,13 +395,25 @@ fn cmd_trace(args: Vec<String>) {
 }
 
 fn cmd_orchestrate(args: Vec<String>) {
-    let (_, path) = parse_json_and_path(args, "usage: valid orchestrate <model-file> [--json]");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid orchestrate <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     let model = compile_model(&source).unwrap_or_else(|diagnostics| {
         print_diagnostics(&diagnostics);
         process::exit(3);
     });
-    let runs = run_all_properties(&model, &valid::engine::RunPlan::default());
+    let mut base_plan = valid::engine::RunPlan::default();
+    if let Some(backend) = parsed.backend.as_deref() {
+        base_plan.manifest.backend_name = match backend {
+            "explicit" => valid::engine::BackendKind::Explicit,
+            _ => valid::engine::BackendKind::MockBmc,
+        };
+    }
+    let backend =
+        parse_backend_config(parsed.backend, parsed.solver_executable, parsed.solver_args);
+    let runs = valid::orchestrator::run_all_properties_with_backend(&model, &base_plan, &backend);
     for run in runs {
         match run.outcome {
             CheckOutcome::Completed(result) => {
@@ -386,17 +430,23 @@ fn cmd_orchestrate(args: Vec<String>) {
 }
 
 fn cmd_coverage(args: Vec<String>) {
-    let (_, path) = parse_json_and_path(args, "usage: valid coverage <model-file>");
-    let source = read_source(&path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid coverage <model-file> [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+    );
+    let source = read_source(&parsed.path);
     let model = compile_model(&source).unwrap_or_else(|diagnostics| {
         print_diagnostics(&diagnostics);
         process::exit(3);
     });
     let outcome = check_source(&CheckRequest {
         request_id: "req-local-coverage".to_string(),
-        source_name: path.clone(),
+        source_name: parsed.path.clone(),
         source,
         property_id: None,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
     });
     match outcome {
         CheckOutcome::Completed(result) => {
@@ -406,6 +456,80 @@ fn cmd_coverage(args: Vec<String>) {
         }
         CheckOutcome::Errored(error) => {
             print_diagnostics(&error.diagnostics);
+            process::exit(3);
+        }
+    }
+}
+
+#[derive(Default)]
+struct ParsedArgs {
+    json: bool,
+    path: String,
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
+    extra: Option<String>,
+}
+
+fn parse_common_args(args: Vec<String>, usage: &str) -> ParsedArgs {
+    parse_common_args_with(args, usage, |_arg, _parsed| false)
+}
+
+fn parse_common_args_with<F>(args: Vec<String>, usage: &str, mut extra_handler: F) -> ParsedArgs
+where
+    F: FnMut(&str, &mut ParsedArgs) -> bool,
+{
+    let mut parsed = ParsedArgs::default();
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(value) = arg.strip_prefix("--backend=") {
+            parsed.backend = Some(value.to_string());
+        } else if arg == "--solver-exec" {
+            parsed.solver_executable = Some(iter.next().unwrap_or_else(|| {
+                eprintln!("{usage}");
+                process::exit(3);
+            }));
+        } else if arg == "--solver-arg" {
+            parsed.solver_args.push(iter.next().unwrap_or_else(|| {
+                eprintln!("{usage}");
+                process::exit(3);
+            }));
+        } else if extra_handler(&arg, &mut parsed) {
+            continue;
+        } else if parsed.path.is_empty() {
+            parsed.path = arg;
+        } else {
+            eprintln!("{usage}");
+            process::exit(3);
+        }
+    }
+    if parsed.path.is_empty() {
+        eprintln!("{usage}");
+        process::exit(3);
+    }
+    parsed
+}
+
+fn parse_backend_config(
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
+) -> valid::solver::AdapterConfig {
+    match backend.as_deref() {
+        None | Some("explicit") => valid::solver::AdapterConfig::Explicit,
+        Some("mock-bmc") => valid::solver::AdapterConfig::MockBmc,
+        Some("command") => valid::solver::AdapterConfig::Command {
+            backend_name: "command".to_string(),
+            executable: solver_executable.unwrap_or_else(|| {
+                eprintln!("--solver-exec is required when --backend=command");
+                process::exit(3);
+            }),
+            args: solver_args,
+        },
+        Some(other) => {
+            eprintln!("unsupported backend `{other}`");
             process::exit(3);
         }
     }
@@ -426,26 +550,6 @@ fn cmd_selfcheck() {
             println!("case {}: {}", case.case_id, case.status);
         }
     }
-}
-
-fn parse_json_and_path(args: Vec<String>, usage: &str) -> (bool, String) {
-    let mut json = false;
-    let mut path = None;
-    for arg in args {
-        if arg == "--json" {
-            json = true;
-        } else {
-            path = Some(arg);
-        }
-    }
-    let path = match path {
-        Some(path) => path,
-        None => {
-            eprintln!("{usage}");
-            process::exit(3);
-        }
-    };
-    (json, path)
 }
 
 fn read_source(path: &str) -> String {

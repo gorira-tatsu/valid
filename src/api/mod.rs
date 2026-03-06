@@ -1,11 +1,10 @@
 //! Machine-readable API layer for AI and CLI integration.
 
 use crate::{
-    engine::{
-        check_explicit, CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan,
-    },
+    engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
+    solver::{run_with_adapter, AdapterConfig},
     support::{
         diagnostics::Diagnostic,
         hash::stable_hash_hex,
@@ -31,6 +30,9 @@ pub struct CheckRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +62,9 @@ pub struct MinimizeRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +83,9 @@ pub struct TestgenRequest {
     pub source_name: String,
     pub source: String,
     pub strategy: String,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +120,7 @@ pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
 
 pub fn check_source(request: &CheckRequest) -> CheckOutcome {
     let source_hash = stable_hash_hex(&request.source);
+    let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
     match frontend::compile_model(&request.source) {
         Ok(model) => {
             let property_id = request
@@ -136,12 +145,24 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 source_hash,
                 contract_hash: stable_hash_hex(&model.model_id),
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: backend_kind_for_config(&adapter),
+                backend_version: backend_version_for_config(&adapter),
                 seed: None,
             };
             plan.property_selection = PropertySelection::ExactlyOne(property_id);
-            check_explicit(&model, &plan)
+            match run_with_adapter(&model, &plan, &adapter) {
+                Ok(normalized) => normalized.outcome,
+                Err(message) => CheckOutcome::Errored(CheckErrorEnvelope {
+                    manifest: plan.manifest.clone(),
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )],
+                }),
+            }
         }
         Err(diagnostics) => CheckOutcome::Errored(CheckErrorEnvelope {
             manifest: RunManifest {
@@ -154,8 +175,8 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 source_hash,
                 contract_hash: "sha256:unknown".to_string(),
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: backend_kind_for_config(&adapter),
+                backend_version: backend_version_for_config(&adapter),
                 seed: None,
             },
             status: crate::engine::ErrorStatus::Error,
@@ -267,6 +288,9 @@ pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, Ch
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id,
+        backend: request.backend.clone(),
+        solver_executable: request.solver_executable.clone(),
+        solver_args: request.solver_args.clone(),
     });
     let result = match check {
         CheckOutcome::Completed(result) => result,
@@ -326,6 +350,9 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: None,
+        backend: request.backend.clone(),
+        solver_executable: request.solver_executable.clone(),
+        solver_args: request.solver_args.clone(),
     });
     let model =
         frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
@@ -383,6 +410,9 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
 pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source, "source")?;
+    if let Some(backend) = &request.backend {
+        require_non_empty(backend, "backend")?;
+    }
     Ok(())
 }
 
@@ -439,6 +469,9 @@ mod tests {
             source_name: "broken.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  y = 0\n".to_string(),
             property_id: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
         });
         assert!(matches!(outcome, CheckOutcome::Errored(_)));
     }
@@ -451,6 +484,9 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
         })
         .unwrap();
         assert_eq!(response.property_id, "P_SAFE");
@@ -467,6 +503,9 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
         })
         .unwrap();
         assert_eq!(response.original_steps, 1);
@@ -483,6 +522,9 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             strategy: "counterexample".to_string(),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
         })
         .unwrap();
         assert_eq!(response.vector_ids.len(), 1);
@@ -496,8 +538,68 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: "".to_string(),
             property_id: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
         })
         .unwrap_err();
         assert!(error.contains("source"));
+    }
+
+    #[test]
+    fn check_can_use_command_backend() {
+        let outcome = check_source(&CheckRequest {
+            request_id: "req-cmd".to_string(),
+            source_name: "cmd.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
+            property_id: Some("P_SAFE".to_string()),
+            backend: Some("command".to_string()),
+            solver_executable: Some("sh".to_string()),
+            solver_args: vec![
+                "-c".to_string(),
+                "printf 'STATUS=UNKNOWN\\nACTIONS=Jump'".to_string(),
+            ],
+        });
+        match outcome {
+            CheckOutcome::Completed(result) => {
+                assert_eq!(result.status, crate::engine::RunStatus::Unknown);
+            }
+            CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error),
+        }
+    }
+}
+
+fn backend_config_from_request(request: &CheckRequest) -> Result<AdapterConfig, String> {
+    match request.backend.as_deref() {
+        None | Some("explicit") => Ok(AdapterConfig::Explicit),
+        Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("command") => {
+            let executable = request
+                .solver_executable
+                .clone()
+                .ok_or_else(|| "solver_executable is required when backend=command".to_string())?;
+            Ok(AdapterConfig::Command {
+                backend_name: "command".to_string(),
+                executable,
+                args: request.solver_args.clone(),
+            })
+        }
+        Some(other) => Err(format!("unsupported backend `{other}`")),
+    }
+}
+
+fn backend_kind_for_config(config: &AdapterConfig) -> crate::engine::BackendKind {
+    match config {
+        AdapterConfig::Explicit => crate::engine::BackendKind::Explicit,
+        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => {
+            crate::engine::BackendKind::MockBmc
+        }
+    }
+}
+
+fn backend_version_for_config(config: &AdapterConfig) -> String {
+    match config {
+        AdapterConfig::Command { .. } => "external".to_string(),
+        _ => env!("CARGO_PKG_VERSION").to_string(),
     }
 }

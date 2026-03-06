@@ -76,6 +76,17 @@ pub struct NormalizedRunResult {
     pub trace: Option<EvidenceTrace>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdapterConfig {
+    Explicit,
+    MockBmc,
+    Command {
+        backend_name: String,
+        executable: String,
+        args: Vec<String>,
+    },
+}
+
 pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
     format!(
         "{{\"backend\":\"{}\",\"capabilities\":{{\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{}}}}}",
@@ -91,6 +102,58 @@ pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
 
 pub fn validate_capability_matrix(matrix: &CapabilityMatrix) -> Result<(), String> {
     require_non_empty(&matrix.backend_name, "backend_name")
+}
+
+pub fn capabilities_for_config(config: &AdapterConfig) -> CapabilityMatrix {
+    match config {
+        AdapterConfig::Explicit => ExplicitAdapter.capabilities(),
+        AdapterConfig::MockBmc => MockBmcAdapter.capabilities(),
+        AdapterConfig::Command {
+            backend_name,
+            executable,
+            args,
+        } => CommandSolverAdapter {
+            backend_name: backend_name.clone(),
+            executable: executable.clone(),
+            args: args.clone(),
+        }
+        .capabilities(),
+    }
+}
+
+pub fn run_with_adapter(
+    model: &ModelIr,
+    run_plan: &RunPlan,
+    config: &AdapterConfig,
+) -> Result<NormalizedRunResult, String> {
+    match config {
+        AdapterConfig::Explicit => {
+            let adapter = ExplicitAdapter;
+            let plan = adapter.build_plan(model, run_plan)?;
+            let raw = adapter.run(model, &plan)?;
+            adapter.normalize(model, run_plan, raw)
+        }
+        AdapterConfig::MockBmc => {
+            let adapter = MockBmcAdapter;
+            let plan = adapter.build_plan(model, run_plan)?;
+            let raw = adapter.run(model, &plan)?;
+            adapter.normalize(model, run_plan, raw)
+        }
+        AdapterConfig::Command {
+            backend_name,
+            executable,
+            args,
+        } => {
+            let adapter = CommandSolverAdapter {
+                backend_name: backend_name.clone(),
+                executable: executable.clone(),
+                args: args.clone(),
+            };
+            let plan = adapter.build_plan(model, run_plan)?;
+            let raw = adapter.run(model, &plan)?;
+            adapter.normalize(model, run_plan, raw)
+        }
+    }
 }
 
 impl SolverAdapter for ExplicitAdapter {
