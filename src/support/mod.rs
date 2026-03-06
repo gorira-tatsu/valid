@@ -3,3 +3,4 @@
 pub mod artifact;
 pub mod diagnostics;
 pub mod hash;
+pub mod io;

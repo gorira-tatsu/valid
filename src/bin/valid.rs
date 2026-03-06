@@ -2,10 +2,10 @@ use std::{env, fs, process};
 
 use valid::{
     api::{check_source, inspect_source, CheckRequest},
-    contract::snapshot_model,
+    contract::{build_lock_file, compare_snapshot, render_drift_json, render_lock_json, snapshot_model, write_lock_file},
     coverage::{collect_coverage, render_coverage_json},
     engine::CheckOutcome,
-    evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
+    evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts, write_vector_artifact},
     frontend::compile_model,
     selfcheck::run_smoke_selfcheck,
     testgen::{build_counterexample_vector, generated_test_output_path, render_rust_test},
@@ -38,6 +38,7 @@ fn cmd_check(args: Vec<String>) {
         source,
         property_id: None,
     });
+    let _ = write_outcome_artifacts(&path, &outcome);
     if json {
         println!("{}", render_outcome_json(&path, &outcome));
     } else {
@@ -85,16 +86,58 @@ fn cmd_inspect(args: Vec<String>) {
 }
 
 fn cmd_contract(args: Vec<String>) {
-    let (_, path) = parse_json_and_path(args, "usage: valid contract <model-file>");
+    let mut args = args.into_iter();
+    let sub = args.next().unwrap_or_else(|| "snapshot".to_string());
+    let path = args.next().unwrap_or_else(|| {
+        eprintln!("usage: valid contract <snapshot|lock|drift> <model-file> [lock-file]");
+        process::exit(3);
+    });
     let source = read_source(&path);
     let model = compile_model(&source).unwrap_or_else(|diagnostics| {
         print_diagnostics(&diagnostics);
         process::exit(3);
     });
     let snapshot = snapshot_model(&model);
-    println!("model_id: {}", snapshot.model_id);
-    println!("contract_hash: {}", snapshot.contract_hash);
-    println!("state_fields: {}", snapshot.state_fields.join(", "));
+    match sub.as_str() {
+        "snapshot" => {
+            println!("model_id: {}", snapshot.model_id);
+            println!("contract_hash: {}", snapshot.contract_hash);
+            println!("state_fields: {}", snapshot.state_fields.join(", "));
+        }
+        "lock" => {
+            let lock = build_lock_file(vec![snapshot]);
+            let output = args.next().unwrap_or_else(|| "valid.lock.json".to_string());
+            write_lock_file(&output, &lock).unwrap_or_else(|err| {
+                eprintln!("{err}");
+                process::exit(3);
+            });
+            println!("{}", render_lock_json(&lock));
+        }
+        "drift" => {
+            let lock_path = args.next().unwrap_or_else(|| {
+                eprintln!("usage: valid contract drift <model-file> <lock-file>");
+                process::exit(3);
+            });
+            let lock_body = read_source(&lock_path);
+            let expected_hash = extract_first_contract_hash(&lock_body).unwrap_or_else(|| {
+                eprintln!("failed to parse contract hash from lock file");
+                process::exit(3);
+            });
+            let expected = valid::contract::ContractSnapshot {
+                model_id: snapshot.model_id.clone(),
+                state_fields: vec![],
+                actions: vec![],
+                properties: vec![],
+                contract_hash: expected_hash,
+            };
+            let drift = compare_snapshot(&expected, &snapshot);
+            println!("{}", render_drift_json(&drift));
+        }
+        _ => {
+            eprintln!("usage: valid contract <snapshot|lock|drift> <model-file> [lock-file]");
+            process::exit(3);
+        }
+    }
 }
 
 fn cmd_testgen(args: Vec<String>) {
@@ -108,6 +151,7 @@ fn cmd_testgen(args: Vec<String>) {
     });
     match outcome {
         CheckOutcome::Completed(result) => {
+            let run_id = result.manifest.run_id.clone();
             let trace = match result.trace {
                 Some(trace) => trace,
                 None => {
@@ -119,9 +163,11 @@ fn cmd_testgen(args: Vec<String>) {
                 eprintln!("{err}");
                 process::exit(3);
             });
+            let rendered = render_rust_test(&vector);
+            let _ = write_vector_artifact(&run_id, &vector.vector_id, &rendered);
             println!("vector_id: {}", vector.vector_id);
             println!("output_path: {}", generated_test_output_path(&vector));
-            println!("{}", render_rust_test(&vector));
+            println!("{}", rendered);
         }
         CheckOutcome::Errored(error) => {
             print_diagnostics(&error.diagnostics);
@@ -164,6 +210,14 @@ fn cmd_selfcheck() {
     for case in report.cases {
         println!("case {}: {}", case.case_id, case.status);
     }
+}
+
+fn extract_first_contract_hash(lock_body: &str) -> Option<String> {
+    let marker = "\"contract_hash\":\"";
+    let start = lock_body.find(marker)? + marker.len();
+    let rest = &lock_body[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 fn parse_json_and_path(args: Vec<String>, usage: &str) -> (bool, String) {
