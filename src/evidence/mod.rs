@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    engine::{AssuranceLevel, ExplicitRunResult, RunStatus, UnknownReason},
+    engine::{
+        explicit::{CheckErrorEnvelope, CheckOutcome, ExplicitRunResult},
+        AssuranceLevel, ErrorStatus, RunStatus, UnknownReason,
+    },
     ir::Value,
     support::diagnostics::Diagnostic,
 };
@@ -16,96 +19,41 @@ pub enum EvidenceKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceTrace {
+    pub schema_version: String,
+    pub evidence_id: String,
+    pub run_id: String,
+    pub property_id: String,
     pub evidence_kind: EvidenceKind,
     pub assurance_level: AssuranceLevel,
+    pub trace_hash: String,
     pub steps: Vec<TraceStep>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceStep {
     pub index: usize,
+    pub from_state_id: String,
     pub action_id: Option<String>,
-    pub state: BTreeMap<String, Value>,
+    pub action_label: Option<String>,
+    pub to_state_id: String,
+    pub depth: u32,
+    pub state_before: BTreeMap<String, Value>,
+    pub state_after: BTreeMap<String, Value>,
     pub note: Option<String>,
 }
 
-pub fn render_result_text(result: &ExplicitRunResult) -> String {
-    let mut out = String::new();
-    out.push_str(match result.status {
-        RunStatus::Pass => "PASS explicit\n",
-        RunStatus::Fail => "FAIL explicit\n",
-        RunStatus::Unknown => "UNKNOWN explicit\n",
-    });
-    out.push_str(&format!("assurance_level: {}\n", assurance_label(result.assurance_level)));
-    out.push_str(&format!("explored_states: {}\n", result.explored_states));
-    out.push_str(&format!("explored_transitions: {}\n", result.explored_transitions));
-    if let Some(property_id) = &result.property_id {
-        out.push_str(&format!("property_id: {property_id}\n"));
+pub fn render_outcome_text(outcome: &CheckOutcome) -> String {
+    match outcome {
+        CheckOutcome::Completed(result) => render_completed_text(result),
+        CheckOutcome::Errored(error) => render_error_text(error),
     }
-    if let Some(reason) = result.unknown_reason {
-        out.push_str(&format!("unknown_reason: {}\n", unknown_reason_label(reason)));
-    }
-    if let Some(trace) = &result.trace {
-        out.push_str(&format!("trace_steps: {}\n", trace.steps.len()));
-    }
-    out
 }
 
-pub fn render_result_json(model_id: &str, result: &ExplicitRunResult) -> String {
-    let mut out = String::new();
-    out.push('{');
-    out.push_str(&format!("\"model_id\":\"{}\"", escape_json(model_id)));
-    out.push_str(&format!(",\"status\":\"{}\"", status_label(result.status)));
-    out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(result.assurance_level)));
-    out.push_str(&format!(",\"explored_states\":{}", result.explored_states));
-    out.push_str(&format!(",\"explored_transitions\":{}", result.explored_transitions));
-    if let Some(property_id) = &result.property_id {
-        out.push_str(&format!(",\"property_id\":\"{}\"", escape_json(property_id)));
-    } else {
-        out.push_str(",\"property_id\":null");
+pub fn render_outcome_json(model_id: &str, outcome: &CheckOutcome) -> String {
+    match outcome {
+        CheckOutcome::Completed(result) => render_completed_json(model_id, result),
+        CheckOutcome::Errored(error) => render_error_json(model_id, error),
     }
-    if let Some(reason) = result.unknown_reason {
-        out.push_str(&format!(",\"unknown_reason\":\"{}\"", unknown_reason_label(reason)));
-    } else {
-        out.push_str(",\"unknown_reason\":null");
-    }
-    if let Some(trace) = &result.trace {
-        out.push_str(",\"trace\":{");
-        out.push_str("\"evidence_kind\":\"trace\"");
-        out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(trace.assurance_level)));
-        out.push_str(",\"steps\":[");
-        for (index, step) in trace.steps.iter().enumerate() {
-            if index > 0 {
-                out.push(',');
-            }
-            out.push('{');
-            out.push_str(&format!("\"index\":{}", step.index));
-            if let Some(action_id) = &step.action_id {
-                out.push_str(&format!(",\"action_id\":\"{}\"", escape_json(action_id)));
-            } else {
-                out.push_str(",\"action_id\":null");
-            }
-            out.push_str(",\"state\":{");
-            for (field_index, (name, value)) in step.state.iter().enumerate() {
-                if field_index > 0 {
-                    out.push(',');
-                }
-                out.push_str(&format!("\"{}\":{}", escape_json(name), value_json(value)));
-            }
-            out.push('}');
-            if let Some(note) = &step.note {
-                out.push_str(&format!(",\"note\":\"{}\"", escape_json(note)));
-            } else {
-                out.push_str(",\"note\":null");
-            }
-            out.push('}');
-        }
-        out.push_str("]}");
-    } else {
-        out.push_str(",\"trace\":null");
-    }
-    out.push('}');
-    out
 }
 
 pub fn render_diagnostics_json(diagnostics: &[Diagnostic]) -> String {
@@ -144,11 +92,185 @@ pub fn render_diagnostics_json(diagnostics: &[Diagnostic]) -> String {
     out
 }
 
+fn render_completed_text(result: &ExplicitRunResult) -> String {
+    let mut out = String::new();
+    out.push_str(match result.status {
+        RunStatus::Pass => "PASS explicit\n",
+        RunStatus::Fail => "FAIL explicit\n",
+        RunStatus::Unknown => "UNKNOWN explicit\n",
+    });
+    out.push_str(&format!("run_id: {}\n", result.manifest.run_id));
+    out.push_str(&format!("request_id: {}\n", result.manifest.request_id));
+    out.push_str(&format!("assurance_level: {}\n", assurance_label(result.assurance_level)));
+    out.push_str(&format!("property_id: {}\n", result.property_result.property_id));
+    out.push_str(&format!("summary: {}\n", result.property_result.summary));
+    out.push_str(&format!("explored_states: {}\n", result.explored_states));
+    out.push_str(&format!("explored_transitions: {}\n", result.explored_transitions));
+    if let Some(reason) = result.property_result.unknown_reason {
+        out.push_str(&format!("unknown_reason: {}\n", unknown_reason_label(reason)));
+    }
+    if let Some(trace) = &result.trace {
+        out.push_str(&format!("trace_steps: {}\n", trace.steps.len()));
+    }
+    out
+}
+
+fn render_error_text(error: &CheckErrorEnvelope) -> String {
+    let mut out = String::new();
+    out.push_str("ERROR explicit\n");
+    out.push_str(&format!("run_id: {}\n", error.manifest.run_id));
+    out.push_str(&format!("request_id: {}\n", error.manifest.request_id));
+    out.push_str(&format!("assurance_level: {}\n", assurance_label(error.assurance_level)));
+    out.push_str(&format!("status: {}\n", error_status_label(error.status)));
+    out
+}
+
+fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
+    let mut out = String::new();
+    out.push('{');
+    out.push_str("\"kind\":\"completed\"");
+    out.push_str(&format!(",\"model_id\":\"{}\"", escape_json(model_id)));
+    append_manifest(&mut out, &result.manifest);
+    out.push_str(&format!(",\"status\":\"{}\"", status_label(result.status)));
+    out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(result.assurance_level)));
+    out.push_str(&format!(",\"explored_states\":{}", result.explored_states));
+    out.push_str(&format!(",\"explored_transitions\":{}", result.explored_transitions));
+    out.push_str(",\"property_result\":{");
+    out.push_str(&format!("\"property_id\":\"{}\"", escape_json(&result.property_result.property_id)));
+    out.push_str(&format!(",\"property_kind\":\"{}\"", property_kind_label(&result.property_result.property_kind)));
+    out.push_str(&format!(",\"status\":\"{}\"", status_label(result.property_result.status)));
+    out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(result.property_result.assurance_level)));
+    if let Some(reason_code) = &result.property_result.reason_code {
+        out.push_str(&format!(",\"reason_code\":\"{}\"", escape_json(reason_code)));
+    } else {
+        out.push_str(",\"reason_code\":null");
+    }
+    if let Some(reason) = result.property_result.unknown_reason {
+        out.push_str(&format!(",\"unknown_reason\":\"{}\"", unknown_reason_label(reason)));
+    } else {
+        out.push_str(",\"unknown_reason\":null");
+    }
+    if let Some(terminal_state_id) = &result.property_result.terminal_state_id {
+        out.push_str(&format!(",\"terminal_state_id\":\"{}\"", escape_json(terminal_state_id)));
+    } else {
+        out.push_str(",\"terminal_state_id\":null");
+    }
+    if let Some(evidence_id) = &result.property_result.evidence_id {
+        out.push_str(&format!(",\"evidence_id\":\"{}\"", escape_json(evidence_id)));
+    } else {
+        out.push_str(",\"evidence_id\":null");
+    }
+    out.push_str(&format!(",\"summary\":\"{}\"", escape_json(&result.property_result.summary)));
+    out.push('}');
+    if let Some(trace) = &result.trace {
+        append_trace(&mut out, trace);
+    } else {
+        out.push_str(",\"trace\":null");
+    }
+    out.push('}');
+    out
+}
+
+fn render_error_json(model_id: &str, error: &CheckErrorEnvelope) -> String {
+    let mut out = String::new();
+    out.push('{');
+    out.push_str("\"kind\":\"error\"");
+    out.push_str(&format!(",\"model_id\":\"{}\"", escape_json(model_id)));
+    append_manifest(&mut out, &error.manifest);
+    out.push_str(&format!(",\"status\":\"{}\"", error_status_label(error.status)));
+    out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(error.assurance_level)));
+    out.push_str(&format!(",\"diagnostics\":{}", render_diagnostics_json(&error.diagnostics)));
+    out.push('}');
+    out
+}
+
+fn append_manifest(out: &mut String, manifest: &crate::engine::RunManifest) {
+    out.push_str(",\"manifest\":{");
+    out.push_str(&format!("\"request_id\":\"{}\"", escape_json(&manifest.request_id)));
+    out.push_str(&format!(",\"run_id\":\"{}\"", escape_json(&manifest.run_id)));
+    out.push_str(&format!(",\"schema_version\":\"{}\"", escape_json(&manifest.schema_version)));
+    out.push_str(&format!(",\"source_hash\":\"{}\"", escape_json(&manifest.source_hash)));
+    out.push_str(&format!(",\"contract_hash\":\"{}\"", escape_json(&manifest.contract_hash)));
+    out.push_str(&format!(",\"engine_version\":\"{}\"", escape_json(&manifest.engine_version)));
+    out.push_str(&format!(",\"backend_name\":\"{}\"", backend_label(manifest.backend_name)));
+    out.push_str(&format!(",\"backend_version\":\"{}\"", escape_json(&manifest.backend_version)));
+    if let Some(seed) = manifest.seed {
+        out.push_str(&format!(",\"seed\":{}", seed));
+    } else {
+        out.push_str(",\"seed\":null");
+    }
+    out.push('}');
+}
+
+fn append_trace(out: &mut String, trace: &EvidenceTrace) {
+    out.push_str(",\"trace\":{");
+    out.push_str(&format!("\"schema_version\":\"{}\"", escape_json(&trace.schema_version)));
+    out.push_str(&format!(",\"evidence_id\":\"{}\"", escape_json(&trace.evidence_id)));
+    out.push_str(&format!(",\"run_id\":\"{}\"", escape_json(&trace.run_id)));
+    out.push_str(&format!(",\"property_id\":\"{}\"", escape_json(&trace.property_id)));
+    out.push_str(&format!(",\"evidence_kind\":\"{}\"", evidence_kind_label(&trace.evidence_kind)));
+    out.push_str(&format!(",\"assurance_level\":\"{}\"", assurance_label(trace.assurance_level)));
+    out.push_str(&format!(",\"trace_hash\":\"{}\"", escape_json(&trace.trace_hash)));
+    out.push_str(",\"steps\":[");
+    for (index, step) in trace.steps.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!("\"index\":{}", step.index));
+        out.push_str(&format!(",\"from_state_id\":\"{}\"", escape_json(&step.from_state_id)));
+        if let Some(action_id) = &step.action_id {
+            out.push_str(&format!(",\"action_id\":\"{}\"", escape_json(action_id)));
+        } else {
+            out.push_str(",\"action_id\":null");
+        }
+        if let Some(action_label) = &step.action_label {
+            out.push_str(&format!(",\"action_label\":\"{}\"", escape_json(action_label)));
+        } else {
+            out.push_str(",\"action_label\":null");
+        }
+        out.push_str(&format!(",\"to_state_id\":\"{}\"", escape_json(&step.to_state_id)));
+        out.push_str(&format!(",\"depth\":{}", step.depth));
+        append_state_map(out, "state_before", &step.state_before);
+        append_state_map(out, "state_after", &step.state_after);
+        if let Some(note) = &step.note {
+            out.push_str(&format!(",\"note\":\"{}\"", escape_json(note)));
+        } else {
+            out.push_str(",\"note\":null");
+        }
+        out.push('}');
+    }
+    out.push_str("]}");
+}
+
+fn append_state_map(out: &mut String, name: &str, state: &BTreeMap<String, Value>) {
+    out.push_str(&format!(",\"{}\":{{", name));
+    for (index, (field, value)) in state.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\":{}", escape_json(field), value_json(value)));
+    }
+    out.push('}');
+}
+
 fn status_label(status: RunStatus) -> &'static str {
     match status {
-        RunStatus::Pass => "pass",
-        RunStatus::Fail => "fail",
-        RunStatus::Unknown => "unknown",
+        RunStatus::Pass => "PASS",
+        RunStatus::Fail => "FAIL",
+        RunStatus::Unknown => "UNKNOWN",
+    }
+}
+
+fn error_status_label(status: ErrorStatus) -> &'static str {
+    match status {
+        ErrorStatus::Error => "ERROR",
+    }
+}
+
+fn property_kind_label(kind: &crate::ir::PropertyKind) -> &'static str {
+    match kind {
+        crate::ir::PropertyKind::Invariant => "invariant",
     }
 }
 
@@ -162,10 +284,22 @@ fn assurance_label(level: AssuranceLevel) -> &'static str {
 
 fn unknown_reason_label(reason: UnknownReason) -> &'static str {
     match reason {
-        UnknownReason::UnsatInit => "UNSAT_INIT",
-        UnknownReason::StateLimitReached => "STATE_LIMIT_REACHED",
-        UnknownReason::DepthLimitReached => "DEPTH_LIMIT_REACHED",
-        UnknownReason::TimeLimitReached => "TIME_LIMIT_REACHED",
+        UnknownReason::StateLimitReached => "UNKNOWN_STATE_LIMIT_REACHED",
+        UnknownReason::TimeLimitReached => "UNKNOWN_TIME_LIMIT_REACHED",
+        UnknownReason::EngineAborted => "UNKNOWN_ENGINE_ABORTED",
+    }
+}
+
+fn backend_label(kind: crate::engine::BackendKind) -> &'static str {
+    match kind {
+        crate::engine::BackendKind::Explicit => "explicit",
+    }
+}
+
+fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {
+    match kind {
+        EvidenceKind::Trace => "trace",
+        EvidenceKind::Certificate => "certificate",
     }
 }
 
@@ -177,43 +311,73 @@ fn value_json(value: &Value) -> String {
 }
 
 fn escape_json(input: &str) -> String {
-    input
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
+    input.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::engine::{AssuranceLevel, ExplicitRunResult, RunStatus};
+    use crate::engine::{
+        explicit::{CheckOutcome, ExplicitRunResult, PropertyResult},
+        AssuranceLevel, BackendKind, RunManifest, RunStatus,
+    };
 
-    use super::{render_result_json, EvidenceKind, EvidenceTrace, TraceStep};
+    use super::{render_outcome_json, EvidenceKind, EvidenceTrace, TraceStep};
 
     #[test]
-    fn renders_result_json() {
+    fn renders_completed_outcome_json() {
         let result = ExplicitRunResult {
+            manifest: RunManifest {
+                request_id: "req-1".to_string(),
+                run_id: "run-1".to_string(),
+                schema_version: "1.0.0".to_string(),
+                source_hash: "sha256:a".to_string(),
+                contract_hash: "sha256:b".to_string(),
+                engine_version: "0.1.0".to_string(),
+                backend_name: BackendKind::Explicit,
+                backend_version: "0.1.0".to_string(),
+                seed: None,
+            },
             status: RunStatus::Fail,
             assurance_level: AssuranceLevel::Complete,
-            property_id: Some("SAFE".to_string()),
+            property_result: PropertyResult {
+                property_id: "SAFE".to_string(),
+                property_kind: crate::ir::PropertyKind::Invariant,
+                status: RunStatus::Fail,
+                assurance_level: AssuranceLevel::Complete,
+                reason_code: Some("PROPERTY_FAILED".to_string()),
+                unknown_reason: None,
+                terminal_state_id: Some("s-000001".to_string()),
+                evidence_id: Some("ev-1".to_string()),
+                summary: "failed".to_string(),
+            },
             explored_states: 2,
             explored_transitions: 1,
-            unknown_reason: None,
             trace: Some(EvidenceTrace {
+                schema_version: "1.0.0".to_string(),
+                evidence_id: "ev-1".to_string(),
+                run_id: "run-1".to_string(),
+                property_id: "SAFE".to_string(),
                 evidence_kind: EvidenceKind::Trace,
                 assurance_level: AssuranceLevel::Complete,
+                trace_hash: "tracehash".to_string(),
                 steps: vec![TraceStep {
                     index: 0,
-                    action_id: None,
-                    state: BTreeMap::from([("x".to_string(), crate::ir::Value::UInt(0))]),
-                    note: Some("initial state".to_string()),
+                    from_state_id: "s-000000".to_string(),
+                    action_id: Some("Jump".to_string()),
+                    action_label: Some("Jump".to_string()),
+                    to_state_id: "s-000001".to_string(),
+                    depth: 1,
+                    state_before: BTreeMap::from([("x".to_string(), crate::ir::Value::UInt(0))]),
+                    state_after: BTreeMap::from([("x".to_string(), crate::ir::Value::UInt(2))]),
+                    note: None,
                 }],
             }),
         };
-        let json = render_result_json("Counter", &result);
-        assert!(json.contains("\"model_id\":\"Counter\""));
-        assert!(json.contains("\"status\":\"fail\""));
-        assert!(json.contains("\"property_id\":\"SAFE\""));
+        let json = render_outcome_json("Counter", &CheckOutcome::Completed(result));
+        assert!(json.contains("\"kind\":\"completed\""));
+        assert!(json.contains("\"request_id\":\"req-1\""));
+        assert!(json.contains("\"status\":\"FAIL\""));
     }
 }

@@ -1,8 +1,8 @@
 use std::{env, fs, process};
 
 use valid::{
-    engine::{explicit::run_explicit, RunPlan},
-    evidence::{render_diagnostics_json, render_result_json, render_result_text},
+    engine::{check_explicit, CheckOutcome, PropertySelection, RunPlan},
+    evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
     support::diagnostics::Diagnostic,
 };
 
@@ -50,30 +50,32 @@ fn main() {
                 }
             };
 
-            match run_explicit(&model, &RunPlan::default()) {
-                Ok(result) => {
-                    if json {
-                        println!("{}", render_result_json(&model.model_id, &result));
-                    } else {
-                        print!("{}", render_result_text(&result));
-                        println!("model_id: {}", model.model_id);
-                    }
-                    let code = match result.status {
-                        valid::engine::RunStatus::Pass => 0,
-                        valid::engine::RunStatus::Fail => 2,
-                        valid::engine::RunStatus::Unknown => 4,
-                    };
-                    process::exit(code);
-                }
-                Err(diagnostic) => {
-                    if json {
-                        println!("{}", render_diagnostics_json(&[diagnostic]));
-                    } else {
-                        print_diagnostics(&[diagnostic]);
-                    }
-                    process::exit(3);
-                }
+            let mut plan = RunPlan::default();
+            let property_id = model
+                .properties
+                .first()
+                .map(|property| property.property_id.clone())
+                .unwrap_or_else(|| "P_SAFE".to_string());
+            plan.property_selection = PropertySelection::ExactlyOne(property_id);
+            plan.reporter_options.json = json;
+
+            let outcome = check_explicit(&model, &plan);
+            if json {
+                println!("{}", render_outcome_json(&model.model_id, &outcome));
+            } else {
+                print!("{}", render_outcome_text(&outcome));
+                println!("model_id: {}", model.model_id);
             }
+
+            let code = match outcome {
+                CheckOutcome::Completed(result) => match result.status {
+                    valid::engine::RunStatus::Pass => 0,
+                    valid::engine::RunStatus::Fail => 2,
+                    valid::engine::RunStatus::Unknown => 4,
+                },
+                CheckOutcome::Errored(_) => 3,
+            };
+            process::exit(code);
         }
         _ => {
             eprintln!("usage: valid check <model-file> [--json]");
