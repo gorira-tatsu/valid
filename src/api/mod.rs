@@ -4,7 +4,7 @@ use crate::{
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
-    solver::{run_with_adapter, AdapterConfig},
+    solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
         diagnostics::Diagnostic,
         hash::stable_hash_hex,
@@ -97,6 +97,14 @@ pub struct TestgenResponse {
     pub generated_files: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilitiesResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub backend: String,
+    pub capabilities: CapabilityMatrix,
+}
+
 pub fn inspect_source(request_id: &str, source: &str) -> Result<InspectResponse, Vec<Diagnostic>> {
     let model = frontend::compile_model(source)?;
     Ok(InspectResponse {
@@ -116,6 +124,32 @@ pub fn inspect_source(request_id: &str, source: &str) -> Result<InspectResponse,
 
 pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
     frontend::compile_model(source)
+}
+
+pub fn capabilities_response(
+    request_id: &str,
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
+) -> Result<CapabilitiesResponse, String> {
+    let config = match backend.as_deref() {
+        None | Some("explicit") => AdapterConfig::Explicit,
+        Some("mock-bmc") => AdapterConfig::MockBmc,
+        Some("command") => AdapterConfig::Command {
+            backend_name: "command".to_string(),
+            executable: solver_executable
+                .ok_or_else(|| "solver_executable is required when backend=command".to_string())?,
+            args: solver_args,
+        },
+        Some(other) => return Err(format!("unsupported backend `{other}`")),
+    };
+    let capabilities = capabilities_for_config(&config);
+    Ok(CapabilitiesResponse {
+        schema_version: "1.0.0".to_string(),
+        request_id: request_id.to_string(),
+        backend: capabilities.backend_name.clone(),
+        capabilities,
+    })
 }
 
 pub fn check_source(request: &CheckRequest) -> CheckOutcome {
@@ -379,7 +413,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         CheckOutcome::Errored(error) => return Err(error),
     };
     let traces = result.trace.into_iter().collect::<Vec<_>>();
-    let vectors = if request.strategy == "transition" {
+    let vectors = if request.strategy == "transition" || request.strategy == "witness" {
         let action_ids = model
             .actions
             .iter()
@@ -445,11 +479,35 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
     Ok(())
 }
 
+pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result<(), String> {
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
+    require_non_empty(&response.backend, "backend")?;
+    require_non_empty(
+        &response.capabilities.backend_name,
+        "capabilities.backend_name",
+    )?;
+    Ok(())
+}
+
+pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
+    require_non_empty(&request.source, "source")?;
+    match request.strategy.as_str() {
+        "counterexample" | "transition" | "witness" => Ok(()),
+        other => Err(format!(
+            "strategy must be one of counterexample, transition, witness, got `{other}`"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        check_source, explain_source, inspect_source, minimize_source, testgen_source,
-        validate_check_request, validate_explain_response, validate_minimize_response,
+        capabilities_response, check_source, explain_source, inspect_source, minimize_source,
+        testgen_source, validate_capabilities_response, validate_check_request,
+        validate_explain_response, validate_minimize_response, validate_testgen_request,
         validate_testgen_response, CheckRequest, MinimizeRequest, TestgenRequest,
     };
     use crate::engine::CheckOutcome;
@@ -532,6 +590,20 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_can_be_reported_for_command_backend() {
+        let response = capabilities_response(
+            "req-cap",
+            Some("command".to_string()),
+            Some("sh".to_string()),
+            vec!["-c".to_string(), "true".to_string()],
+        )
+        .unwrap();
+        validate_capabilities_response(&response).unwrap();
+        assert_eq!(response.backend, "command");
+        assert!(response.capabilities.supports_bmc);
+    }
+
+    #[test]
     fn request_validation_rejects_empty_source() {
         let error = validate_check_request(&CheckRequest {
             request_id: "req".to_string(),
@@ -544,6 +616,21 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.contains("source"));
+    }
+
+    #[test]
+    fn testgen_request_validation_rejects_unknown_strategy() {
+        let error = validate_testgen_request(&TestgenRequest {
+            request_id: "req".to_string(),
+            source_name: "a.valid".to_string(),
+            source: "model A".to_string(),
+            strategy: "weird".to_string(),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap_err();
+        assert!(error.contains("strategy"));
     }
 
     #[test]

@@ -4,8 +4,8 @@
 
 - FR: `FR-040`〜`FR-043`
 - Epic: `E-1`〜`E-5`
-- Specs: [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
-- 索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- Specs: [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
+- 索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 ## 1. 目的
 

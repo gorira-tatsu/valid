@@ -4,18 +4,18 @@
 - バージョン: `v0.2`
 - 目的: `E`, `F`, `G` エピックを、API例、JSON例、擬似コード、テストケース一覧まで落とし込む。
 - 依存章:
-  - [explicit_engine_and_evidence_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
-  - [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md)
-  - [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md)
-  - [artifact_naming.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/artifact_naming.md)
+  - [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
+  - [json_schemas.md](../09_reference/json_schemas.md)
+  - [error_codes.md](../09_reference/error_codes.md)
+  - [artifact_naming.md](../09_reference/artifact_naming.md)
 - 関連ID:
   - FR: `FR-040`〜`FR-043`, `FR-050`〜`FR-053`, `FR-060`〜`FR-063`
   - Epic: `E-1`〜`E-5`, `F-1`〜`F-4`, `G-1`〜`G-5`
   - PR: `PR-06`, `PR-07`, `PR-08`
-  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - 参照索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 - 次に読む:
-  - [ai_solver_selfcheck_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
-  - [../09_reference/implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md)
+  - [ai_solver_selfcheck_specs.md](ai_solver_selfcheck_specs.md)
+  - [../09_reference/implementation_pr_plan.md](../09_reference/implementation_pr_plan.md)
 
 ## 1. 対象範囲
 

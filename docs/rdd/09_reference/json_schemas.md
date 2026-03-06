@@ -108,6 +108,12 @@
 - 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`
 - 本体: [schemas/capability_matrix.schema.json](schemas/capability_matrix.schema.json)
 
+## 13.1 AI Capabilities Request/Response
+
+- ID: `schema.ai.capabilities`
+- 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`, `05_interfaces/interfaces_cli_api_ci.md`
+- 本体: [schemas/ai_capabilities_request.schema.json](schemas/ai_capabilities_request.schema.json), [schemas/ai_capabilities_response.schema.json](schemas/ai_capabilities_response.schema.json)
+
 ## 14. SelfcheckReport
 
 - ID: `schema.selfcheck_report`

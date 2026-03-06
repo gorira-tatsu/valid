@@ -6,16 +6,16 @@
 
 ## 前提として読む章
 
-- [../03_architecture/architecture.md](/Users/tatsuhiko/code/valid/docs/rdd/03_architecture/architecture.md)
-- [../04_domain/business_logic_and_data_model.md](/Users/tatsuhiko/code/valid/docs/rdd/04_domain/business_logic_and_data_model.md)
-- [../07_planning/feature_breakdown.md](/Users/tatsuhiko/code/valid/docs/rdd/07_planning/feature_breakdown.md)
+- [../03_architecture/architecture.md](../03_architecture/architecture.md)
+- [../04_domain/business_logic_and_data_model.md](../04_domain/business_logic_and_data_model.md)
+- [../07_planning/feature_breakdown.md](../07_planning/feature_breakdown.md)
 
-- [mvp_frontend_and_kernel_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
-- [explicit_engine_and_evidence_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
-- [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
-- [ai_solver_selfcheck_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
-- [full_technology_usage_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/full_technology_usage_plan.md)
-- [../09_reference](/Users/tatsuhiko/code/valid/docs/rdd/09_reference)
+- [mvp_frontend_and_kernel_specs.md](mvp_frontend_and_kernel_specs.md)
+- [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
+- [testgen_contract_coverage_specs.md](testgen_contract_coverage_specs.md)
+- [ai_solver_selfcheck_specs.md](ai_solver_selfcheck_specs.md)
+- [full_technology_usage_plan.md](full_technology_usage_plan.md)
+- [../09_reference](../09_reference)
 
 読むべきタイミング:
 
@@ -36,5 +36,5 @@
 
 実装との接続先:
 
-- 参照契約: [../09_reference/README.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/README.md)
-- PR 単位受け入れ: [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
+- 参照契約: [../09_reference/README.md](../09_reference/README.md)
+- PR 単位受け入れ: [../10_delivery/README.md](../10_delivery/README.md)

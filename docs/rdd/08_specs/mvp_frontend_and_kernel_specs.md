@@ -4,17 +4,17 @@
 - バージョン: `v0.1`
 - 目的: 最初に実装する `A-1`〜`A-4`, `B-1`〜`B-3` の詳細仕様を定義する。
 - 前提:
-  - [../03_architecture/architecture.md](/Users/tatsuhiko/code/valid/docs/rdd/03_architecture/architecture.md)
-  - [../04_domain/business_logic_and_data_model.md](/Users/tatsuhiko/code/valid/docs/rdd/04_domain/business_logic_and_data_model.md)
-  - [../09_reference/glossary.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/glossary.md)
+  - [../03_architecture/architecture.md](../03_architecture/architecture.md)
+  - [../04_domain/business_logic_and_data_model.md](../04_domain/business_logic_and_data_model.md)
+  - [../09_reference/glossary.md](../09_reference/glossary.md)
 - 関連ID:
   - FR: `FR-001`〜`FR-014`
   - Epic: `A-1`〜`A-4`, `B-1`〜`B-3`
   - PR: `PR-01`, `PR-02`
-  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - 参照索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 - 次に読む:
-  - [explicit_engine_and_evidence_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
-  - [../10_delivery/pr_01_frontend_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_01_frontend_acceptance.md)
+  - [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
+  - [../10_delivery/pr_01_frontend_acceptance.md](../10_delivery/pr_01_frontend_acceptance.md)
 
 ## 1. 対象範囲
 

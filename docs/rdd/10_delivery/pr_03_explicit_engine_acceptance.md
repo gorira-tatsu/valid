@@ -4,8 +4,8 @@
 
 - FR: `FR-020`〜`FR-024`
 - Epic: `C-1`〜`C-7`
-- Specs: [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
-- 索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- Specs: [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
+- 索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 ## 1. 範囲
 

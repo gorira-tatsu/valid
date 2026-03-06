@@ -4,8 +4,8 @@
 
 - FR: `FR-011`, `FR-073`
 - Epic: `J-1`〜`J-3`
-- Specs: [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
-- 索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- Specs: [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
+- 索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 ## 1. 目的
 

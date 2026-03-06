@@ -4,9 +4,9 @@
 - バージョン: `v0.1`
 - 目的: 実際に何の機能をどの順序で作るかを、実装可能な粒度まで分解する。
 - ID参照:
-  - [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
-  - 詳細仕様: [../08_specs/README.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/README.md)
-  - PR受け入れ: [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
+  - [id_cross_reference.md](../09_reference/id_cross_reference.md)
+  - 詳細仕様: [../08_specs/README.md](../08_specs/README.md)
+  - PR受け入れ: [../10_delivery/README.md](../10_delivery/README.md)
 
 ## 1. 本章の位置づけ
 
@@ -39,7 +39,7 @@
 
 ### A-1 モデルソース読込
 
-関連ID: `FR-001`, `FR-002`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+関連ID: `FR-001`, `FR-002`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -59,7 +59,7 @@
 
 ### A-2 名前解決
 
-関連ID: `FR-001`, `FR-004`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+関連ID: `FR-001`, `FR-004`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -80,7 +80,7 @@
 
 ### A-3 型付け
 
-関連ID: `FR-001`, `FR-003`, `FR-010`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+関連ID: `FR-001`, `FR-003`, `FR-010`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -92,7 +92,7 @@
 
 ### A-4 IR生成
 
-関連ID: `FR-001`〜`FR-005`, `FR-012`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+関連ID: `FR-001`〜`FR-005`, `FR-012`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -108,7 +108,7 @@
 
 ### A-5 モデル検証
 
-関連ID: `FR-004`, `FR-005`, `Phase 0`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+関連ID: `FR-004`, `FR-005`, `Phase 0`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -122,7 +122,7 @@
 
 ### B-1 式評価器
 
-関連ID: `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+関連ID: `FR-011`, `PR-02`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -139,7 +139,7 @@
 
 ### B-2 ガード評価
 
-関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -147,7 +147,7 @@
 
 ### B-3 遷移適用
 
-関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -155,7 +155,7 @@
 
 ### B-4 Property評価
 
-関連ID: `FR-004`, `FR-020`, `Phase 1`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-004`, `FR-020`, `Phase 1`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -163,7 +163,7 @@
 
 ### B-5 Trace Replay
 
-関連ID: `FR-021`, `NFR-002`, `J-1`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-021`, `NFR-002`, `J-1`, `PR-02`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -175,7 +175,7 @@
 
 ### C-1 初期状態列挙
 
-関連ID: `FR-002`, `FR-020`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-002`, `FR-020`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -183,7 +183,7 @@
 
 ### C-2 BFS探索
 
-関連ID: `FR-020`, `FR-021`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-020`, `FR-021`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -191,7 +191,7 @@
 
 ### C-3 DFS探索
 
-関連ID: `FR-020`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-020`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -199,7 +199,7 @@
 
 ### C-4 訪問済み状態管理
 
-関連ID: `FR-020`, `FR-022`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-020`, `FR-022`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -207,7 +207,7 @@
 
 ### C-5 predecessor記録
 
-関連ID: `FR-021`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-021`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -215,7 +215,7 @@
 
 ### C-6 上限制御
 
-関連ID: `FR-022`, `FR-024`, `NFR-010`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-022`, `FR-024`, `NFR-010`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -223,7 +223,7 @@
 
 ### C-7 実行統計
 
-関連ID: `FR-052`, `NFR-011`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-052`, `NFR-011`, `PR-03`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -233,7 +233,7 @@
 
 ### D-1 Evidence生成
 
-関連ID: `FR-021`, `FR-031`, `FR-040`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-021`, `FR-031`, `FR-040`, `PR-04`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -241,7 +241,7 @@
 
 ### D-2 Trace JSON出力
 
-関連ID: `FR-032`, `FR-063`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-032`, `FR-063`, `PR-04`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -249,7 +249,7 @@
 
 ### D-3 テキスト要約
 
-関連ID: `FR-031`, `FR-053`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `FR-031`, `FR-053`, `PR-04`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -257,7 +257,7 @@
 
 ### D-4 Mermaid生成
 
-関連ID: `FR-030`, `FR-062`, `Phase 3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-030`, `FR-062`, `Phase 3`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -265,7 +265,7 @@
 
 ### D-5 Explain基礎
 
-関連ID: `FR-073`, `H-3`, `Phase 5`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-073`, `H-3`, `Phase 5`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -275,7 +275,7 @@
 
 ### E-1 Counterexample to Vector
 
-関連ID: `FR-040`, `FR-041`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-040`, `FR-041`, `PR-06`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -283,7 +283,7 @@
 
 ### E-2 Vector to Rust Test
 
-関連ID: `FR-040`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-040`, `PR-06`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -291,7 +291,7 @@
 
 ### E-3 Witness Test Generation
 
-関連ID: `FR-041`, `FR-042`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-041`, `FR-042`, `PR-06`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -299,7 +299,7 @@
 
 ### E-4 Trace Minimization
 
-関連ID: `FR-043`, `H-4`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-043`, `H-4`, `PR-06`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -307,7 +307,7 @@
 
 ### E-5 Test Rendering Modes
 
-関連ID: `FR-040`, `FR-041`, `Phase 3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-040`, `FR-041`, `Phase 3`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -320,7 +320,7 @@
 
 ### F-1 Contract Snapshot生成
 
-関連ID: `FR-060`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-060`, `PR-07`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -328,7 +328,7 @@
 
 ### F-2 Lock照合
 
-関連ID: `FR-061`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-061`, `PR-07`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -336,7 +336,7 @@
 
 ### F-3 Drift出力
 
-関連ID: `FR-061`, `KPI-05`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-061`, `KPI-05`, `PR-07`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -344,7 +344,7 @@
 
 ### F-4 Document Drift検知
 
-関連ID: `FR-062`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-062`, `PR-07`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -354,7 +354,7 @@
 
 ### G-1 Transition Coverage
 
-関連ID: `FR-050`, `KPI-03`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-050`, `KPI-03`, `PR-08`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -362,7 +362,7 @@
 
 ### G-2 Guard Coverage
 
-関連ID: `FR-051`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-051`, `PR-08`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -370,7 +370,7 @@
 
 ### G-3 State/Depth Summary
 
-関連ID: `FR-052`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-052`, `PR-08`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -378,7 +378,7 @@
 
 ### G-4 Coverage Report
 
-関連ID: `FR-053`, `KPI-03`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-053`, `KPI-03`, `PR-08`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -386,7 +386,7 @@
 
 ### G-5 Coverage Gate Evaluation
 
-関連ID: `FR-042`, `FR-053`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `FR-042`, `FR-053`, `PR-08`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -396,7 +396,7 @@
 
 ### H-1 Inspect API
 
-関連ID: `FR-070`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-070`, `PR-09`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -404,7 +404,7 @@
 
 ### H-2 Check API
 
-関連ID: `FR-071`, `FR-072`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-071`, `FR-072`, `PR-09`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -412,7 +412,7 @@
 
 ### H-3 Explain API
 
-関連ID: `FR-073`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-073`, `PR-09`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -420,7 +420,7 @@
 
 ### H-4 Minimize API
 
-関連ID: `FR-043`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-043`, `PR-09`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -428,7 +428,7 @@
 
 ### H-5 Testgen API
 
-関連ID: `FR-040`, `FR-041`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-040`, `FR-041`, `PR-09`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -438,7 +438,7 @@
 
 ### I-1 Solver Adapter Interface
 
-関連ID: `FR-023`, `NFR-041`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-023`, `NFR-041`, `PR-10`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -446,7 +446,7 @@
 
 ### I-2 BMC Run Plan
 
-関連ID: `FR-023`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-023`, `PR-10`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -454,7 +454,7 @@
 
 ### I-3 Assignment to Trace
 
-関連ID: `FR-023`, `FR-032`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-023`, `FR-032`, `PR-10`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -462,7 +462,7 @@
 
 ### I-4 Capability Matrix
 
-関連ID: `FR-070`〜`FR-073`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `FR-070`〜`FR-073`, `PR-10`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -472,7 +472,7 @@
 
 ### J-1 Selfcheck Spec群
 
-関連ID: `NFR-002`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `NFR-002`, `Phase 6`, `PR-11`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -480,7 +480,7 @@
 
 ### J-2 Selfcheck Runner
 
-関連ID: `NFR-040`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `NFR-040`, `Phase 6`, `PR-11`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -488,7 +488,7 @@
 
 ### J-3 Selfcheck Report
 
-関連ID: `NFR-042`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `NFR-042`, `Phase 6`, `PR-11`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -498,7 +498,7 @@
 
 ### Phase 0
 
-関連ID: `A-1`〜`A-4`, `B-1`〜`B-3`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+関連ID: `A-1`〜`A-4`, `B-1`〜`B-3`, [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md)
 
 - A-1
 - A-2
@@ -510,7 +510,7 @@
 
 ### Phase 1
 
-関連ID: `B-4`, `C-1`〜`C-6`, `D-1`〜`D-3`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+関連ID: `B-4`, `C-1`〜`C-6`, `D-1`〜`D-3`, [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md)
 
 - B-4
 - C-1
@@ -534,7 +534,7 @@
 
 ### Phase 3
 
-関連ID: `E-1`, `E-2`, `E-4`, `G-1`, `G-2`, `G-4`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+関連ID: `E-1`, `E-2`, `E-4`, `G-1`, `G-2`, `G-4`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md)
 
 - E-1
 - E-2
@@ -545,7 +545,7 @@
 
 ### Phase 4
 
-関連ID: `I-1`〜`I-4`, `E-3`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `I-1`〜`I-4`, `E-3`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 - I-1
 - I-2
@@ -555,7 +555,7 @@
 
 ### Phase 5
 
-関連ID: `G-3`, `G-5`, `H-3`, `H-4`, `H-5`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `G-3`, `G-5`, `H-3`, `H-4`, `H-5`, [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 - G-3
 - G-5
@@ -565,7 +565,7 @@
 
 ### Phase 6
 
-関連ID: `J-1`, `J-2`, `J-3`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+関連ID: `J-1`, `J-2`, `J-3`, [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 - J-1
 - J-2

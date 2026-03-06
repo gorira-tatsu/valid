@@ -4,8 +4,8 @@
 - バージョン: `v0.3`
 - 目的: ドメインルール、用語、一貫性条件、永続化対象、集約境界、履歴管理を定義する。
 - ID参照:
-  - [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
-  - 関連仕様: [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+  - [id_cross_reference.md](../09_reference/id_cross_reference.md)
+  - 関連仕様: [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 ## 1. 本章の位置づけ
 

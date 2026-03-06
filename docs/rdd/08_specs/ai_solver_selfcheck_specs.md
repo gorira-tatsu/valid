@@ -252,12 +252,12 @@
 {
   "schema_version": "1.0.0",
   "request_id": "req-testgen-0001",
-  "source": {
-    "kind": "evidence",
-    "value": "ev-fail-0001"
-  },
-  "strategy": "counterexample",
-  "render_mode": "file"
+  "source_name": "counterlock.valid",
+  "source": "model CounterLock\n...",
+  "strategy": "transition",
+  "backend": "mock-bmc",
+  "solver_executable": null,
+  "solver_args": []
 }
 ```
 
@@ -268,12 +268,14 @@
   "schema_version": "1.0.0",
   "request_id": "req-testgen-0001",
   "status": "ok",
-  "vector_id": "vec-000001",
+  "vector_ids": ["vec-000001"],
   "generated_files": [
     "tests/generated/vec-000001.rs"
   ]
 }
 ```
+
+`strategy` は MVP では `counterexample | transition | witness` を受け付ける。
 
 ## 8. I-1 Solver Adapter Interface
 
@@ -392,8 +394,11 @@ function assignment_to_trace(assignment):
 
 ```json
 {
+  "schema_version": "1.0.0",
+  "request_id": "req-cap-0001",
   "backend": "explicit",
   "capabilities": {
+    "backend_name": "explicit",
     "supports_explicit": true,
     "supports_bmc": false,
     "supports_certificate": false,
@@ -405,6 +410,17 @@ function assignment_to_trace(assignment):
 ```
 
 `supports_trace = false` の backend は `FAIL` の本番ゲートに使わない。`command` backend は `ACTIONS` を返す限り `supports_trace = true` とみなす。
+
+### 11.3 request 例
+
+```json
+{
+  "request_id": "req-cap-0001",
+  "backend": "command",
+  "solver_executable": "solver-wrapper",
+  "solver_args": ["--profile", "ci"]
+}
+```
 
 ## 12. J-1 Selfcheck対象
 

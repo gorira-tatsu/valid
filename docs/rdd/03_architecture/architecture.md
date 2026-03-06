@@ -4,11 +4,11 @@
 - バージョン: `v0.3`
 - 目的: 本システムの構造、境界、依存方向、実行時フロー、拡張点を定義する。
 - ID参照:
-  - [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - [id_cross_reference.md](../09_reference/id_cross_reference.md)
   - 関連FR: `FR-001`〜`FR-073`
   - 関連NFR: `NFR-001`〜`NFR-042`
   - 関連Phase: `Phase 0`〜`Phase 6`
-  - 関連仕様: [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+  - 関連仕様: [RDD-0001-10](../08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](../08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](../08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
 
 ## 1. 本章の方針
 

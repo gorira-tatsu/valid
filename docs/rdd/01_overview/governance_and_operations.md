@@ -7,7 +7,7 @@
   - `REQ-002`, `REQ-006`, `REQ-007`, `REQ-010`
   - `FR-060`〜`FR-063`, `FR-070`〜`FR-073`
   - `NFR-020`, `NFR-022`, `NFR-032`
-  - 親文書: [overview_and_scope.md](/Users/tatsuhiko/code/valid/docs/rdd/01_overview/overview_and_scope.md)
+  - 親文書: [overview_and_scope.md](overview_and_scope.md)
 
 ## 1. 位置づけ
 
@@ -84,6 +84,6 @@
 
 ## 10. 参照先
 
-- 親方針: [overview_and_scope.md](/Users/tatsuhiko/code/valid/docs/rdd/01_overview/overview_and_scope.md)
-- KPI / ロードマップ: [kpi_roadmap_risks.md](/Users/tatsuhiko/code/valid/docs/rdd/07_planning/kpi_roadmap_risks.md)
-- PR 計画: [implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md)
+- 親方針: [overview_and_scope.md](overview_and_scope.md)
+- KPI / ロードマップ: [kpi_roadmap_risks.md](../07_planning/kpi_roadmap_risks.md)
+- PR 計画: [implementation_pr_plan.md](../09_reference/implementation_pr_plan.md)

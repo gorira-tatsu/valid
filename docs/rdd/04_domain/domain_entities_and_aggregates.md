@@ -2,8 +2,8 @@
 
 参照元:
 
-- [business_logic_and_data_model.md](/Users/tatsuhiko/code/valid/docs/rdd/04_domain/business_logic_and_data_model.md)
-- [../09_reference/id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- [business_logic_and_data_model.md](business_logic_and_data_model.md)
+- [../09_reference/id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 関連ID:
 
@@ -117,7 +117,7 @@
 - `CoverageRatio`
 - `ContractHash`
 
-これらは文字列や数値の薄い wrapper ではなく、文脈を区別する型として扱う。実装側では [entity_type_schema_map.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/entity_type_schema_map.md) にある Rust 型へ対応づける。
+これらは文字列や数値の薄い wrapper ではなく、文脈を区別する型として扱う。実装側では [entity_type_schema_map.md](../09_reference/entity_type_schema_map.md) にある Rust 型へ対応づける。
 
 ## 集約境界
 

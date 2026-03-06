@@ -2,8 +2,8 @@
 
 参照元:
 
-- [business_logic_and_data_model.md](/Users/tatsuhiko/code/valid/docs/rdd/04_domain/business_logic_and_data_model.md)
-- [../09_reference/id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- [business_logic_and_data_model.md](business_logic_and_data_model.md)
+- [../09_reference/id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 関連ID:
 

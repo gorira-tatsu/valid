@@ -2,9 +2,9 @@
 
 関連文書:
 
-- 詳細仕様: [../08_specs/README.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/README.md)
-- リポジトリ構造: [repository_structure.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/repository_structure.md)
-- 受け入れ基準: [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
+- 詳細仕様: [../08_specs/README.md](../08_specs/README.md)
+- リポジトリ構造: [repository_structure.md](repository_structure.md)
+- 受け入れ基準: [../10_delivery/README.md](../10_delivery/README.md)
 
 ## 1. MVP / Phase 区分
 
@@ -153,14 +153,14 @@ DoD:
 
 ## 4. 受け入れ仕様
 
-- [../10_delivery/pr_01_frontend_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_01_frontend_acceptance.md)
-- [../10_delivery/pr_02_kernel_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_02_kernel_acceptance.md)
-- [../10_delivery/pr_03_explicit_engine_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_03_explicit_engine_acceptance.md)
-- [../10_delivery/pr_04_evidence_reporter_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_04_evidence_reporter_acceptance.md)
-- [../10_delivery/pr_05_cli_integration_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_05_cli_integration_acceptance.md)
-- [../10_delivery/pr_06_testgen_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_06_testgen_acceptance.md)
-- [../10_delivery/pr_07_contract_drift_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_07_contract_drift_acceptance.md)
-- [../10_delivery/pr_08_coverage_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_08_coverage_acceptance.md)
-- [../10_delivery/pr_09_ai_api_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_09_ai_api_acceptance.md)
-- [../10_delivery/pr_10_solver_adapter_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_10_solver_adapter_acceptance.md)
-- [../10_delivery/pr_11_selfcheck_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_11_selfcheck_acceptance.md)
+- [../10_delivery/pr_01_frontend_acceptance.md](../10_delivery/pr_01_frontend_acceptance.md)
+- [../10_delivery/pr_02_kernel_acceptance.md](../10_delivery/pr_02_kernel_acceptance.md)
+- [../10_delivery/pr_03_explicit_engine_acceptance.md](../10_delivery/pr_03_explicit_engine_acceptance.md)
+- [../10_delivery/pr_04_evidence_reporter_acceptance.md](../10_delivery/pr_04_evidence_reporter_acceptance.md)
+- [../10_delivery/pr_05_cli_integration_acceptance.md](../10_delivery/pr_05_cli_integration_acceptance.md)
+- [../10_delivery/pr_06_testgen_acceptance.md](../10_delivery/pr_06_testgen_acceptance.md)
+- [../10_delivery/pr_07_contract_drift_acceptance.md](../10_delivery/pr_07_contract_drift_acceptance.md)
+- [../10_delivery/pr_08_coverage_acceptance.md](../10_delivery/pr_08_coverage_acceptance.md)
+- [../10_delivery/pr_09_ai_api_acceptance.md](../10_delivery/pr_09_ai_api_acceptance.md)
+- [../10_delivery/pr_10_solver_adapter_acceptance.md](../10_delivery/pr_10_solver_adapter_acceptance.md)
+- [../10_delivery/pr_11_selfcheck_acceptance.md](../10_delivery/pr_11_selfcheck_acceptance.md)

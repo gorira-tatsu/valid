@@ -2,8 +2,8 @@
 
 このディレクトリは旧版・統合版の退避先である。現行の参照先ではない。
 
-- [00_integrated_rdd.md](/Users/tatsuhiko/code/valid/docs/rdd/old/00_integrated_rdd.md)
-- [requirements.md](/Users/tatsuhiko/code/valid/docs/rdd/old/requirements.md)
+- [00_integrated_rdd.md](00_integrated_rdd.md)
+- [requirements.md](requirements.md)
 
 運用ルール:
 

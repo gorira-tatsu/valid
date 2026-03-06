@@ -2,8 +2,9 @@ use std::{env, fs, process};
 
 use valid::{
     api::{
-        check_source, explain_source, inspect_source, minimize_source, testgen_source,
-        validate_check_request, CheckRequest, MinimizeRequest, TestgenRequest,
+        capabilities_response, check_source, explain_source, inspect_source, minimize_source,
+        testgen_source, validate_check_request, validate_testgen_request, CapabilitiesResponse,
+        CheckRequest, MinimizeRequest, TestgenRequest,
     },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
@@ -31,6 +32,7 @@ fn main() {
     match command.as_str() {
         "check" => cmd_check(args.collect()),
         "inspect" => cmd_inspect(args.collect()),
+        "capabilities" => cmd_capabilities(args.collect()),
         "explain" => cmd_explain(args.collect()),
         "minimize" => cmd_minimize(args.collect()),
         "contract" => cmd_contract(args.collect()),
@@ -40,7 +42,7 @@ fn main() {
         "coverage" => cmd_coverage(args.collect()),
         "selfcheck" => cmd_selfcheck(),
         _ => {
-            eprintln!("usage: valid <check|inspect|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck> ...");
+            eprintln!("usage: valid <check|inspect|capabilities|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck> ...");
             process::exit(3);
         }
     }
@@ -216,6 +218,50 @@ fn cmd_inspect(args: Vec<String>) {
     }
 }
 
+fn cmd_capabilities(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid capabilities [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        |_arg, _parsed| false,
+    );
+    match capabilities_response(
+        "req-local-capabilities",
+        parsed.backend,
+        parsed.solver_executable,
+        parsed.solver_args,
+    ) {
+        Ok(response) => {
+            if parsed.json {
+                print_capabilities_json(&response);
+            } else {
+                println!("backend: {}", response.backend);
+                println!(
+                    "supports_explicit: {}",
+                    response.capabilities.supports_explicit
+                );
+                println!("supports_bmc: {}", response.capabilities.supports_bmc);
+                println!(
+                    "supports_certificate: {}",
+                    response.capabilities.supports_certificate
+                );
+                println!("supports_trace: {}", response.capabilities.supports_trace);
+                println!(
+                    "supports_witness: {}",
+                    response.capabilities.supports_witness
+                );
+                println!(
+                    "selfcheck_compatible: {}",
+                    response.capabilities.selfcheck_compatible
+                );
+            }
+        }
+        Err(message) => {
+            eprintln!("{message}");
+            process::exit(3);
+        }
+    }
+}
+
 fn cmd_contract(args: Vec<String>) {
     let mut args = args.into_iter();
     let sub = args.next().unwrap_or_else(|| "snapshot".to_string());
@@ -275,20 +321,28 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--strategy=<counterexample|transition|witness>] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    let strategy = parsed
+        .extra
+        .clone()
+        .unwrap_or_else(|| "counterexample".to_string());
     let source = read_source(&parsed.path);
     let request = TestgenRequest {
         request_id: "req-local-testgen".to_string(),
         source_name: parsed.path.clone(),
         source: source.clone(),
-        strategy: "counterexample".to_string(),
+        strategy,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
     };
+    if let Err(message) = validate_testgen_request(&request) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
     match testgen_source(&request) {
-        Ok(_) => {
+        Ok(response) => {
             let outcome = check_source(&CheckRequest {
                 request_id: request.request_id.clone(),
                 source_name: request.source_name.clone(),
@@ -325,17 +379,31 @@ fn cmd_testgen(args: Vec<String>) {
                     .filter_map(|trace| build_counterexample_vector(trace).ok())
                     .collect::<Vec<_>>()
             };
+            if parsed.json {
+                println!(
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
+                    response.schema_version,
+                    response.request_id,
+                    response.status,
+                    response
+                        .vector_ids
+                        .iter()
+                        .map(|s| format!("\"{}\"", s))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    response
+                        .generated_files
+                        .iter()
+                        .map(|s| format!("\"{}\"", s))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            }
             for vector in vectors {
                 let rendered = render_rust_test(&vector);
                 let _ = write_vector_artifact(&run_id, &vector.vector_id, &rendered);
                 write_generated_test_file(&vector, &rendered);
-                if parsed.json {
-                    println!(
-                        "{{\"vector_id\":\"{}\",\"output_path\":\"{}\"}}",
-                        vector.vector_id,
-                        generated_test_output_path(&vector)
-                    );
-                } else {
+                if !parsed.json {
                     println!("vector_id: {}", vector.vector_id);
                     println!("output_path: {}", generated_test_output_path(&vector));
                     println!("{}", rendered);
@@ -414,16 +482,39 @@ fn cmd_orchestrate(args: Vec<String>) {
     let backend =
         parse_backend_config(parsed.backend, parsed.solver_executable, parsed.solver_args);
     let runs = valid::orchestrator::run_all_properties_with_backend(&model, &base_plan, &backend);
-    for run in runs {
-        match run.outcome {
-            CheckOutcome::Completed(result) => {
-                println!(
-                    "property_id: {} status: {:?}",
-                    run.property_id, result.status
-                );
-            }
-            CheckOutcome::Errored(_) => {
-                println!("property_id: {} status: ERROR", run.property_id);
+    if parsed.json {
+        let body = runs
+            .iter()
+            .map(|run| match &run.outcome {
+                CheckOutcome::Completed(result) => format!(
+                    "{{\"property_id\":\"{}\",\"status\":\"{:?}\",\"assurance_level\":\"{:?}\",\"run_id\":\"{}\"}}",
+                    run.property_id,
+                    result.status,
+                    result.assurance_level,
+                    result.manifest.run_id
+                ),
+                CheckOutcome::Errored(error) => format!(
+                    "{{\"property_id\":\"{}\",\"status\":\"ERROR\",\"assurance_level\":\"{:?}\",\"run_id\":\"{}\"}}",
+                    run.property_id,
+                    error.assurance_level,
+                    error.manifest.run_id
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("{{\"runs\":[{body}]}}");
+    } else {
+        for run in runs {
+            match run.outcome {
+                CheckOutcome::Completed(result) => {
+                    println!(
+                        "property_id: {} status: {:?}",
+                        run.property_id, result.status
+                    );
+                }
+                CheckOutcome::Errored(_) => {
+                    println!("property_id: {} status: ERROR", run.property_id);
+                }
             }
         }
     }
@@ -472,7 +563,14 @@ struct ParsedArgs {
 }
 
 fn parse_common_args(args: Vec<String>, usage: &str) -> ParsedArgs {
-    parse_common_args_with(args, usage, |_arg, _parsed| false)
+    parse_common_args_with(args, usage, |arg, parsed| {
+        if let Some(value) = arg.strip_prefix("--strategy=") {
+            parsed.extra = Some(value.to_string());
+            true
+        } else {
+            false
+        }
+    })
 }
 
 fn parse_common_args_with<F>(args: Vec<String>, usage: &str, mut extra_handler: F) -> ParsedArgs
@@ -505,7 +603,7 @@ where
             process::exit(3);
         }
     }
-    if parsed.path.is_empty() {
+    if parsed.path.is_empty() && !usage.contains("valid capabilities") {
         eprintln!("{usage}");
         process::exit(3);
     }
@@ -588,4 +686,20 @@ fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
             }
         }
     }
+}
+
+fn print_capabilities_json(response: &CapabilitiesResponse) {
+    println!(
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{}}}}}",
+        response.schema_version,
+        response.request_id,
+        response.backend,
+        response.capabilities.backend_name,
+        response.capabilities.supports_explicit,
+        response.capabilities.supports_bmc,
+        response.capabilities.supports_certificate,
+        response.capabilities.supports_trace,
+        response.capabilities.supports_witness,
+        response.capabilities.selfcheck_compatible
+    );
 }

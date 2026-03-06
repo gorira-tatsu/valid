@@ -16,3 +16,5 @@ AI API:
 
 - `ai_*_request.schema.json`
 - `ai_*_response.schema.json`
+- `ai_capabilities_request.schema.json`
+- `ai_capabilities_response.schema.json`

@@ -4,7 +4,7 @@
 - バージョン: `v0.3`
 - 目的: 先行研究と既存ツールを比較し、本プロジェクトの採用方針と非採用方針を明文化する。
 - ID参照:
-  - [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - [id_cross_reference.md](../09_reference/id_cross_reference.md)
   - 関連Phase: `Phase 0`〜`Phase 6`
   - 関連Epic: `C-*`, `I-*`, `J-*`
 
