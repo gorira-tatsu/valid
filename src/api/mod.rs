@@ -27,6 +27,13 @@ pub struct InspectResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectRequest {
+    pub request_id: String,
+    pub source_name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRequest {
     pub request_id: String,
     pub source_name: String,
@@ -108,6 +115,14 @@ pub struct CapabilitiesResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilitiesRequest {
+    pub request_id: String,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrchestrateRequest {
     pub request_id: String,
     pub source_name: String,
@@ -132,11 +147,11 @@ pub struct OrchestrateResponse {
     pub runs: Vec<OrchestratedRunSummary>,
 }
 
-pub fn inspect_source(request_id: &str, source: &str) -> Result<InspectResponse, Vec<Diagnostic>> {
-    let model = frontend::compile_model(source)?;
+pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
+    let model = frontend::compile_model(&request.source)?;
     Ok(InspectResponse {
         schema_version: "1.0.0".to_string(),
-        request_id: request_id.to_string(),
+        request_id: request.request_id.clone(),
         status: "ok".to_string(),
         model_id: model.model_id.clone(),
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
@@ -154,26 +169,25 @@ pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
 }
 
 pub fn capabilities_response(
-    request_id: &str,
-    backend: Option<String>,
-    solver_executable: Option<String>,
-    solver_args: Vec<String>,
+    request: &CapabilitiesRequest,
 ) -> Result<CapabilitiesResponse, String> {
-    let config = match backend.as_deref() {
+    let config = match request.backend.as_deref() {
         None | Some("explicit") => AdapterConfig::Explicit,
         Some("mock-bmc") => AdapterConfig::MockBmc,
         Some("command") => AdapterConfig::Command {
             backend_name: "command".to_string(),
-            executable: solver_executable
+            executable: request
+                .solver_executable
+                .clone()
                 .ok_or_else(|| "solver_executable is required when backend=command".to_string())?,
-            args: solver_args,
+            args: request.solver_args.clone(),
         },
         Some(other) => return Err(format!("unsupported backend `{other}`")),
     };
     let capabilities = capabilities_for_config(&config);
     Ok(CapabilitiesResponse {
         schema_version: "1.0.0".to_string(),
-        request_id: request_id.to_string(),
+        request_id: request.request_id.clone(),
         backend: capabilities.backend_name.clone(),
         capabilities,
     })
@@ -554,6 +568,13 @@ pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_inspect_request(request: &InspectRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
+    require_non_empty(&request.source, "source")?;
+    Ok(())
+}
+
 pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), String> {
     require_schema_version(&response.schema_version)?;
     require_non_empty(&response.request_id, "request_id")?;
@@ -605,15 +626,11 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
     Ok(())
 }
 
-pub fn validate_capabilities_request(
-    request_id: &str,
-    backend: Option<&str>,
-    solver_executable: Option<&str>,
-) -> Result<(), String> {
-    require_non_empty(request_id, "request_id")?;
-    if let Some(backend) = backend {
+pub fn validate_capabilities_request(request: &CapabilitiesRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    if let Some(backend) = request.backend.as_deref() {
         require_non_empty(backend, "backend")?;
-        if backend == "command" && solver_executable.is_none() {
+        if backend == "command" && request.solver_executable.is_none() {
             return Err("solver_executable is required when backend=command".to_string());
         }
     }
@@ -668,17 +685,23 @@ mod tests {
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
         orchestrate_source, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_request,
-        validate_explain_response, validate_inspect_response, validate_minimize_request,
-        validate_minimize_response, validate_orchestrate_response, validate_testgen_request,
-        validate_testgen_response, CheckRequest, MinimizeRequest, OrchestrateRequest,
-        TestgenRequest,
+        validate_explain_response, validate_inspect_request, validate_inspect_response,
+        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
+        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
+        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
     use crate::engine::CheckOutcome;
 
     #[test]
     fn inspect_returns_model_outline() {
         let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\nproperty P_SAFE:\n  invariant: x <= 7\n";
-        let response = inspect_source("req-1", source).unwrap();
+        let request = InspectRequest {
+            request_id: "req-1".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+        };
+        validate_inspect_request(&request).unwrap();
+        let response = inspect_source(&request).unwrap();
         assert_eq!(response.model_id, "A");
         assert_eq!(response.properties, vec!["P_SAFE"]);
         validate_inspect_response(&response).unwrap();
@@ -757,14 +780,14 @@ mod tests {
 
     #[test]
     fn capabilities_can_be_reported_for_command_backend() {
-        validate_capabilities_request("req-cap", Some("command"), Some("sh")).unwrap();
-        let response = capabilities_response(
-            "req-cap",
-            Some("command".to_string()),
-            Some("sh".to_string()),
-            vec!["-c".to_string(), "true".to_string()],
-        )
-        .unwrap();
+        let request = CapabilitiesRequest {
+            request_id: "req-cap".to_string(),
+            backend: Some("command".to_string()),
+            solver_executable: Some("sh".to_string()),
+            solver_args: vec!["-c".to_string(), "true".to_string()],
+        };
+        validate_capabilities_request(&request).unwrap();
+        let response = capabilities_response(&request).unwrap();
         validate_capabilities_response(&response).unwrap();
         assert_eq!(response.backend, "command");
         assert!(response.capabilities.supports_bmc);

@@ -3,8 +3,9 @@ use std::{env, fs, process};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_check_request, validate_orchestrate_request,
-        validate_testgen_request, CapabilitiesResponse, CheckRequest, MinimizeRequest,
+        orchestrate_source, testgen_source, validate_capabilities_request, validate_check_request,
+        validate_inspect_request, validate_orchestrate_request, validate_testgen_request,
+        CapabilitiesRequest, CapabilitiesResponse, CheckRequest, InspectRequest, MinimizeRequest,
         OrchestrateRequest, TestgenRequest,
     },
     contract::{
@@ -189,7 +190,16 @@ fn cmd_minimize(args: Vec<String>) {
 fn cmd_inspect(args: Vec<String>) {
     let parsed = parse_common_args(args, "usage: valid inspect <model-file> [--json]");
     let source = read_source(&parsed.path);
-    match inspect_source("req-local-inspect", &source) {
+    let request = InspectRequest {
+        request_id: "req-local-inspect".to_string(),
+        source_name: parsed.path.clone(),
+        source,
+    };
+    if let Err(message) = validate_inspect_request(&request) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
+    match inspect_source(&request) {
         Ok(response) => {
             if parsed.json {
                 println!("{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"state_fields\":[{}],\"actions\":[{}],\"properties\":[{}]}}",
@@ -225,12 +235,17 @@ fn cmd_capabilities(args: Vec<String>) {
         "usage: valid capabilities [--json] [--backend=<explicit|mock-bmc|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |_arg, _parsed| false,
     );
-    match capabilities_response(
-        "req-local-capabilities",
-        parsed.backend,
-        parsed.solver_executable,
-        parsed.solver_args,
-    ) {
+    let request = CapabilitiesRequest {
+        request_id: "req-local-capabilities".to_string(),
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
+    };
+    if let Err(message) = validate_capabilities_request(&request) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
+    match capabilities_response(&request) {
         Ok(response) => {
             if parsed.json {
                 print_capabilities_json(&response);
