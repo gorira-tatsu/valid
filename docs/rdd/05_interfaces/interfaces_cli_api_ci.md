@@ -151,6 +151,10 @@ MVP の `strategy` は次を受け付ける。
 目的:
 
 - モデル実行と生成テスト実行のCoverage集計
+- `summary.transition_coverage_percent`
+- `summary.guard_full_coverage_percent`
+- `depth_histogram`
+- 埋め込み `gate` 判定
 
 ### 4.7 `contract`
 

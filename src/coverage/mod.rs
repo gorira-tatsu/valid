@@ -1,10 +1,11 @@
 //! Coverage collection and gate evaluation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     evidence::EvidenceTrace,
     ir::ModelIr,
+    kernel::{guard::evaluate_guard, MachineState},
     support::{
         json::{
             parse_json, require_array_field, require_bool_field, require_number_field,
@@ -19,13 +20,31 @@ pub struct CoverageReport {
     pub schema_version: String,
     pub model_id: String,
     pub transition_coverage_percent: u32,
+    pub guard_full_coverage_percent: u32,
     pub covered_actions: BTreeSet<String>,
     pub total_actions: BTreeSet<String>,
+    pub action_execution_counts: BTreeMap<String, usize>,
     pub visited_state_count: usize,
     pub max_depth_observed: u32,
     pub guard_true_actions: BTreeSet<String>,
     pub guard_false_actions: BTreeSet<String>,
+    pub depth_histogram: BTreeMap<u32, usize>,
     pub step_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoverageGateStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoverageGateResult {
+    pub schema_version: String,
+    pub status: CoverageGateStatus,
+    pub policy_id: String,
+    pub reasons: Vec<String>,
 }
 
 pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageReport {
@@ -38,19 +57,46 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     let mut visited_states = BTreeSet::new();
     let mut max_depth_observed = 0u32;
     let mut guard_true_actions = BTreeSet::new();
-    let mut guard_false_actions = total_actions.clone();
+    let mut guard_false_actions = BTreeSet::new();
+    let mut action_execution_counts = BTreeMap::new();
+    let mut depth_histogram = BTreeMap::new();
     let mut step_count = 0usize;
     for trace in traces {
+        let mut state_depths: BTreeMap<String, u32> = BTreeMap::new();
         for step in &trace.steps {
             step_count += 1;
             max_depth_observed = max_depth_observed.max(step.depth);
             visited_states.insert(step.from_state_id.clone());
             visited_states.insert(step.to_state_id.clone());
+            state_depths
+                .entry(step.from_state_id.clone())
+                .and_modify(|depth| *depth = (*depth).min(step.depth.saturating_sub(1)))
+                .or_insert(step.depth.saturating_sub(1));
+            state_depths
+                .entry(step.to_state_id.clone())
+                .and_modify(|depth| *depth = (*depth).min(step.depth))
+                .or_insert(step.depth);
             if let Some(action_id) = &step.action_id {
                 covered_actions.insert(action_id.clone());
-                guard_true_actions.insert(action_id.clone());
-                guard_false_actions.remove(action_id);
+                *action_execution_counts.entry(action_id.clone()).or_insert(0) += 1;
             }
+
+            if let Some(state) = machine_state_from_snapshot(model, &step.state_before) {
+                for action in &model.actions {
+                    match evaluate_guard(model, &state, action) {
+                        Ok(true) => {
+                            guard_true_actions.insert(action.action_id.clone());
+                        }
+                        Ok(false) => {
+                            guard_false_actions.insert(action.action_id.clone());
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+        }
+        for depth in state_depths.into_values() {
+            *depth_histogram.entry(depth).or_insert(0) += 1;
         }
     }
     let transition_coverage_percent = if total_actions.is_empty() {
@@ -58,31 +104,70 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     } else {
         ((covered_actions.len() * 100) / total_actions.len()) as u32
     };
+    let fully_covered_guards = total_actions
+        .iter()
+        .filter(|action| {
+            guard_true_actions.contains(*action) && guard_false_actions.contains(*action)
+        })
+        .count();
+    let guard_full_coverage_percent = if total_actions.is_empty() {
+        100
+    } else {
+        ((fully_covered_guards * 100) / total_actions.len()) as u32
+    };
     CoverageReport {
         schema_version: "1.0.0".to_string(),
         model_id: model.model_id.clone(),
         transition_coverage_percent,
+        guard_full_coverage_percent,
         covered_actions,
         total_actions,
+        action_execution_counts,
         visited_state_count: visited_states.len(),
         max_depth_observed,
         guard_true_actions,
         guard_false_actions,
+        depth_histogram,
         step_count,
     }
 }
 
-pub fn evaluate_coverage_gate(report: &CoverageReport, minimum_percent: u32) -> bool {
-    report.transition_coverage_percent >= minimum_percent
+pub fn evaluate_coverage_gate(report: &CoverageReport, minimum_percent: u32) -> CoverageGateResult {
+    let mut reasons = Vec::new();
+    let status = if report.transition_coverage_percent >= minimum_percent
+        && report.guard_full_coverage_percent >= 80
+    {
+        CoverageGateStatus::Pass
+    } else if report.transition_coverage_percent >= minimum_percent {
+        reasons.push("guard_full_coverage below threshold".to_string());
+        CoverageGateStatus::Warn
+    } else {
+        reasons.push("transition_coverage below threshold".to_string());
+        if report.guard_full_coverage_percent < 80 {
+            reasons.push("guard_full_coverage below threshold".to_string());
+        }
+        CoverageGateStatus::Fail
+    };
+    CoverageGateResult {
+        schema_version: "1.0.0".to_string(),
+        status,
+        policy_id: "default-mvp-policy".to_string(),
+        reasons,
+    }
 }
 
 pub fn render_coverage_json(report: &CoverageReport) -> String {
+    let gate = evaluate_coverage_gate(report, 80);
     let mut out = String::from("{");
     out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
     out.push_str(&format!(",\"model_id\":\"{}\"", report.model_id));
     out.push_str(&format!(
-        ",\"summary\":{{\"transition_coverage_percent\":{},\"visited_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
-        report.transition_coverage_percent, report.visited_state_count, report.step_count, report.max_depth_observed
+        ",\"summary\":{{\"transition_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"visited_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
+        report.transition_coverage_percent,
+        report.guard_full_coverage_percent,
+        report.visited_state_count,
+        report.step_count,
+        report.max_depth_observed
     ));
     out.push_str(",\"actions\":[");
     for (index, action) in report.total_actions.iter().enumerate() {
@@ -90,9 +175,10 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"covered\":{}}}",
+            "{{\"action_id\":\"{}\",\"covered\":{},\"count\":{}}}",
             action,
-            report.covered_actions.contains(action)
+            report.covered_actions.contains(action),
+            report.action_execution_counts.get(action).copied().unwrap_or(0)
         ));
     }
     out.push(']');
@@ -110,7 +196,12 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     }
     out.push(']');
     out.push_str(",\"depth_histogram\":{");
-    out.push_str(&format!("\"0\":0,\"max\":{}", report.max_depth_observed));
+    for (index, (depth, count)) in report.depth_histogram.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\":{}", depth, count));
+    }
     out.push('}');
     out.push_str(&format!(
         ",\"visited_state_count\":{}",
@@ -137,8 +228,58 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     }
     out.push(']');
     out.push_str(&format!(",\"step_count\":{}", report.step_count));
+    out.push_str(&format!(
+        ",\"gate\":{{\"schema_version\":\"{}\",\"status\":\"{}\",\"policy_id\":\"{}\",\"reasons\":[",
+        gate.schema_version,
+        coverage_gate_status_label(&gate.status),
+        gate.policy_id
+    ));
+    for (index, reason) in gate.reasons.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", reason));
+    }
+    out.push_str("]}");
     out.push('}');
     out
+}
+
+pub fn render_coverage_text(report: &CoverageReport) -> String {
+    let gate = evaluate_coverage_gate(report, 80);
+    let uncovered_guards = report
+        .total_actions
+        .iter()
+        .filter_map(|action| {
+            if report.guard_true_actions.contains(action) && report.guard_false_actions.contains(action)
+            {
+                None
+            } else if report.guard_true_actions.contains(action) {
+                Some(format!("{action}:false"))
+            } else if report.guard_false_actions.contains(action) {
+                Some(format!("{action}:true"))
+            } else {
+                Some(format!("{action}:true,false"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!(
+        "COVERAGE model={}\ntransition_coverage_percent={}\nguard_full_coverage_percent={}\nvisited_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
+        report.model_id,
+        report.transition_coverage_percent,
+        report.guard_full_coverage_percent,
+        report.visited_state_count,
+        report.step_count,
+        report.max_depth_observed,
+        coverage_gate_status_label(&gate.status),
+        if uncovered_guards.is_empty() {
+            "uncovered_guards=".to_string()
+        } else {
+            format!("uncovered_guards={uncovered_guards}")
+        }
+    )
 }
 
 pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
@@ -147,8 +288,21 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     if report.transition_coverage_percent > 100 {
         return Err("transition_coverage_percent must not exceed 100".to_string());
     }
+    if report.guard_full_coverage_percent > 100 {
+        return Err("guard_full_coverage_percent must not exceed 100".to_string());
+    }
     if report.covered_actions.len() > report.total_actions.len() {
         return Err("covered_actions must be a subset of total_actions".to_string());
+    }
+    for action in &report.covered_actions {
+        if !report.total_actions.contains(action) {
+            return Err("covered_actions must reference declared actions only".to_string());
+        }
+    }
+    for action in report.action_execution_counts.keys() {
+        if !report.total_actions.contains(action) {
+            return Err("action_execution_counts must reference declared actions only".to_string());
+        }
     }
     Ok(())
 }
@@ -165,6 +319,7 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         "summary",
     )?;
     require_number_field(summary, "transition_coverage_percent")?;
+    require_number_field(summary, "guard_full_coverage_percent")?;
     require_number_field(summary, "visited_state_count")?;
     require_number_field(summary, "step_count")?;
     require_number_field(summary, "max_depth_observed")?;
@@ -172,8 +327,50 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         let action_object = require_object(action, "actions[]")?;
         require_string_field(action_object, "action_id")?;
         require_bool_field(action_object, "covered")?;
+        require_number_field(action_object, "count")?;
     }
+    for guard in require_array_field(object, "guards")? {
+        let guard_object = require_object(guard, "guards[]")?;
+        require_string_field(guard_object, "action_id")?;
+        require_bool_field(guard_object, "true_seen")?;
+        require_bool_field(guard_object, "false_seen")?;
+    }
+    require_object(
+        object
+            .get("depth_histogram")
+            .ok_or_else(|| "depth_histogram must be present".to_string())?,
+        "depth_histogram",
+    )?;
+    let gate = require_object(
+        object
+            .get("gate")
+            .ok_or_else(|| "gate must be present".to_string())?,
+        "gate",
+    )?;
+    require_string_field(gate, "schema_version")?;
+    require_string_field(gate, "status")?;
+    require_string_field(gate, "policy_id")?;
+    require_array_field(gate, "reasons")?;
     Ok(())
+}
+
+fn machine_state_from_snapshot(
+    model: &ModelIr,
+    snapshot: &BTreeMap<String, crate::ir::Value>,
+) -> Option<MachineState> {
+    let mut values = Vec::with_capacity(model.state_fields.len());
+    for field in &model.state_fields {
+        values.push(snapshot.get(&field.name)?.clone());
+    }
+    Some(MachineState::new(values))
+}
+
+fn coverage_gate_status_label(status: &CoverageGateStatus) -> &'static str {
+    match status {
+        CoverageGateStatus::Pass => "pass",
+        CoverageGateStatus::Warn => "warn",
+        CoverageGateStatus::Fail => "fail",
+    }
 }
 
 #[cfg(test)]
@@ -188,8 +385,8 @@ mod tests {
     };
 
     use super::{
-        collect_coverage, evaluate_coverage_gate, render_coverage_json, validate_coverage_report,
-        validate_rendered_coverage_json,
+        collect_coverage, evaluate_coverage_gate, render_coverage_json, render_coverage_text,
+        validate_coverage_report, validate_rendered_coverage_json, CoverageGateStatus,
     };
 
     #[test]
@@ -219,14 +416,34 @@ mod tests {
         assert_eq!(report.schema_version, "1.0.0");
         assert_eq!(report.model_id, "A");
         assert_eq!(report.transition_coverage_percent, 50);
+        assert_eq!(report.guard_full_coverage_percent, 0);
         assert_eq!(report.visited_state_count, 2);
         assert_eq!(report.max_depth_observed, 1);
+        assert_eq!(report.action_execution_counts.get("A_INC"), Some(&1));
         assert!(report.guard_true_actions.contains("A_INC"));
-        assert!(report.guard_false_actions.contains("A_DEC"));
-        assert!(!evaluate_coverage_gate(&report, 60));
+        assert!(report.guard_true_actions.contains("A_DEC"));
+        assert!(!report.guard_false_actions.contains("A_DEC"));
+        assert_eq!(report.depth_histogram.get(&0), Some(&1));
+        assert_eq!(report.depth_histogram.get(&1), Some(&1));
+        assert_eq!(evaluate_coverage_gate(&report, 60).status, CoverageGateStatus::Fail);
         let json = render_coverage_json(&report);
         assert!(json.contains("\"summary\""));
         validate_rendered_coverage_json(&json).unwrap();
         validate_coverage_report(&report).unwrap();
+        let text = render_coverage_text(&report);
+        assert!(text.contains("gate_status=fail"));
+        assert!(text.contains("transition_coverage_percent=50"));
+    }
+
+    #[test]
+    fn fails_gate_when_transition_coverage_is_below_threshold() {
+        let model = compile_model("model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction A_INC:\n  pre: true\n  post:\n    x = 1\naction A_DEC:\n  pre: true\n  post:\n    x = 0\nproperty P_SAFE:\n  invariant: x <= 7\n").unwrap();
+        let report = collect_coverage(&model, &[]);
+        let gate = evaluate_coverage_gate(&report, 80);
+        assert_eq!(gate.status, CoverageGateStatus::Fail);
+        assert!(gate
+            .reasons
+            .iter()
+            .any(|reason| reason == "transition_coverage below threshold"));
     }
 }

@@ -16,7 +16,9 @@
 1. `CoverageReport` を JSON で出力できる。
 2. transition coverage を計算できる。
 3. guard coverage を計算できる。
-4. threshold policy で gate 判定できる。
+4. state/depth summary を計算できる。
+5. threshold policy で gate 判定できる。
+6. report JSON に `gate` を埋め込める。
 
 ## 3. DoD
 

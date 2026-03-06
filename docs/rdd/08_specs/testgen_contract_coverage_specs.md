@@ -450,17 +450,18 @@ for each guard:
   "schema_version": "1.0.0",
   "model_id": "counterlock",
   "summary": {
-    "transition_coverage": 1.0,
-    "guard_full_coverage": 0.5,
-    "visited_unique_states": 12,
-    "max_depth": 4
+    "transition_coverage_percent": 100,
+    "guard_full_coverage_percent": 50,
+    "visited_state_count": 12,
+    "step_count": 12,
+    "max_depth_observed": 4
   },
   "actions": [
     { "action_id": "A_INC", "covered": true, "count": 5 },
     { "action_id": "A_LOCK", "covered": true, "count": 2 }
   ],
   "guards": [
-    { "guard_id": "G_NOT_LOCKED", "true_seen": true, "false_seen": false }
+    { "action_id": "A_INC", "true_seen": true, "false_seen": false }
   ],
   "depth_histogram": {
     "0": 1,
@@ -468,6 +469,14 @@ for each guard:
     "2": 4,
     "3": 3,
     "4": 2
+  },
+  "gate": {
+    "schema_version": "1.0.0",
+    "status": "warn",
+    "policy_id": "default-mvp-policy",
+    "reasons": [
+      "guard_full_coverage below threshold"
+    ]
   }
 }
 ```
@@ -476,19 +485,19 @@ for each guard:
 
 ```text
 COVERAGE model=counterlock
-transition_coverage=100.00%
-guard_full_coverage=50.00%
-visited_unique_states=12
-max_depth=4
-uncovered_guards=G_NOT_LOCKED:false
+transition_coverage_percent=100
+guard_full_coverage_percent=50
+visited_state_count=12
+max_depth_observed=4
+uncovered_guards=A_INC:false
 ```
 
 ## 15. G-5 Coverage Gate Evaluation
 
 ### 15.1 判定ルール
 
-- `PASS`: transition coverage >= 1.0 かつ guard full coverage >= 0.8
-- `WARN`: transition coverage >= 0.8
+- `PASS`: transition coverage >= 80% かつ guard full coverage >= 80%
+- `WARN`: transition coverage >= 80%
 - `FAIL`: それ未満
 
 ### 15.2 JSON例

@@ -14,7 +14,7 @@ use valid::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
         snapshot_model, write_lock_file,
     },
-    coverage::{collect_coverage, render_coverage_json},
+    coverage::{collect_coverage, render_coverage_json, render_coverage_text},
     engine::CheckOutcome,
     evidence::{
         render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts,
@@ -580,7 +580,11 @@ fn cmd_coverage(args: Vec<String>) {
         CheckOutcome::Completed(result) => {
             let traces = result.trace.into_iter().collect::<Vec<_>>();
             let report = collect_coverage(&model, &traces);
-            println!("{}", render_coverage_json(&report));
+            if parsed.json {
+                println!("{}", render_coverage_json(&report));
+            } else {
+                println!("{}", render_coverage_text(&report));
+            }
         }
         CheckOutcome::Errored(error) => {
             print_diagnostics(&error.diagnostics);

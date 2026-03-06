@@ -2,13 +2,61 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.coverage_report",
   "type": "object",
-  "required": ["schema_version", "model_id", "summary", "actions", "guards", "depth_histogram"],
+  "required": ["schema_version", "model_id", "summary", "actions", "guards", "depth_histogram", "gate"],
   "properties": {
     "schema_version": { "type": "string" },
     "model_id": { "type": "string" },
-    "summary": { "type": "object" },
-    "actions": { "type": "array", "items": { "type": "object" } },
-    "guards": { "type": "array", "items": { "type": "object" } },
-    "depth_histogram": { "type": "object" }
+    "summary": {
+      "type": "object",
+      "required": [
+        "transition_coverage_percent",
+        "guard_full_coverage_percent",
+        "visited_state_count",
+        "step_count",
+        "max_depth_observed"
+      ],
+      "properties": {
+        "transition_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "guard_full_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "visited_state_count": { "type": "integer", "minimum": 0 },
+        "step_count": { "type": "integer", "minimum": 0 },
+        "max_depth_observed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action_id", "covered", "count"],
+        "properties": {
+          "action_id": { "type": "string" },
+          "covered": { "type": "boolean" },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "guards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action_id", "true_seen", "false_seen"],
+        "properties": {
+          "action_id": { "type": "string" },
+          "true_seen": { "type": "boolean" },
+          "false_seen": { "type": "boolean" }
+        }
+      }
+    },
+    "depth_histogram": { "type": "object" },
+    "gate": {
+      "type": "object",
+      "required": ["schema_version", "status", "policy_id", "reasons"],
+      "properties": {
+        "schema_version": { "type": "string" },
+        "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+        "policy_id": { "type": "string" },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    }
   }
 }
