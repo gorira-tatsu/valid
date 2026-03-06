@@ -1,7 +1,7 @@
 use valid::native::{
     authz::{
-        evaluate_request, AuthorizationRequest, Matcher, PolicyDomain, PolicyEffect, PolicySet,
-        PolicyStatement, RequestContext,
+        collect_authorization_coverage, evaluate_request, explain_request, AuthorizationRequest,
+        Matcher, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement, RequestContext,
     },
     Finite,
 };
@@ -74,7 +74,13 @@ fn main() {
     };
 
     let trace = evaluate_request(&policies, &request);
+    let explanation = explain_request(&policies, &request);
+    let coverage = collect_authorization_coverage(&policies);
     println!("decision: {:?}", trace.decision);
     println!("matched policies: {:?}", trace.matched_policy_ids);
     println!("denying policies: {:?}", trace.denying_policy_ids);
+    println!("summary: {}", explanation.summary);
+    println!("repair hints: {:?}", explanation.repair_hints);
+    println!("coverage allow_count: {}", coverage.allow_count);
+    println!("coverage explicit_deny_count: {}", coverage.explicit_deny_count);
 }

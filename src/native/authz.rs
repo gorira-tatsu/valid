@@ -1,6 +1,10 @@
 //! IAM-like authorization semantics for mission-critical policy verification.
 
-use std::{collections::BTreeMap, fmt::Debug, hash::Hash};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Debug,
+    hash::Hash,
+};
 
 use super::Finite;
 
@@ -112,6 +116,29 @@ pub struct DecisionTrace {
     pub domain_allows: BTreeMap<String, bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizationExplanation {
+    pub decision: AuthorizationDecision,
+    pub summary: String,
+    pub decisive_policy_ids: Vec<String>,
+    pub failed_domains: Vec<String>,
+    pub failed_conditions: Vec<String>,
+    pub repair_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizationCoverageReport {
+    pub total_requests: usize,
+    pub allow_count: usize,
+    pub explicit_deny_count: usize,
+    pub implicit_deny_count: usize,
+    pub matched_policy_ids: BTreeSet<String>,
+    pub unmatched_policy_ids: BTreeSet<String>,
+    pub mfa_true_count: usize,
+    pub mfa_false_count: usize,
+    pub domain_block_counts: BTreeMap<String, usize>,
+}
+
 pub fn evaluate_request<P, A, R>(
     policies: &PolicySet<P, A, R>,
     request: &AuthorizationRequest<P, A, R>,
@@ -182,6 +209,92 @@ where
         allowing_policy_ids,
         denying_policy_ids,
         domain_allows: domain_map,
+    }
+}
+
+pub fn explain_request<P, A, R>(
+    policies: &PolicySet<P, A, R>,
+    request: &AuthorizationRequest<P, A, R>,
+) -> AuthorizationExplanation
+where
+    P: Clone + Debug + PartialEq,
+    A: Clone + Debug + PartialEq,
+    R: Clone + Debug + PartialEq,
+{
+    let trace = evaluate_request(policies, request);
+    let failed_domains = trace
+        .domain_allows
+        .iter()
+        .filter_map(|(domain, allowed)| if *allowed { None } else { Some(domain.clone()) })
+        .collect::<Vec<_>>();
+    let failed_conditions = policies
+        .statements
+        .iter()
+        .filter(|statement| {
+            statement.principal.matches(&request.principal)
+                && statement.action.matches(&request.action)
+                && statement.resource.matches(&request.resource)
+                && statement
+                    .condition
+                    .as_ref()
+                    .map(|condition| !condition.matches(&request.context))
+                    .unwrap_or(false)
+        })
+        .map(|statement| statement.id.clone())
+        .collect::<Vec<_>>();
+
+    let (summary, decisive_policy_ids) = match trace.decision {
+        AuthorizationDecision::ExplicitDeny => (
+            "request denied because an explicit deny statement matched".to_string(),
+            trace.denying_policy_ids.clone(),
+        ),
+        AuthorizationDecision::Allow => (
+            "request allowed because an allow path exists and all limiting domains permit it"
+                .to_string(),
+            trace.allowing_policy_ids.clone(),
+        ),
+        AuthorizationDecision::ImplicitDeny => (
+            "request denied because no complete allow path survived all limiting domains"
+                .to_string(),
+            trace.allowing_policy_ids.clone(),
+        ),
+    };
+
+    let mut repair_hints = Vec::new();
+    if matches!(trace.decision, AuthorizationDecision::ImplicitDeny) {
+        if !failed_conditions.is_empty() {
+            repair_hints.push(format!(
+                "review unmet conditions in policies [{}]",
+                failed_conditions.join(", ")
+            ));
+        }
+        if !failed_domains.is_empty() {
+            repair_hints.push(format!(
+                "review limiting domains [{}] for missing allows or unexpected restrictions",
+                failed_domains.join(", ")
+            ));
+        }
+        if trace.allowing_policy_ids.is_empty() {
+            repair_hints.push(
+                "no identity/resource allow matched; verify principal, action, and resource scope"
+                    .to_string(),
+            );
+        }
+    }
+    if matches!(trace.decision, AuthorizationDecision::ExplicitDeny) {
+        repair_hints.push(format!(
+            "inspect explicit deny statements [{}] before changing any allow policy",
+            trace.denying_policy_ids.join(", ")
+        ));
+    }
+
+    AuthorizationExplanation {
+        decision: trace.decision,
+        summary,
+        decisive_policy_ids,
+        failed_domains,
+        failed_conditions,
+        repair_hints,
     }
 }
 
@@ -266,12 +379,74 @@ where
     requests
 }
 
+pub fn collect_authorization_coverage<P, A, R>(
+    policies: &PolicySet<P, A, R>,
+) -> AuthorizationCoverageReport
+where
+    P: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+    A: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+    R: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+{
+    let requests = enumerate_requests::<P, A, R>();
+    let mut allow_count = 0usize;
+    let mut explicit_deny_count = 0usize;
+    let mut implicit_deny_count = 0usize;
+    let mut matched_policy_ids = BTreeSet::new();
+    let mut domain_block_counts = BTreeMap::new();
+    let mut mfa_true_count = 0usize;
+    let mut mfa_false_count = 0usize;
+
+    for request in &requests {
+        if request.context.mfa_present {
+            mfa_true_count += 1;
+        } else {
+            mfa_false_count += 1;
+        }
+        let trace = evaluate_request(policies, request);
+        for policy_id in &trace.matched_policy_ids {
+            matched_policy_ids.insert(policy_id.clone());
+        }
+        match trace.decision {
+            AuthorizationDecision::Allow => allow_count += 1,
+            AuthorizationDecision::ExplicitDeny => explicit_deny_count += 1,
+            AuthorizationDecision::ImplicitDeny => implicit_deny_count += 1,
+        }
+        for (domain, allowed) in &trace.domain_allows {
+            if !allowed {
+                *domain_block_counts.entry(domain.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let all_policy_ids = policies
+        .statements
+        .iter()
+        .map(|statement| statement.id.clone())
+        .collect::<BTreeSet<_>>();
+    let unmatched_policy_ids = all_policy_ids
+        .difference(&matched_policy_ids)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    AuthorizationCoverageReport {
+        total_requests: requests.len(),
+        allow_count,
+        explicit_deny_count,
+        implicit_deny_count,
+        matched_policy_ids,
+        unmatched_policy_ids,
+        mfa_true_count,
+        mfa_false_count,
+        domain_block_counts,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_request, verify_never_allows, AuthorizationDecision, AuthorizationRequest,
-        Matcher, PolicyCondition, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement,
-        RequestContext,
+        collect_authorization_coverage, evaluate_request, explain_request, verify_never_allows,
+        AuthorizationDecision, AuthorizationRequest, Matcher, PolicyCondition, PolicyDomain,
+        PolicyEffect, PolicySet, PolicyStatement, RequestContext,
     };
     use crate::native::Finite;
 
@@ -467,5 +642,99 @@ mod tests {
         });
 
         assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn explanation_reports_failed_domains_and_conditions() {
+        let policies = PolicySet {
+            statements: vec![
+                PolicyStatement {
+                    id: "allow-write-with-mfa".to_string(),
+                    domain: PolicyDomain::Identity,
+                    effect: PolicyEffect::Allow,
+                    principal: Matcher::Exact(Principal::Alice),
+                    action: Matcher::Exact(Action::Write),
+                    resource: Matcher::Exact(Resource::Logs),
+                    condition: Some(PolicyCondition { require_mfa: true }),
+                },
+                PolicyStatement {
+                    id: "boundary-read-only".to_string(),
+                    domain: PolicyDomain::Boundary,
+                    effect: PolicyEffect::Allow,
+                    principal: Matcher::Exact(Principal::Alice),
+                    action: Matcher::Exact(Action::Read),
+                    resource: Matcher::Any,
+                    condition: None,
+                },
+            ],
+        };
+
+        let explanation = explain_request(
+            &policies,
+            &AuthorizationRequest {
+                principal: Principal::Alice,
+                action: Action::Write,
+                resource: Resource::Logs,
+                context: RequestContext { mfa_present: false },
+            },
+        );
+
+        assert_eq!(explanation.decision, AuthorizationDecision::ImplicitDeny);
+        assert!(explanation
+            .failed_domains
+            .contains(&"boundary".to_string()));
+        assert!(explanation
+            .failed_conditions
+            .contains(&"allow-write-with-mfa".to_string()));
+        assert!(!explanation.repair_hints.is_empty());
+    }
+
+    #[test]
+    fn authorization_coverage_reports_unmatched_policies_and_domain_blocks() {
+        let policies = PolicySet {
+            statements: vec![
+                PolicyStatement {
+                    id: "allow-read".to_string(),
+                    domain: PolicyDomain::Identity,
+                    effect: PolicyEffect::Allow,
+                    principal: Matcher::Exact(Principal::Alice),
+                    action: Matcher::Exact(Action::Read),
+                    resource: Matcher::Exact(Resource::Billing),
+                    condition: None,
+                },
+                PolicyStatement {
+                    id: "allow-logs-write-with-mfa".to_string(),
+                    domain: PolicyDomain::Resource,
+                    effect: PolicyEffect::Allow,
+                    principal: Matcher::Exact(Principal::Alice),
+                    action: Matcher::Exact(Action::Write),
+                    resource: Matcher::Exact(Resource::Logs),
+                    condition: Some(PolicyCondition { require_mfa: true }),
+                },
+                PolicyStatement {
+                    id: "scp-deny-write".to_string(),
+                    domain: PolicyDomain::Scp,
+                    effect: PolicyEffect::Deny,
+                    principal: Matcher::Any,
+                    action: Matcher::Exact(Action::Write),
+                    resource: Matcher::Exact(Resource::Billing),
+                    condition: None,
+                },
+            ],
+        };
+
+        let report = collect_authorization_coverage(&policies);
+        assert!(report.total_requests > 0);
+        assert!(report
+            .matched_policy_ids
+            .contains("allow-read"));
+        assert!(report
+            .matched_policy_ids
+            .contains("scp-deny-write"));
+        assert!(report
+            .matched_policy_ids
+            .contains("allow-logs-write-with-mfa"));
+        assert_eq!(report.unmatched_policy_ids.len(), 0);
+        assert!(report.explicit_deny_count > 0);
     }
 }

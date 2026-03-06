@@ -12,6 +12,7 @@ Rust-native authorization example:
 - `iam_like_authz.rs`
   - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented
     authorization reasoning without `.valid`
+  - decision trace, explanation, and authorization coverage
 
 ## Models
 
