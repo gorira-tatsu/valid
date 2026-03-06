@@ -1,0 +1,27 @@
+use crate::ir::value::Value;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprIr {
+    Literal(Value),
+    FieldRef(String),
+    Unary {
+        op: UnaryOp,
+        expr: Box<ExprIr>,
+    },
+    Binary {
+        op: BinaryOp,
+        left: Box<ExprIr>,
+        right: Box<ExprIr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Add,
+    LessThanOrEqual,
+}
