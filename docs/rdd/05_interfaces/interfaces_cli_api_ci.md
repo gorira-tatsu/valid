@@ -120,6 +120,8 @@ MVP では file path 入力も許可するが、長期的な正規経路は `cra
 - `train-fare`
 - `saas-entitlements`
 
+`native-demo` は text と JSON の両方を返し、JSON は AI/CLI の安定観察経路として扱う。
+
 ### 4.3 `trace`
 
 関連ID: `FR-031`, `FR-032`, `D-2`, `D-3`, `PR-04`

@@ -3,12 +3,13 @@ use std::{env, fs, process};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_capabilities_request,
+        native_demo_response, orchestrate_source, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_response,
         validate_inspect_request, validate_inspect_response, validate_minimize_response,
-        validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
-        validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
-        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        validate_native_demo_request, validate_native_demo_response, validate_orchestrate_request,
+        validate_orchestrate_response, validate_testgen_request, validate_testgen_response,
+        CapabilitiesRequest, CapabilitiesResponse, CheckRequest, InspectRequest, MinimizeRequest,
+        NativeDemoRequest, OrchestrateRequest, TestgenRequest,
     },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
@@ -21,7 +22,7 @@ use valid::{
         write_vector_artifact,
     },
     frontend::compile_model,
-    native::demo::{render_demo_json, render_demo_text, run_demo, NativeDemoKind},
+    native::demo::{render_demo_json, render_demo_text},
     reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{
@@ -68,18 +69,53 @@ fn cmd_native_demo(args: Vec<String>) {
         }
     }
 
-    let Some(kind) = demo.as_deref().and_then(NativeDemoKind::parse) else {
+    let Some(demo_id) = demo else {
         eprintln!(
             "usage: valid native-demo <iam-authz|iam-policy-diff|train-fare|saas-entitlements> [--json]"
         );
         process::exit(3);
     };
-
-    let report = run_demo(kind);
+    let request = NativeDemoRequest {
+        request_id: "req-local-native-demo".to_string(),
+        demo_id,
+    };
+    if let Err(message) = validate_native_demo_request(&request) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
+    let response = match native_demo_response(&request) {
+        Ok(response) => response,
+        Err(message) => {
+            eprintln!("{message}");
+            process::exit(3);
+        }
+    };
+    if let Err(message) = validate_native_demo_response(&response) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
     if json {
-        println!("{}", render_demo_json(&report));
+        println!(
+            "{}",
+            render_demo_json(&valid::native::demo::NativeDemoReport {
+                schema_version: response.schema_version,
+                demo_id: response.demo_id,
+                summary: response.summary,
+                checks: response.checks,
+                highlights: response.highlights,
+            })
+        );
     } else {
-        print!("{}", render_demo_text(&report));
+        print!(
+            "{}",
+            render_demo_text(&valid::native::demo::NativeDemoReport {
+                schema_version: response.schema_version,
+                demo_id: response.demo_id,
+                summary: response.summary,
+                checks: response.checks,
+                highlights: response.highlights,
+            })
+        );
     }
 }
 
