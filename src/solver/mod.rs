@@ -518,24 +518,24 @@ fn normalize_protocol_result(
             status: RunStatus::Pass,
             assurance_level,
             property_result: PropertyResult {
-                    property_id: property_id.clone(),
-                    property_kind: property_kind.clone(),
-                    status: RunStatus::Pass,
-                    assurance_level,
-                    reason_code: Some(
-                        protocol
-                            .reason_code
-                            .clone()
-                            .unwrap_or_else(|| "SOLVER_REPORTED_PASS".to_string()),
-                    ),
-                    unknown_reason: None,
-                    terminal_state_id: None,
-                    evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
-                    summary: protocol
-                        .summary
+                property_id: property_id.clone(),
+                property_kind: property_kind.clone(),
+                status: RunStatus::Pass,
+                assurance_level,
+                reason_code: Some(
+                    protocol
+                        .reason_code
                         .clone()
-                        .unwrap_or_else(|| "external solver reported pass".to_string()),
-                },
+                        .unwrap_or_else(|| "SOLVER_REPORTED_PASS".to_string()),
+                ),
+                unknown_reason: None,
+                terminal_state_id: None,
+                evidence_id: trace.as_ref().map(|item| item.evidence_id.clone()),
+                summary: protocol
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| "external solver reported pass".to_string()),
+            },
             explored_states: 0,
             explored_transitions: trace.as_ref().map(|item| item.steps.len()).unwrap_or(0),
             trace: trace.clone(),
@@ -647,7 +647,9 @@ fn parse_assurance_level(value: &str) -> Result<AssuranceLevel, String> {
 fn parse_unknown_reason(value: &str) -> Result<UnknownReason, String> {
     match value {
         "UNKNOWN_ENGINE_ABORTED" | "ENGINE_ABORTED" => Ok(UnknownReason::EngineAborted),
-        "UNKNOWN_STATE_LIMIT_REACHED" | "STATE_LIMIT_REACHED" => Ok(UnknownReason::StateLimitReached),
+        "UNKNOWN_STATE_LIMIT_REACHED" | "STATE_LIMIT_REACHED" => {
+            Ok(UnknownReason::StateLimitReached)
+        }
         "UNKNOWN_DEPTH_LIMIT_REACHED" | "DEPTH_LIMIT_REACHED" => Ok(UnknownReason::EngineAborted),
         "UNKNOWN_TIME_LIMIT_REACHED" | "TIME_LIMIT_REACHED" => Ok(UnknownReason::TimeLimitReached),
         other => Err(format!("unsupported UNKNOWN_REASON `{other}`")),
@@ -731,12 +733,18 @@ mod tests {
         let crate::engine::CheckOutcome::Completed(result) = normalized.outcome else {
             panic!("expected completed outcome");
         };
-        assert_eq!(result.assurance_level, crate::engine::AssuranceLevel::Bounded);
+        assert_eq!(
+            result.assurance_level,
+            crate::engine::AssuranceLevel::Bounded
+        );
         assert_eq!(
             result.property_result.reason_code.as_deref(),
             Some("SOLVER_REPORTED_UNKNOWN")
         );
-        assert_eq!(result.property_result.unknown_reason, Some(UnknownReason::TimeLimitReached));
+        assert_eq!(
+            result.property_result.unknown_reason,
+            Some(UnknownReason::TimeLimitReached)
+        );
         assert!(result.property_result.summary.contains("command"));
     }
 }

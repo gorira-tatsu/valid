@@ -82,5 +82,8 @@ fn main() {
     println!("summary: {}", explanation.summary);
     println!("repair hints: {:?}", explanation.repair_hints);
     println!("coverage allow_count: {}", coverage.allow_count);
-    println!("coverage explicit_deny_count: {}", coverage.explicit_deny_count);
+    println!(
+        "coverage explicit_deny_count: {}",
+        coverage.explicit_deny_count
+    );
 }

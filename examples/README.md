@@ -1,18 +1,36 @@
 # Example Models
 
-This directory contains reproducible `.valid` models that show the current
-implementation boundary.
+This directory contains runnable examples that show the current implementation
+boundary.
 
-These fixtures are a temporary compatibility harness. The intended primary
-modeling path is Rust-native (`Finite` + `VerifiedMachine`), not a project-
-specific DSL.
+The intended primary modeling path is Rust-native, not a project-specific DSL.
 
-Rust-native authorization example:
+## Rust-native examples
 
 - `iam_like_authz.rs`
   - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented
-    authorization reasoning without `.valid`
+    authorization reasoning
   - decision trace, explanation, and authorization coverage
+- `iam_policy_diff.rs`
+  - policy change verification
+  - finds concrete requests that became newly allowed after a policy edit
+- `train_fare.rs`
+  - train fare calculation with realistic business rules
+  - explanation, rule coverage, and invariant checks around child fare, day
+    pass behavior, and monotonic distance pricing
+
+Run them with:
+
+```sh
+cargo run --example iam_like_authz
+cargo run --example iam_policy_diff
+cargo run --example train_fare
+```
+
+## Legacy compatibility fixtures
+
+These `.valid` files remain as a temporary compatibility harness while the
+Rust-native path becomes the primary route.
 
 ## Models
 
@@ -41,6 +59,8 @@ cargo run -- coverage examples/models/failing_counter.valid --json
 cargo run -- orchestrate examples/models/multi_property.valid --json
 cargo run -- inspect examples/models/safe_counter.valid --json
 cargo run --example iam_like_authz
+cargo run --example iam_policy_diff
+cargo run --example train_fare
 ```
 
 ## Current capability boundary

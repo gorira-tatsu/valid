@@ -392,10 +392,17 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 .collect::<Vec<_>>();
             let action_metadata = compiled_model.as_ref().and_then(|model| {
                 failure_step.action_id.as_ref().and_then(|action_id| {
-                    model.actions
+                    model
+                        .actions
                         .iter()
                         .find(|action| &action.action_id == action_id)
-                        .map(|action| (action.action_id.clone(), action.reads.clone(), action.writes.clone()))
+                        .map(|action| {
+                            (
+                                action.action_id.clone(),
+                                action.reads.clone(),
+                                action.writes.clone(),
+                            )
+                        })
                 })
             });
             let coverage_report = compiled_model
@@ -452,8 +459,11 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         ),
                     });
                     if let Some(report) = &coverage_report {
-                        let execution_count =
-                            report.action_execution_counts.get(action_id).copied().unwrap_or(0);
+                        let execution_count = report
+                            .action_execution_counts
+                            .get(action_id)
+                            .copied()
+                            .unwrap_or(0);
                         if execution_count <= 1 {
                             causes.push(ExplainCandidateCause {
                                 kind: "rare_action_path".to_string(),

@@ -45,10 +45,7 @@ pub struct RequestContext {
 
 impl Finite for RequestContext {
     fn all() -> Vec<Self> {
-        vec![
-            Self { mfa_present: false },
-            Self { mfa_present: true },
-        ]
+        vec![Self { mfa_present: false }, Self { mfa_present: true }]
     }
 }
 
@@ -139,6 +136,14 @@ pub struct AuthorizationCoverageReport {
     pub domain_block_counts: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizationDelta<P, A, R> {
+    pub request: AuthorizationRequest<P, A, R>,
+    pub before: AuthorizationDecision,
+    pub after: AuthorizationDecision,
+    pub summary: String,
+}
+
 pub fn evaluate_request<P, A, R>(
     policies: &PolicySet<P, A, R>,
     request: &AuthorizationRequest<P, A, R>,
@@ -192,7 +197,10 @@ where
     let scp_allow = domain_allows(&policies.statements, &applicable, PolicyDomain::Scp);
 
     let mut domain_map = BTreeMap::new();
-    domain_map.insert("identity_or_resource".to_string(), identity_or_resource_allow);
+    domain_map.insert(
+        "identity_or_resource".to_string(),
+        identity_or_resource_allow,
+    );
     domain_map.insert("boundary".to_string(), boundary_allow);
     domain_map.insert("session".to_string(), session_allow);
     domain_map.insert("scp".to_string(), scp_allow);
@@ -303,7 +311,9 @@ fn domain_allows<P, A, R>(
     applicable: &[&PolicyStatement<P, A, R>],
     domain: PolicyDomain,
 ) -> bool {
-    let domain_defined = all_statements.iter().any(|statement| statement.domain == domain);
+    let domain_defined = all_statements
+        .iter()
+        .any(|statement| statement.domain == domain);
     let domain_policies = applicable
         .iter()
         .copied()
@@ -441,12 +451,43 @@ where
     }
 }
 
+pub fn find_newly_allowed_requests<P, A, R>(
+    before: &PolicySet<P, A, R>,
+    after: &PolicySet<P, A, R>,
+) -> Vec<AuthorizationDelta<P, A, R>>
+where
+    P: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+    A: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+    R: Clone + Debug + Eq + Hash + Finite + Ord + PartialEq,
+{
+    enumerate_requests::<P, A, R>()
+        .into_iter()
+        .filter_map(|request| {
+            let before_trace = evaluate_request(before, &request);
+            let after_trace = evaluate_request(after, &request);
+            if before_trace.decision != AuthorizationDecision::Allow
+                && after_trace.decision == AuthorizationDecision::Allow
+            {
+                Some(AuthorizationDelta {
+                    request,
+                    before: before_trace.decision,
+                    after: after_trace.decision,
+                    summary: "request became newly allowed after the policy change".to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_authorization_coverage, evaluate_request, explain_request, verify_never_allows,
-        AuthorizationDecision, AuthorizationRequest, Matcher, PolicyCondition, PolicyDomain,
-        PolicyEffect, PolicySet, PolicyStatement, RequestContext,
+        collect_authorization_coverage, evaluate_request, explain_request,
+        find_newly_allowed_requests, verify_never_allows, AuthorizationDecision,
+        AuthorizationRequest, Matcher, PolicyCondition, PolicyDomain, PolicyEffect, PolicySet,
+        PolicyStatement, RequestContext,
     };
     use crate::native::Finite;
 
@@ -486,7 +527,11 @@ mod tests {
         }
     }
 
-    fn request(principal: Principal, action: Action, resource: Resource) -> AuthorizationRequest<Principal, Action, Resource> {
+    fn request(
+        principal: Principal,
+        action: Action,
+        resource: Resource,
+    ) -> AuthorizationRequest<Principal, Action, Resource> {
         AuthorizationRequest {
             principal,
             action,
@@ -520,7 +565,10 @@ mod tests {
             ],
         };
 
-        let trace = evaluate_request(&policies, &request(Principal::Alice, Action::Read, Resource::Billing));
+        let trace = evaluate_request(
+            &policies,
+            &request(Principal::Alice, Action::Read, Resource::Billing),
+        );
         assert_eq!(trace.decision, AuthorizationDecision::ExplicitDeny);
         assert_eq!(trace.denying_policy_ids, vec!["deny-read".to_string()]);
     }
@@ -550,7 +598,10 @@ mod tests {
             ],
         };
 
-        let trace = evaluate_request(&policies, &request(Principal::Alice, Action::Write, Resource::Billing));
+        let trace = evaluate_request(
+            &policies,
+            &request(Principal::Alice, Action::Write, Resource::Billing),
+        );
         assert_eq!(trace.decision, AuthorizationDecision::ImplicitDeny);
         assert_eq!(trace.domain_allows.get("boundary"), Some(&false));
     }
@@ -569,7 +620,10 @@ mod tests {
             }],
         };
 
-        let trace = evaluate_request(&policies, &request(Principal::Bob, Action::Read, Resource::Logs));
+        let trace = evaluate_request(
+            &policies,
+            &request(Principal::Bob, Action::Read, Resource::Logs),
+        );
         assert_eq!(trace.decision, AuthorizationDecision::Allow);
     }
 
@@ -680,9 +734,7 @@ mod tests {
         );
 
         assert_eq!(explanation.decision, AuthorizationDecision::ImplicitDeny);
-        assert!(explanation
-            .failed_domains
-            .contains(&"boundary".to_string()));
+        assert!(explanation.failed_domains.contains(&"boundary".to_string()));
         assert!(explanation
             .failed_conditions
             .contains(&"allow-write-with-mfa".to_string()));
@@ -725,16 +777,40 @@ mod tests {
 
         let report = collect_authorization_coverage(&policies);
         assert!(report.total_requests > 0);
-        assert!(report
-            .matched_policy_ids
-            .contains("allow-read"));
-        assert!(report
-            .matched_policy_ids
-            .contains("scp-deny-write"));
+        assert!(report.matched_policy_ids.contains("allow-read"));
+        assert!(report.matched_policy_ids.contains("scp-deny-write"));
         assert!(report
             .matched_policy_ids
             .contains("allow-logs-write-with-mfa"));
         assert_eq!(report.unmatched_policy_ids.len(), 0);
         assert!(report.explicit_deny_count > 0);
+    }
+
+    #[test]
+    fn policy_diff_finds_newly_allowed_requests() {
+        let before = PolicySet { statements: vec![] };
+        let after = PolicySet {
+            statements: vec![PolicyStatement {
+                id: "allow-alice-logs-read".to_string(),
+                domain: PolicyDomain::Identity,
+                effect: PolicyEffect::Allow,
+                principal: Matcher::Exact(Principal::Alice),
+                action: Matcher::Exact(Action::Read),
+                resource: Matcher::Exact(Resource::Logs),
+                condition: None,
+            }],
+        };
+
+        let deltas = find_newly_allowed_requests(&before, &after);
+        assert_eq!(deltas.len(), 2);
+        assert!(deltas.iter().any(|delta| {
+            delta.request.principal == Principal::Alice
+                && delta.request.action == Action::Read
+                && delta.request.resource == Resource::Logs
+                && !delta.request.context.mfa_present
+        }));
+        assert!(deltas
+            .iter()
+            .all(|delta| delta.after == AuthorizationDecision::Allow));
     }
 }

@@ -145,7 +145,12 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
         let single = synthetic_trace_from_states(
             model,
             property_id,
-            &[(&initial, first_action.action_id.as_str(), first_action.label.as_str(), &first_state)],
+            &[(
+                &initial,
+                first_action.action_id.as_str(),
+                first_action.label.as_str(),
+                &first_state,
+            )],
         );
         if let Some(vector) = single
             .as_ref()
@@ -172,7 +177,12 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
                 model,
                 property_id,
                 &[
-                    (&initial, first_action.action_id.as_str(), first_action.label.as_str(), &first_state),
+                    (
+                        &initial,
+                        first_action.action_id.as_str(),
+                        first_action.label.as_str(),
+                        &first_state,
+                    ),
                     (
                         &first_state,
                         second_action.action_id.as_str(),
@@ -216,35 +226,41 @@ fn synthetic_trace_from_states(
     let steps = transitions
         .iter()
         .enumerate()
-        .map(|(index, (before, action_id, action_label, after))| crate::evidence::TraceStep {
-            index,
-            from_state_id: if index == 0 {
-                "s-init".to_string()
-            } else {
-                format!("s-{index}")
+        .map(
+            |(index, (before, action_id, action_label, after))| crate::evidence::TraceStep {
+                index,
+                from_state_id: if index == 0 {
+                    "s-init".to_string()
+                } else {
+                    format!("s-{index}")
+                },
+                action_id: Some((*action_id).to_string()),
+                action_label: Some((*action_label).to_string()),
+                to_state_id: format!("s-{}", index + 1),
+                depth: (index + 1) as u32,
+                state_before: model
+                    .state_fields
+                    .iter()
+                    .enumerate()
+                    .map(|(field_index, field)| {
+                        (field.name.clone(), before.values[field_index].clone())
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+                state_after: model
+                    .state_fields
+                    .iter()
+                    .enumerate()
+                    .map(|(field_index, field)| {
+                        (field.name.clone(), after.values[field_index].clone())
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+                note: Some(if transitions.len() == 1 {
+                    "synthetic witness from initial state".to_string()
+                } else {
+                    "synthetic witness sequence".to_string()
+                }),
             },
-            action_id: Some((*action_id).to_string()),
-            action_label: Some((*action_label).to_string()),
-            to_state_id: format!("s-{}", index + 1),
-            depth: (index + 1) as u32,
-            state_before: model
-                .state_fields
-                .iter()
-                .enumerate()
-                .map(|(field_index, field)| (field.name.clone(), before.values[field_index].clone()))
-                .collect::<BTreeMap<_, _>>(),
-            state_after: model
-                .state_fields
-                .iter()
-                .enumerate()
-                .map(|(field_index, field)| (field.name.clone(), after.values[field_index].clone()))
-                .collect::<BTreeMap<_, _>>(),
-            note: Some(if transitions.len() == 1 {
-                "synthetic witness from initial state".to_string()
-            } else {
-                "synthetic witness sequence".to_string()
-            }),
-        })
+        )
         .collect::<Vec<_>>();
 
     let action_signature = transitions

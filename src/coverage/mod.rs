@@ -86,7 +86,9 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 .or_insert(step.depth);
             if let Some(action_id) = &step.action_id {
                 covered_actions.insert(action_id.clone());
-                *action_execution_counts.entry(action_id.clone()).or_insert(0) += 1;
+                *action_execution_counts
+                    .entry(action_id.clone())
+                    .or_insert(0) += 1;
             }
 
             if let Some(state) = machine_state_from_snapshot(model, &step.state_before) {
@@ -94,11 +96,15 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                     match evaluate_guard(model, &state, action) {
                         Ok(true) => {
                             guard_true_actions.insert(action.action_id.clone());
-                            *guard_true_counts.entry(action.action_id.clone()).or_insert(0) += 1;
+                            *guard_true_counts
+                                .entry(action.action_id.clone())
+                                .or_insert(0) += 1;
                         }
                         Ok(false) => {
                             guard_false_actions.insert(action.action_id.clone());
-                            *guard_false_counts.entry(action.action_id.clone()).or_insert(0) += 1;
+                            *guard_false_counts
+                                .entry(action.action_id.clone())
+                                .or_insert(0) += 1;
                         }
                         Err(_) => {}
                     }
@@ -207,7 +213,11 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             "{{\"action_id\":\"{}\",\"covered\":{},\"count\":{}}}",
             action,
             report.covered_actions.contains(action),
-            report.action_execution_counts.get(action).copied().unwrap_or(0)
+            report
+                .action_execution_counts
+                .get(action)
+                .copied()
+                .unwrap_or(0)
         ));
     }
     out.push(']');
@@ -460,7 +470,10 @@ mod tests {
         assert_eq!(report.guard_true_counts.get("A_INC"), Some(&1));
         assert_eq!(report.depth_histogram.get(&0), Some(&1));
         assert_eq!(report.depth_histogram.get(&1), Some(&1));
-        assert_eq!(evaluate_coverage_gate(&report, 60).status, CoverageGateStatus::Fail);
+        assert_eq!(
+            evaluate_coverage_gate(&report, 60).status,
+            CoverageGateStatus::Fail
+        );
         let json = render_coverage_json(&report);
         assert!(json.contains("\"summary\""));
         validate_rendered_coverage_json(&json).unwrap();

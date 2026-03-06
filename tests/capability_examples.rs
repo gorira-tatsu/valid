@@ -187,3 +187,21 @@ fn cli_command_backend_demo_script_normalizes_failures() {
     assert!(stdout.contains("MOCK_SOLVER_COUNTEREXAMPLE"));
     assert!(stdout.contains("\"status\":\"FAIL\""));
 }
+
+#[test]
+fn rust_native_examples_run_successfully() {
+    for example in ["iam_like_authz", "iam_policy_diff", "train_fare"] {
+        let output = Command::new("cargo")
+            .arg("run")
+            .arg("--example")
+            .arg(example)
+            .output()
+            .expect("example should run");
+        assert!(
+            output.status.success(),
+            "example {} failed: {}",
+            example,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
