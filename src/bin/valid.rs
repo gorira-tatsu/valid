@@ -3,10 +3,12 @@ use std::{env, fs, process};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_capabilities_request, validate_check_request,
-        validate_inspect_request, validate_orchestrate_request, validate_testgen_request,
-        CapabilitiesRequest, CapabilitiesResponse, CheckRequest, InspectRequest, MinimizeRequest,
-        OrchestrateRequest, TestgenRequest,
+        orchestrate_source, testgen_source, validate_capabilities_request,
+        validate_capabilities_response, validate_check_request, validate_explain_response,
+        validate_inspect_request, validate_inspect_response, validate_minimize_response,
+        validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
+        validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
+        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
@@ -108,6 +110,10 @@ fn cmd_explain(args: Vec<String>) {
         solver_args: parsed.solver_args,
     }) {
         Ok(response) => {
+            if let Err(message) = validate_explain_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             if parsed.json {
                 println!(
                     "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"involved_fields\":[{}],\"candidate_causes\":[{}],\"repair_hints\":[{}],\"confidence\":{},\"best_practices\":[{}]}}",
@@ -160,6 +166,10 @@ fn cmd_minimize(args: Vec<String>) {
         solver_args: parsed.solver_args,
     }) {
         Ok(response) => {
+            if let Err(message) = validate_minimize_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             if parsed.json {
                 println!(
                     "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"original_steps\":{},\"minimized_steps\":{},\"vector_id\":\"{}\"}}",
@@ -201,6 +211,10 @@ fn cmd_inspect(args: Vec<String>) {
     }
     match inspect_source(&request) {
         Ok(response) => {
+            if let Err(message) = validate_inspect_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             if parsed.json {
                 println!("{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"state_fields\":[{}],\"actions\":[{}],\"properties\":[{}]}}",
                     response.schema_version,
@@ -247,6 +261,10 @@ fn cmd_capabilities(args: Vec<String>) {
     }
     match capabilities_response(&request) {
         Ok(response) => {
+            if let Err(message) = validate_capabilities_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             if parsed.json {
                 print_capabilities_json(&response);
             } else {
@@ -359,6 +377,10 @@ fn cmd_testgen(args: Vec<String>) {
     }
     match testgen_source(&request) {
         Ok(response) => {
+            if let Err(message) = validate_testgen_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             let outcome = check_source(&CheckRequest {
                 request_id: request.request_id.clone(),
                 source_name: request.source_name.clone(),
@@ -498,6 +520,10 @@ fn cmd_orchestrate(args: Vec<String>) {
     }
     match orchestrate_source(&request) {
         Ok(response) => {
+            if let Err(message) = validate_orchestrate_response(&response) {
+                eprintln!("{message}");
+                process::exit(3);
+            }
             if parsed.json {
                 let body = response
                     .runs
