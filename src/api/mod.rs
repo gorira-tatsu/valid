@@ -2,6 +2,7 @@
 
 use crate::{
     contract::snapshot_model,
+    coverage::collect_coverage,
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
@@ -384,6 +385,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         .map(|action| (action.action_id.clone(), action.reads.clone(), action.writes.clone()))
                 })
             });
+            let coverage_report = compiled_model
+                .as_ref()
+                .map(|model| collect_coverage(model, std::slice::from_ref(&trace)));
             let write_overlap = action_metadata
                 .as_ref()
                 .map(|(_, _, writes)| {
@@ -434,6 +438,31 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                             failure_step.index,
                         ),
                     });
+                    if let Some(report) = &coverage_report {
+                        let execution_count =
+                            report.action_execution_counts.get(action_id).copied().unwrap_or(0);
+                        if execution_count <= 1 {
+                            causes.push(ExplainCandidateCause {
+                                kind: "rare_action_path".to_string(),
+                                message: format!(
+                                    "action {action_id} was executed only {} time in the available witness/trace set",
+                                    execution_count
+                                ),
+                            });
+                        }
+                        if let Some(uncovered) = report
+                            .uncovered_guards
+                            .iter()
+                            .find(|entry| entry.starts_with(&format!("{action_id}:")))
+                        {
+                            causes.push(ExplainCandidateCause {
+                                kind: "guard_polarity_gap".to_string(),
+                                message: format!(
+                                    "guard coverage for action {action_id} is incomplete: {uncovered}"
+                                ),
+                            });
+                        }
+                    }
                 }
                 causes.extend(involved_fields.iter().map(|field| ExplainCandidateCause {
                     kind: "field_flip".to_string(),
@@ -456,6 +485,17 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     write_overlap.join(", ")
                 ));
             }
+            if let (Some(report), Some(action_id)) = (&coverage_report, &failure_step.action_id) {
+                if report
+                    .uncovered_guards
+                    .iter()
+                    .any(|entry| entry.starts_with(&format!("{action_id}:")))
+                {
+                    repair_hints.push(format!(
+                        "add witness coverage for both guard outcomes of action {action_id}"
+                    ));
+                }
+            }
             let mut confidence = 0.45f32;
             if failure_step.action_id.is_some() {
                 confidence += 0.1;
@@ -465,6 +505,15 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             }
             if !write_overlap.is_empty() {
                 confidence += 0.2;
+            }
+            if let (Some(report), Some(action_id)) = (&coverage_report, &failure_step.action_id) {
+                if report
+                    .uncovered_guards
+                    .iter()
+                    .any(|entry| entry.starts_with(&format!("{action_id}:")))
+                {
+                    confidence += 0.1;
+                }
             }
             if trace.steps.len() == 1 {
                 confidence += 0.1;
@@ -834,8 +883,20 @@ mod tests {
         assert!(response
             .candidate_causes
             .iter()
+            .any(|cause| cause.kind == "rare_action_path"));
+        assert!(response
+            .candidate_causes
+            .iter()
+            .any(|cause| cause.kind == "guard_polarity_gap"));
+        assert!(response
+            .candidate_causes
+            .iter()
             .any(|cause| cause.kind == "action_write_set"));
         assert!(response.confidence >= 0.8);
+        assert!(response
+            .repair_hints
+            .iter()
+            .any(|hint| hint.contains("both guard outcomes")));
         validate_explain_response(&response).unwrap();
     }
 

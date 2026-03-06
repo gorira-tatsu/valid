@@ -196,13 +196,22 @@
     {
       "kind": "action_write_set",
       "message": "review writes [bad] and reads [bad] of action A_MARK_BAD at failing step 1"
+    },
+    {
+      "kind": "rare_action_path",
+      "message": "action A_MARK_BAD was executed only 1 time in the available witness/trace set"
+    },
+    {
+      "kind": "guard_polarity_gap",
+      "message": "guard coverage for action A_MARK_BAD is incomplete: A_MARK_BAD:false"
     }
   ],
   "repair_hints": [
     "review guard of action A_MARK_BAD",
     "verify invariant P_NO_BAD is intended",
     "inspect the postcondition or implementation of action A_MARK_BAD",
-    "check whether writes [bad] should be narrowed or guarded"
+    "check whether writes [bad] should be narrowed or guarded",
+    "add witness coverage for both guard outcomes of action A_MARK_BAD"
   ],
   "best_practices": [
     "keep write sets explicit so involved fields stay explainable",
