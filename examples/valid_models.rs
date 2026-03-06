@@ -19,8 +19,7 @@ valid_actions! {
 }
 
 valid_model! {
-    model CounterModel<State, Action>;
-    property P_RANGE;
+    model CounterModel;
     init [State {
         x: 0,
         locked: false,
@@ -42,12 +41,14 @@ valid_model! {
             _ => Vec::new(),
         }
     }
-    invariant |state| state.x <= 3;
+    properties {
+        invariant P_RANGE |state| state.x <= 3;
+        invariant P_LOCKED_RANGE |state| !state.locked || state.x <= 3;
+    }
 }
 
 valid_model! {
-    model FailingCounterModel<State, Action>;
-    property P_FAIL;
+    model FailingCounterModel;
     init [State {
         x: 0,
         locked: false,
@@ -69,7 +70,9 @@ valid_model! {
             _ => Vec::new(),
         }
     }
-    invariant |state| state.x <= 1;
+    properties {
+        invariant P_FAIL |state| state.x <= 1;
+    }
 }
 
 fn main() {

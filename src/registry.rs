@@ -5,8 +5,9 @@ use crate::{
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
     modeling::{
-        build_machine_test_vectors, check_machine_outcome, collect_machine_coverage,
-        explain_machine, Finite, ModelingAction, ModelingState, VerifiedMachine,
+        build_machine_test_vectors, check_machine_outcome, check_machine_outcomes,
+        collect_machine_coverage, explain_machine, property_ids, Finite, ModelingAction,
+        ModelingState, VerifiedMachine,
     },
 };
 
@@ -25,11 +26,7 @@ pub struct RegisteredModel {
 }
 
 impl RegisteredModel {
-    pub fn for_machine<M: VerifiedMachine>(name: &'static str) -> Self
-    where
-        M::Action: Finite + ModelingAction,
-        M::State: ModelingState,
-    {
+    pub fn for_machine<M: VerifiedMachine>(name: &'static str) -> Self {
         Self {
             name,
             inspect: inspect_machine::<M>,
@@ -233,9 +230,6 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
 }
 
 fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse
-where
-    M::Action: Finite + ModelingAction,
-    M::State: ModelingState,
 {
     let state_fields = M::init_states()
         .first()
@@ -252,7 +246,10 @@ where
         model_id: M::model_id().to_string(),
         state_fields,
         actions,
-        properties: vec![M::property_id().to_string()],
+        properties: property_ids::<M>()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     }
 }
 
@@ -261,42 +258,26 @@ fn check_machine<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
 }
 
 fn explain_machine_entry<M: VerifiedMachine>(request_id: &str) -> Result<ExplainResponse, String>
-where
-    M::Action: Finite + ModelingAction,
-    M::State: ModelingState,
 {
     explain_machine::<M>(request_id)
 }
 
-fn coverage_machine<M: VerifiedMachine>() -> CoverageReport
-where
-    M::Action: Finite + ModelingAction,
-    M::State: ModelingState,
-{
+fn coverage_machine<M: VerifiedMachine>() -> CoverageReport {
     collect_machine_coverage::<M>()
 }
 
-fn orchestrate_machine<M: VerifiedMachine>(request_id: &str) -> OrchestrateResponse
-where
-    M::Action: Finite + ModelingAction,
-    M::State: ModelingState,
-{
-    let outcome = check_machine_outcome::<M>(request_id);
+fn orchestrate_machine<M: VerifiedMachine>(request_id: &str) -> OrchestrateResponse {
+    let outcomes = check_machine_outcomes::<M>(request_id);
     let coverage = collect_machine_coverage::<M>();
-    let runs = match outcome {
-        CheckOutcome::Completed(result) => vec![OrchestratedRunSummary {
+    let runs = outcomes
+        .into_iter()
+        .map(|result| OrchestratedRunSummary {
             property_id: result.property_result.property_id,
             status: format!("{:?}", result.status),
             assurance_level: format!("{:?}", result.assurance_level),
             run_id: result.manifest.run_id,
-        }],
-        CheckOutcome::Errored(error) => vec![OrchestratedRunSummary {
-            property_id: "unknown".to_string(),
-            status: "ERROR".to_string(),
-            assurance_level: format!("{:?}", error.assurance_level),
-            run_id: error.manifest.run_id,
-        }],
-    };
+        })
+        .collect();
     OrchestrateResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
@@ -305,11 +286,7 @@ where
     }
 }
 
-fn testgen_machine<M: VerifiedMachine>(request_id: &str) -> TestgenResponse
-where
-    M::Action: Finite + ModelingAction,
-    M::State: ModelingState,
-{
+fn testgen_machine<M: VerifiedMachine>(request_id: &str) -> TestgenResponse {
     let vectors = build_machine_test_vectors::<M>();
     TestgenResponse {
         schema_version: "1.0.0".to_string(),

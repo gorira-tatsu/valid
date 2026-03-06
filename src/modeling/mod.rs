@@ -97,15 +97,80 @@ pub trait ModelingAction: Clone + Debug + Eq + Hash + Finite {
     }
 }
 
-pub trait VerifiedMachine {
-    type State: ModelingState;
-    type Action: ModelingAction;
+pub trait StateSpec: ModelingState {}
+
+impl<T> StateSpec for T where T: ModelingState {}
+
+pub trait ActionSpec: ModelingAction {}
+
+impl<T> ActionSpec for T where T: ModelingAction {}
+
+#[derive(Clone)]
+pub struct ModelProperty<S> {
+    pub property_id: &'static str,
+    pub property_kind: crate::ir::PropertyKind,
+    pub holds: fn(&S) -> bool,
+}
+
+impl<S> ModelProperty<S> {
+    pub fn invariant(property_id: &'static str, holds: fn(&S) -> bool) -> Self {
+        Self {
+            property_id,
+            property_kind: crate::ir::PropertyKind::Invariant,
+            holds,
+        }
+    }
+}
+
+pub trait ModelSpec {
+    type State: StateSpec;
+    type Action: ActionSpec;
 
     fn model_id() -> &'static str;
-    fn property_id() -> &'static str;
     fn init_states() -> Vec<Self::State>;
     fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State>;
-    fn holds(state: &Self::State) -> bool;
+    fn properties() -> Vec<ModelProperty<Self::State>>;
+
+    fn observe(state: &Self::State) -> BTreeMap<String, Value> {
+        state.snapshot()
+    }
+
+    fn enabled_actions(state: &Self::State) -> Vec<Self::Action> {
+        Self::Action::all()
+            .into_iter()
+            .filter(|action| !Self::step(state, action).is_empty())
+            .collect()
+    }
+}
+
+pub trait VerifiedMachine: ModelSpec {}
+
+impl<T> VerifiedMachine for T where T: ModelSpec {}
+
+fn primary_property<M: ModelSpec>() -> ModelProperty<M::State> {
+    M::properties()
+        .into_iter()
+        .next()
+        .expect("ModelSpec::properties must return at least one property")
+}
+
+fn find_property<M: ModelSpec>(property_id: &str) -> ModelProperty<M::State> {
+    M::properties()
+        .into_iter()
+        .find(|property| property.property_id == property_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "unknown property `{property_id}` for model `{}`",
+                M::model_id()
+            )
+        })
+}
+
+pub fn property_ids<M: ModelSpec>() -> Vec<&'static str> {
+    M::properties()
+        .into_iter()
+        .map(|property| property.property_id)
+        .collect()
 }
 
 #[macro_export]
@@ -166,24 +231,38 @@ macro_rules! valid_actions {
 #[macro_export]
 macro_rules! valid_model {
     (
-        model $model:ident<$state_ty:ty, $action_ty:ty>;
-        property $property:ident;
+        model $model:ident;
         init [$($init_state:expr),* $(,)?];
         step |$state:ident, $action:ident| $step_body:block
-        invariant |$holds_state:ident| $holds_expr:expr;
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        $crate::valid_model! {
+            model $model<State, Action>;
+            init [$($init_state),*];
+            step |$state, $action| $step_body
+            properties {
+                $(invariant $property |$holds_state| $holds_expr;)+
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        step |$state:ident, $action:ident| $step_body:block
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
     ) => {
         struct $model;
 
-        impl $crate::modeling::VerifiedMachine for $model {
+        impl $crate::modeling::ModelSpec for $model {
             type State = $state_ty;
             type Action = $action_ty;
 
             fn model_id() -> &'static str {
                 stringify!($model)
-            }
-
-            fn property_id() -> &'static str {
-                stringify!($property)
             }
 
             fn init_states() -> Vec<Self::State> {
@@ -192,8 +271,31 @@ macro_rules! valid_model {
 
             fn step($state: &Self::State, $action: &Self::Action) -> Vec<Self::State> $step_body
 
-            fn holds($holds_state: &Self::State) -> bool {
-                $holds_expr
+            fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
+                vec![
+                    $(
+                        $crate::modeling::ModelProperty::invariant(
+                            stringify!($property),
+                            |$holds_state: &Self::State| $holds_expr,
+                        )
+                    ),+
+                ]
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        property $property:ident;
+        init [$($init_state:expr),* $(,)?];
+        step |$state:ident, $action:ident| $step_body:block
+        invariant |$holds_state:ident| $holds_expr:expr;
+    ) => {
+        $crate::valid_model! {
+            model $model<$state_ty, $action_ty>;
+            init [$($init_state),*];
+            step |$state, $action| $step_body
+            properties {
+                invariant $property |$holds_state| $holds_expr;
             }
         }
     };
@@ -217,11 +319,19 @@ struct ModelingEdge<S, A> {
 }
 
 pub fn check_machine<M: VerifiedMachine>() -> ModelingCheckResult<M::State, M::Action> {
-    let exploration = explore_machine::<M>();
+    let property = primary_property::<M>();
+    check_machine_property::<M>(property.property_id)
+}
+
+pub fn check_machine_property<M: VerifiedMachine>(
+    property_id: &str,
+) -> ModelingCheckResult<M::State, M::Action> {
+    let property = find_property::<M>(property_id);
+    let exploration = explore_machine::<M>(property.holds);
     if let Some(failure_index) = exploration.failure_index {
         return ModelingCheckResult {
             model_id: M::model_id(),
-            property_id: M::property_id(),
+            property_id: property.property_id,
             status: ModelingRunStatus::Fail,
             explored_states: exploration.visited_states,
             explored_transitions: exploration.explored_transitions,
@@ -230,7 +340,7 @@ pub fn check_machine<M: VerifiedMachine>() -> ModelingCheckResult<M::State, M::A
     }
     ModelingCheckResult {
         model_id: M::model_id(),
-        property_id: M::property_id(),
+        property_id: property.property_id,
         status: ModelingRunStatus::Pass,
         explored_states: exploration.visited_states,
         explored_transitions: exploration.explored_transitions,
@@ -239,7 +349,7 @@ pub fn check_machine<M: VerifiedMachine>() -> ModelingCheckResult<M::State, M::A
 }
 
 pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
-    let exploration = explore_machine::<M>();
+    let exploration = explore_machine::<M>(primary_property::<M>().holds);
     let total_actions = M::Action::all()
         .into_iter()
         .map(|action| action.action_id())
@@ -436,11 +546,12 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
 }
 
 pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
-    let exploration = explore_machine::<M>();
+    let property = primary_property::<M>();
+    let exploration = explore_machine::<M>(property.holds);
     if let Some(failure_index) = exploration.failure_index {
         let trace = build_evidence_trace::<M>(
             "req-modeling",
-            &modeling_result_from_failure::<M>(&exploration, failure_index),
+            &modeling_result_from_failure::<M>(&exploration, failure_index, property.property_id),
         );
         return build_counterexample_vector(&trace)
             .map(|vector| vec![vector])
@@ -471,7 +582,7 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
                 }],
                 initial_state: Some(edge.state_before.snapshot()),
                 expected_states: vec![format!("{:?}", edge.state_after.snapshot())],
-                property_id: M::property_id().to_string(),
+                property_id: property.property_id.to_string(),
                 minimized: false,
             });
         }
@@ -480,14 +591,22 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
 }
 
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
-    let result = check_machine::<M>();
+    let property = primary_property::<M>();
+    check_machine_outcome_for_property::<M>(request_id, property.property_id)
+}
+
+pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
+    request_id: &str,
+    property_id: &str,
+) -> CheckOutcome {
+    let result = check_machine_property::<M>(property_id);
     let run_id = format!(
         "run-{}",
-        stable_hash_hex(&(request_id.to_string() + M::model_id() + M::property_id()))
+        stable_hash_hex(&(request_id.to_string() + M::model_id() + result.property_id))
             .replace("sha256:", "")
     );
     let source_hash = stable_hash_hex(M::model_id());
-    let contract_hash = stable_hash_hex(&(M::model_id().to_string() + M::property_id()));
+    let contract_hash = stable_hash_hex(&(M::model_id().to_string() + result.property_id));
     let manifest = RunManifest {
         request_id: request_id.to_string(),
         run_id: run_id.clone(),
@@ -524,8 +643,8 @@ pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutco
         status,
         assurance_level: AssuranceLevel::Complete,
         property_result: PropertyResult {
-            property_id: M::property_id().to_string(),
-            property_kind: crate::ir::PropertyKind::Invariant,
+            property_id: result.property_id.to_string(),
+            property_kind: find_property::<M>(result.property_id).property_kind,
             status,
             assurance_level: AssuranceLevel::Complete,
             reason_code,
@@ -540,6 +659,16 @@ pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutco
         explored_transitions: result.explored_transitions,
         trace,
     })
+}
+
+pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<ExplicitRunResult> {
+    property_ids::<M>()
+        .into_iter()
+        .filter_map(|property_id| match check_machine_outcome_for_property::<M>(request_id, property_id) {
+            CheckOutcome::Completed(result) => Some(result),
+            CheckOutcome::Errored(_) => None,
+        })
+        .collect()
 }
 
 fn build_trace<M: VerifiedMachine>(
@@ -580,7 +709,9 @@ struct ModelingExploration<S, A> {
     failure_index: Option<usize>,
 }
 
-fn explore_machine<M: VerifiedMachine>() -> ModelingExploration<M::State, M::Action> {
+fn explore_machine<M: VerifiedMachine>(
+    holds: fn(&M::State) -> bool,
+) -> ModelingExploration<M::State, M::Action> {
     let actions = M::Action::all();
     let init_states = M::init_states();
     assert!(
@@ -610,7 +741,7 @@ fn explore_machine<M: VerifiedMachine>() -> ModelingExploration<M::State, M::Act
     let mut failure_index = None;
     while let Some(node_index) = frontier.pop_front() {
         let node = nodes[node_index].clone();
-        if !M::holds(&node.state) {
+        if !holds(&node.state) {
             failure_index = Some(node_index);
             break;
         }
@@ -658,10 +789,11 @@ fn explore_machine<M: VerifiedMachine>() -> ModelingExploration<M::State, M::Act
 fn modeling_result_from_failure<M: VerifiedMachine>(
     exploration: &ModelingExploration<M::State, M::Action>,
     failure_index: usize,
+    property_id: &'static str,
 ) -> ModelingCheckResult<M::State, M::Action> {
     ModelingCheckResult {
         model_id: M::model_id(),
-        property_id: M::property_id(),
+        property_id,
         status: ModelingRunStatus::Fail,
         explored_states: exploration.visited_states,
         explored_transitions: exploration.explored_transitions,
@@ -675,7 +807,7 @@ fn build_evidence_trace<M: VerifiedMachine>(
 ) -> EvidenceTrace {
     let run_id = format!(
         "run-{}",
-        stable_hash_hex(&(request_id.to_string() + M::model_id() + M::property_id()))
+        stable_hash_hex(&(request_id.to_string() + M::model_id() + result.property_id))
             .replace("sha256:", "")
     );
     let evidence_id = format!("ev-{run_id}");
@@ -709,7 +841,7 @@ fn build_evidence_trace<M: VerifiedMachine>(
         schema_version: "1.0.0".to_string(),
         evidence_id,
         run_id,
-        property_id: M::property_id().to_string(),
+        property_id: result.property_id.to_string(),
         evidence_kind: EvidenceKind::Trace,
         assurance_level: AssuranceLevel::Complete,
         trace_hash,
@@ -720,8 +852,8 @@ fn build_evidence_trace<M: VerifiedMachine>(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_machine_test_vectors, check_machine, check_machine_outcome, collect_machine_coverage,
-        explain_machine, ModelingRunStatus,
+        build_machine_test_vectors, check_machine, check_machine_outcome, check_machine_outcomes,
+        collect_machine_coverage, explain_machine, property_ids, ModelingRunStatus,
     };
     use crate::{engine::CheckOutcome, valid_actions, valid_state};
 
@@ -741,8 +873,7 @@ mod tests {
     }
 
     crate::valid_model! {
-        model CounterModel<State, Action>;
-        property P_RANGE;
+        model CounterModel;
         init [State {
             x: 0,
             locked: false,
@@ -764,12 +895,14 @@ mod tests {
                 _ => Vec::new(),
             }
         }
-        invariant |state| state.x <= 3;
+        properties {
+            invariant P_RANGE |state| state.x <= 3;
+            invariant P_LOCKED_RANGE |state| !state.locked || state.x <= 3;
+        }
     }
 
     crate::valid_model! {
-        model FailingCounterModel<State, Action>;
-        property P_FAIL;
+        model FailingCounterModel;
         init [State {
             x: 0,
             locked: false,
@@ -791,7 +924,9 @@ mod tests {
                 _ => Vec::new(),
             }
         }
-        invariant |state| state.x <= 1;
+        properties {
+            invariant P_FAIL |state| state.x <= 1;
+        }
     }
 
     #[test]
@@ -828,6 +963,16 @@ mod tests {
         assert!(report.transition_coverage_percent >= 66);
         assert!(report.visited_state_count >= 4);
         assert!(report.guard_true_counts.contains_key("INC"));
+    }
+
+    #[test]
+    fn modeling_spec_exposes_multiple_properties() {
+        assert_eq!(property_ids::<CounterModel>(), vec!["P_RANGE", "P_LOCKED_RANGE"]);
+        let outcomes = check_machine_outcomes::<CounterModel>("req-modeling-all");
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes
+            .iter()
+            .all(|outcome| outcome.status == crate::engine::RunStatus::Pass));
     }
 
     #[test]

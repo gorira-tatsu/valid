@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     api::{
         ExplainResponse, InspectResponse, OrchestrateResponse, OrchestratedRunSummary,
@@ -7,74 +5,35 @@ use crate::{
     },
     coverage::CoverageReport,
     engine::CheckOutcome,
-    ir::Value,
     modeling::{
-        build_machine_test_vectors, check_machine_outcome, collect_machine_coverage,
-        explain_machine, Finite, ModelingAction, ModelingState, VerifiedMachine,
+        build_machine_test_vectors, check_machine_outcome, check_machine_outcomes,
+        collect_machine_coverage, explain_machine, property_ids, Finite, ModelingAction,
+        ModelingState,
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct State {
-    x: u8,
-    locked: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Action {
-    Inc,
-    Lock,
-    Unlock,
-}
-
-impl Finite for Action {
-    fn all() -> Vec<Self> {
-        vec![Self::Inc, Self::Lock, Self::Unlock]
+crate::valid_state! {
+    struct State {
+        x: u8,
+        locked: bool,
     }
 }
 
-impl ModelingAction for Action {
-    fn action_id(&self) -> String {
-        match self {
-            Action::Inc => "INC".to_string(),
-            Action::Lock => "LOCK".to_string(),
-            Action::Unlock => "UNLOCK".to_string(),
-        }
+crate::valid_actions! {
+    enum Action {
+        Inc => "INC",
+        Lock => "LOCK",
+        Unlock => "UNLOCK",
     }
 }
 
-impl ModelingState for State {
-    fn snapshot(&self) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("x".to_string(), Value::UInt(self.x as u64)),
-            ("locked".to_string(), Value::Bool(self.locked)),
-        ])
-    }
-}
-
-struct CounterModel;
-struct FailingCounterModel;
-
-impl VerifiedMachine for CounterModel {
-    type State = State;
-    type Action = Action;
-
-    fn model_id() -> &'static str {
-        "CounterModel"
-    }
-
-    fn property_id() -> &'static str {
-        "P_RANGE"
-    }
-
-    fn init_states() -> Vec<Self::State> {
-        vec![State {
-            x: 0,
-            locked: false,
-        }]
-    }
-
-    fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
+crate::valid_model! {
+    model CounterModel<State, Action>;
+    init [State {
+        x: 0,
+        locked: false,
+    }];
+    step |state, action| {
         match action {
             Action::Inc if !state.locked && state.x < 3 => vec![State {
                 x: state.x + 1,
@@ -91,34 +50,37 @@ impl VerifiedMachine for CounterModel {
             _ => Vec::new(),
         }
     }
-
-    fn holds(state: &Self::State) -> bool {
-        state.x <= 3
+    properties {
+        invariant P_RANGE |state| state.x <= 3;
+        invariant P_LOCKED_RANGE |state| !state.locked || state.x <= 3;
     }
 }
 
-impl VerifiedMachine for FailingCounterModel {
-    type State = State;
-    type Action = Action;
-
-    fn model_id() -> &'static str {
-        "FailingCounterModel"
+crate::valid_model! {
+    model FailingCounterModel<State, Action>;
+    init [State {
+        x: 0,
+        locked: false,
+    }];
+    step |state, action| {
+        match action {
+            Action::Inc if !state.locked && state.x < 3 => vec![State {
+                x: state.x + 1,
+                locked: state.locked,
+            }],
+            Action::Lock => vec![State {
+                x: state.x,
+                locked: true,
+            }],
+            Action::Unlock => vec![State {
+                x: state.x,
+                locked: false,
+            }],
+            _ => Vec::new(),
+        }
     }
-
-    fn property_id() -> &'static str {
-        "P_FAIL"
-    }
-
-    fn init_states() -> Vec<Self::State> {
-        CounterModel::init_states()
-    }
-
-    fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
-        CounterModel::step(state, action)
-    }
-
-    fn holds(state: &Self::State) -> bool {
-        state.x <= 1
+    properties {
+        invariant P_FAIL |state| state.x <= 1;
     }
 }
 
@@ -194,22 +156,21 @@ pub fn orchestrate_bundled_model(
     request_id: &str,
     model_ref: &str,
 ) -> Result<OrchestrateResponse, String> {
-    let outcome = check_bundled_model(request_id, model_ref)?;
+    let outcomes = match parse_model_ref(model_ref) {
+        Some(BundledModel::Counter) => check_machine_outcomes::<CounterModel>(request_id),
+        Some(BundledModel::FailingCounter) => check_machine_outcomes::<FailingCounterModel>(request_id),
+        None => return Err(format!("unknown bundled rust model `{model_ref}`")),
+    };
     let coverage = coverage_bundled_model(model_ref)?;
-    let runs = match outcome {
-        CheckOutcome::Completed(result) => vec![OrchestratedRunSummary {
+    let runs = outcomes
+        .into_iter()
+        .map(|result| OrchestratedRunSummary {
             property_id: result.property_result.property_id,
             status: format!("{:?}", result.status),
             assurance_level: format!("{:?}", result.assurance_level),
             run_id: result.manifest.run_id,
-        }],
-        CheckOutcome::Errored(error) => vec![OrchestratedRunSummary {
-            property_id: "unknown".to_string(),
-            status: "ERROR".to_string(),
-            assurance_level: format!("{:?}", error.assurance_level),
-            run_id: error.manifest.run_id,
-        }],
-    };
+        })
+        .collect();
     Ok(OrchestrateResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
@@ -218,7 +179,7 @@ pub fn orchestrate_bundled_model(
     })
 }
 
-fn build_inspect_response<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
+fn build_inspect_response<M: crate::modeling::VerifiedMachine>(request_id: &str) -> InspectResponse {
     let state_fields = M::init_states()
         .first()
         .map(|state| state.snapshot().keys().cloned().collect())
@@ -234,7 +195,10 @@ fn build_inspect_response<M: VerifiedMachine>(request_id: &str) -> InspectRespon
         model_id: M::model_id().to_string(),
         state_fields,
         actions,
-        properties: vec![M::property_id().to_string()],
+        properties: property_ids::<M>()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     }
 }
 

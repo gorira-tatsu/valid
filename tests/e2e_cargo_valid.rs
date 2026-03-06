@@ -47,6 +47,7 @@ fn cargo_valid_inspects_registered_model() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"model_id\":\"CounterModel\""));
+    assert!(stdout.contains("\"P_LOCKED_RANGE\""));
 }
 
 #[test]
