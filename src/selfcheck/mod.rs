@@ -16,6 +16,7 @@ use crate::{
     support::{
         artifact::selfcheck_report_path,
         io::write_text_file,
+        json::{parse_json, require_array_field, require_object, require_string_field},
         schema::{require_non_empty, require_schema_version},
     },
 };
@@ -100,6 +101,21 @@ pub fn validate_selfcheck_report(report: &SelfcheckReport) -> Result<(), String>
         if !matches!(case.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
             return Err("case status must be PASS, FAIL, or UNKNOWN".to_string());
         }
+    }
+    Ok(())
+}
+
+pub fn validate_rendered_selfcheck_json(body: &str) -> Result<(), String> {
+    let root = parse_json(body)?;
+    let object = require_object(&root, "selfcheck")?;
+    require_string_field(object, "schema_version")?;
+    require_string_field(object, "suite_id")?;
+    require_string_field(object, "run_id")?;
+    require_string_field(object, "status")?;
+    for case in require_array_field(object, "cases")? {
+        let case_object = require_object(case, "cases[]")?;
+        require_string_field(case_object, "case_id")?;
+        require_string_field(case_object, "status")?;
     }
     Ok(())
 }
@@ -222,8 +238,8 @@ fn selfcheck_model() -> ModelIr {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_selfcheck_json, run_smoke_selfcheck, validate_selfcheck_report,
-        write_selfcheck_artifact,
+        render_selfcheck_json, run_smoke_selfcheck, validate_rendered_selfcheck_json,
+        validate_selfcheck_report, write_selfcheck_artifact,
     };
 
     #[test]
@@ -239,6 +255,7 @@ mod tests {
         let report = run_smoke_selfcheck();
         let json = render_selfcheck_json(&report);
         assert!(json.contains("\"suite_id\":\"selfcheck-smoke\""));
+        validate_rendered_selfcheck_json(&json).unwrap();
         let path = write_selfcheck_artifact(&report).unwrap();
         assert!(path.ends_with("/report.json"));
     }

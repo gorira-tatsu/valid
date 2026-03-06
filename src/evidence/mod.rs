@@ -12,6 +12,10 @@ use crate::{
         artifact::{evidence_path, run_result_path, vector_path},
         diagnostics::Diagnostic,
         io::write_text_file,
+        json::{
+            parse_json, require_array_field, require_number_field, require_object,
+            require_string_field,
+        },
         schema::{require_non_empty, require_schema_version},
     },
 };
@@ -255,6 +259,61 @@ pub fn render_diagnostics_json(diagnostics: &[Diagnostic]) -> String {
     }
     out.push_str("]}");
     out
+}
+
+pub fn validate_rendered_trace_json(body: &str) -> Result<(), String> {
+    let root = parse_json(body)?;
+    let object = require_object(&root, "trace")?;
+    require_string_field(object, "schema_version")?;
+    require_string_field(object, "evidence_id")?;
+    require_string_field(object, "run_id")?;
+    require_string_field(object, "property_id")?;
+    require_string_field(object, "evidence_kind")?;
+    require_string_field(object, "assurance_level")?;
+    require_string_field(object, "trace_hash")?;
+    for step in require_array_field(object, "steps")? {
+        let step_object = require_object(step, "trace.steps[]")?;
+        require_number_field(step_object, "index")?;
+        require_string_field(step_object, "from_state_id")?;
+        require_string_field(step_object, "to_state_id")?;
+        require_number_field(step_object, "depth")?;
+    }
+    Ok(())
+}
+
+pub fn validate_rendered_outcome_json(body: &str) -> Result<(), String> {
+    let root = parse_json(body)?;
+    let object = require_object(&root, "outcome")?;
+    require_string_field(object, "kind")?;
+    require_string_field(object, "model_id")?;
+    let manifest = require_object(
+        object
+            .get("manifest")
+            .ok_or_else(|| "manifest must be present".to_string())?,
+        "manifest",
+    )?;
+    require_string_field(manifest, "request_id")?;
+    require_string_field(manifest, "run_id")?;
+    require_string_field(manifest, "schema_version")?;
+    require_string_field(manifest, "source_hash")?;
+    require_string_field(manifest, "contract_hash")?;
+    require_string_field(manifest, "engine_version")?;
+    require_string_field(manifest, "backend_name")?;
+    require_string_field(manifest, "backend_version")?;
+    require_string_field(object, "assurance_level")?;
+    Ok(())
+}
+
+pub fn validate_rendered_diagnostics_json(body: &str) -> Result<(), String> {
+    let root = parse_json(body)?;
+    let object = require_object(&root, "diagnostics")?;
+    for item in require_array_field(object, "diagnostics")? {
+        let diag = require_object(item, "diagnostics[]")?;
+        require_string_field(diag, "error_code")?;
+        require_string_field(diag, "segment")?;
+        require_string_field(diag, "message")?;
+    }
+    Ok(())
 }
 
 fn render_completed_text(result: &ExplicitRunResult) -> String {
@@ -525,7 +584,10 @@ mod tests {
     };
 
     use super::{
-        render_outcome_json, write_outcome_artifacts, EvidenceKind, EvidenceTrace, TraceStep,
+        render_diagnostics_json, render_outcome_json, render_trace_json,
+        validate_rendered_diagnostics_json, validate_rendered_outcome_json,
+        validate_rendered_trace_json, write_outcome_artifacts, EvidenceKind, EvidenceTrace,
+        TraceStep,
     };
 
     #[test]
@@ -583,6 +645,7 @@ mod tests {
         assert!(json.contains("\"kind\":\"completed\""));
         assert!(json.contains("\"request_id\":\"req-1\""));
         assert!(json.contains("\"status\":\"FAIL\""));
+        validate_rendered_outcome_json(&json).unwrap();
     }
 
     #[test]
@@ -632,5 +695,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(paths.len(), 2);
+    }
+
+    #[test]
+    fn rendered_trace_and_diagnostics_json_validate() {
+        let trace = EvidenceTrace {
+            schema_version: "1.0.0".to_string(),
+            evidence_id: "ev-1".to_string(),
+            run_id: "run-1".to_string(),
+            property_id: "SAFE".to_string(),
+            evidence_kind: EvidenceKind::Trace,
+            assurance_level: AssuranceLevel::Complete,
+            trace_hash: "tracehash".to_string(),
+            steps: vec![TraceStep {
+                index: 0,
+                from_state_id: "s-0".to_string(),
+                action_id: Some("Jump".to_string()),
+                action_label: Some("Jump".to_string()),
+                to_state_id: "s-1".to_string(),
+                depth: 1,
+                state_before: BTreeMap::new(),
+                state_after: BTreeMap::new(),
+                note: None,
+            }],
+        };
+        validate_rendered_trace_json(&render_trace_json(&trace)).unwrap();
+        let diagnostics_json =
+            render_diagnostics_json(&[crate::support::diagnostics::Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                "boom",
+            )]);
+        validate_rendered_diagnostics_json(&diagnostics_json).unwrap();
     }
 }

@@ -5,7 +5,13 @@ use std::collections::BTreeSet;
 use crate::{
     evidence::EvidenceTrace,
     ir::ModelIr,
-    support::schema::{require_non_empty, require_schema_version},
+    support::{
+        json::{
+            parse_json, require_array_field, require_bool_field, require_number_field,
+            require_object, require_string_field,
+        },
+        schema::{require_non_empty, require_schema_version},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +153,29 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
+    let root = parse_json(body)?;
+    let object = require_object(&root, "coverage")?;
+    require_string_field(object, "schema_version")?;
+    require_string_field(object, "model_id")?;
+    let summary = require_object(
+        object
+            .get("summary")
+            .ok_or_else(|| "summary must be present".to_string())?,
+        "summary",
+    )?;
+    require_number_field(summary, "transition_coverage_percent")?;
+    require_number_field(summary, "visited_state_count")?;
+    require_number_field(summary, "step_count")?;
+    require_number_field(summary, "max_depth_observed")?;
+    for action in require_array_field(object, "actions")? {
+        let action_object = require_object(action, "actions[]")?;
+        require_string_field(action_object, "action_id")?;
+        require_bool_field(action_object, "covered")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -160,6 +189,7 @@ mod tests {
 
     use super::{
         collect_coverage, evaluate_coverage_gate, render_coverage_json, validate_coverage_report,
+        validate_rendered_coverage_json,
     };
 
     #[test]
@@ -194,7 +224,9 @@ mod tests {
         assert!(report.guard_true_actions.contains("A_INC"));
         assert!(report.guard_false_actions.contains("A_DEC"));
         assert!(!evaluate_coverage_gate(&report, 60));
-        assert!(render_coverage_json(&report).contains("\"summary\""));
+        let json = render_coverage_json(&report);
+        assert!(json.contains("\"summary\""));
+        validate_rendered_coverage_json(&json).unwrap();
         validate_coverage_report(&report).unwrap();
     }
 }
