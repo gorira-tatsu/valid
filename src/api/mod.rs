@@ -752,7 +752,7 @@ fn build_minimize_response(
 
 pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, CheckErrorEnvelope> {
     if is_bundled_model_ref(&request.source_name) {
-        return testgen_bundled_model(&request.request_id, &request.source_name).map_err(
+        return testgen_bundled_model(&request.request_id, &request.source_name, &request.strategy).map_err(
             |message| CheckErrorEnvelope {
                 manifest: RunManifest {
                     request_id: request.request_id.clone(),

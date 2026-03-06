@@ -10,6 +10,7 @@ use crate::{
         collect_machine_coverage, explain_machine, property_ids, Finite, ModelingAction,
         ModelingState,
     },
+    testgen::{write_generated_test_files, TestVector},
 };
 
 crate::valid_state! {
@@ -131,25 +132,43 @@ pub fn coverage_bundled_model(model_ref: &str) -> Result<CoverageReport, String>
     }
 }
 
-pub fn testgen_bundled_model(
-    request_id: &str,
-    model_ref: &str,
-) -> Result<TestgenResponse, String> {
+pub fn testgen_bundled_vectors(model_ref: &str, strategy: &str) -> Result<Vec<TestVector>, String> {
     let vectors = match parse_model_ref(model_ref) {
         Some(BundledModel::Counter) => build_machine_test_vectors::<CounterModel>(),
         Some(BundledModel::FailingCounter) => build_machine_test_vectors::<FailingCounterModel>(),
         None => return Err(format!("unknown bundled rust model `{model_ref}`")),
     };
+    Ok(filter_vectors_for_strategy(vectors, strategy))
+}
+
+pub fn testgen_bundled_model(
+    request_id: &str,
+    model_ref: &str,
+    strategy: &str,
+) -> Result<TestgenResponse, String> {
+    let vectors = testgen_bundled_vectors(model_ref, strategy)?;
+    let generated_files = write_generated_test_files(&vectors)?;
     Ok(TestgenResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         vector_ids: vectors.iter().map(|vector| vector.vector_id.clone()).collect(),
-        generated_files: vectors
-            .iter()
-            .map(crate::testgen::generated_test_output_path)
-            .collect(),
+        generated_files,
     })
+}
+
+fn filter_vectors_for_strategy(vectors: Vec<TestVector>, strategy: &str) -> Vec<TestVector> {
+    match strategy {
+        "counterexample" => vectors
+            .into_iter()
+            .filter(|vector| vector.strategy == "counterexample")
+            .collect(),
+        "transition" | "witness" => vectors
+            .into_iter()
+            .filter(|vector| vector.source_kind == "witness")
+            .collect(),
+        _ => vectors,
+    }
 }
 
 pub fn orchestrate_bundled_model(

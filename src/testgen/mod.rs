@@ -10,7 +10,7 @@ use crate::{
         replay::replay_actions,
         transition::{apply_action, build_initial_state},
     },
-    support::{artifact::generated_test_path, hash::stable_hash_hex},
+    support::{artifact::generated_test_path, hash::stable_hash_hex, io::write_text_file},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -383,6 +383,17 @@ pub fn render_rust_test(vector: &TestVector) -> String {
 
 pub fn generated_test_output_path(vector: &TestVector) -> String {
     generated_test_path(&vector.vector_id)
+}
+
+pub fn write_generated_test_files(vectors: &[TestVector]) -> Result<Vec<String>, String> {
+    let mut generated_files = Vec::with_capacity(vectors.len());
+    for vector in vectors {
+        let rendered = render_rust_test(vector);
+        let path = generated_test_output_path(vector);
+        write_text_file(&path, &rendered)?;
+        generated_files.push(path);
+    }
+    Ok(generated_files)
 }
 
 #[cfg(test)]

@@ -5,10 +5,11 @@ use crate::{
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
     modeling::{
-        build_machine_test_vectors, check_machine_outcome, check_machine_outcomes,
+        build_machine_test_vectors_for_strategy, check_machine_outcome, check_machine_outcomes,
         collect_machine_coverage, explain_machine, property_ids, Finite, ModelingAction,
         ModelingState, VerifiedMachine,
     },
+    testgen::write_generated_test_files,
 };
 
 use crate::api::{
@@ -214,7 +215,12 @@ fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
 fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
     let parsed = parse_args(args);
     let model = find_model(models, parsed.model.as_deref());
-    let response = (model.testgen)("registry-testgen");
+    let response = (model.testgen)(
+        parsed
+            .strategy
+            .as_deref()
+            .unwrap_or("counterexample"),
+    );
     if parsed.json {
         println!(
             "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
@@ -287,16 +293,17 @@ fn orchestrate_machine<M: VerifiedMachine>(request_id: &str) -> OrchestrateRespo
 }
 
 fn testgen_machine<M: VerifiedMachine>(request_id: &str) -> TestgenResponse {
-    let vectors = build_machine_test_vectors::<M>();
+    let vectors = build_machine_test_vectors_for_strategy::<M>(request_id);
+    let generated_files = write_generated_test_files(&vectors).unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(3);
+    });
     TestgenResponse {
         schema_version: "1.0.0".to_string(),
-        request_id: request_id.to_string(),
+        request_id: "registry-testgen".to_string(),
         status: "ok".to_string(),
         vector_ids: vectors.iter().map(|vector| vector.vector_id.clone()).collect(),
-        generated_files: vectors
-            .iter()
-            .map(crate::testgen::generated_test_output_path)
-            .collect(),
+        generated_files,
     }
 }
 
@@ -304,6 +311,7 @@ fn testgen_machine<M: VerifiedMachine>(request_id: &str) -> TestgenResponse {
 struct ParsedArgs {
     json: bool,
     model: Option<String>,
+    strategy: Option<String>,
 }
 
 fn parse_args(args: Vec<String>) -> ParsedArgs {
@@ -311,6 +319,8 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
     for arg in args {
         if arg == "--json" {
             parsed.json = true;
+        } else if let Some(value) = arg.strip_prefix("--strategy=") {
+            parsed.strategy = Some(value.to_string());
         } else if parsed.model.is_none() {
             parsed.model = Some(arg);
         } else {
@@ -334,6 +344,6 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <list|inspect|check|explain|coverage|orchestrate|testgen> [model] [--json]");
+    eprintln!("usage: <registry-bin> <list|inspect|check|explain|coverage|orchestrate|testgen> [model] [--json] [--strategy=<counterexample|transition|witness>]");
     process::exit(3);
 }

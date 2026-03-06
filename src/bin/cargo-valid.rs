@@ -25,6 +25,7 @@ fn main() {
     let local_args = ParsedArgs {
         json: parsed.json,
         model: parsed.model,
+        strategy: parsed.strategy,
     };
 
     match parsed.command.as_str() {
@@ -38,7 +39,7 @@ fn main() {
         "testgen" => cmd_testgen(local_args),
         _ => {
             eprintln!(
-                "usage: cargo valid <list|inspect|check|all|explain|coverage|orchestrate|testgen> ..."
+                "usage: cargo valid <list|inspect|check|all|explain|coverage|orchestrate|testgen> ... [--strategy=<counterexample|transition|witness>]"
             );
             process::exit(3);
         }
@@ -68,6 +69,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
         let mut command = build_external_command(&CliArgs {
             command: "check".to_string(),
             model: Some(model.clone()),
+            strategy: None,
             json: parsed.json,
             manifest_path: parsed.manifest_path.clone(),
             example: parsed.example.clone(),
@@ -112,6 +114,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(model) = &parsed.model {
         command.arg(model);
     }
+    if let Some(strategy) = &parsed.strategy {
+        command.arg(format!("--strategy={strategy}"));
+    }
     if parsed.json {
         command.arg("--json");
     }
@@ -122,6 +127,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
     let output = build_external_command(&CliArgs {
         command: "list".to_string(),
         model: None,
+        strategy: None,
         json: true,
         manifest_path: parsed.manifest_path.clone(),
         example: parsed.example.clone(),
@@ -371,12 +377,15 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
 }
 
 fn cmd_testgen(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness>]"));
     let request = TestgenRequest {
         request_id: "cargo-valid-testgen".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
-        strategy: "counterexample".to_string(),
+        strategy: parsed
+            .strategy
+            .clone()
+            .unwrap_or_else(|| "counterexample".to_string()),
         backend: None,
         solver_executable: None,
         solver_args: Vec::new(),
@@ -413,6 +422,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
 struct ParsedArgs {
     json: bool,
     model: Option<String>,
+    strategy: Option<String>,
 }
 
 #[derive(Default)]
@@ -423,6 +433,7 @@ struct CliArgs {
     file: Option<String>,
     command: String,
     model: Option<String>,
+    strategy: Option<String>,
     json: bool,
 }
 
@@ -436,13 +447,16 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             "--bin" => parsed.bin = Some(next_arg(&mut iter, "--bin")),
             "--file" => parsed.file = Some(next_arg(&mut iter, "--file")),
             "--json" => parsed.json = true,
+            _ if arg.starts_with("--strategy=") => {
+                parsed.strategy = Some(arg.trim_start_matches("--strategy=").to_string())
+            }
             _ if parsed.command.is_empty() => parsed.command = arg,
             _ if parsed.model.is_none() => parsed.model = Some(arg),
-            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json]"),
+            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json] [--strategy=<counterexample|transition|witness>]"),
         }
     }
     if parsed.command.is_empty() {
-        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json]");
+        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json] [--strategy=<counterexample|transition|witness>]");
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");

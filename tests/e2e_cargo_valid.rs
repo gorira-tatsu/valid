@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::fs;
 use std::sync::{Mutex, OnceLock};
 use std::process::Command;
 
@@ -19,6 +20,15 @@ fn example_registry_file() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join("valid_models.rs")
+}
+
+fn cleanup_generated_files(stdout: &str) {
+    for path in stdout
+        .split('"')
+        .filter(|entry| entry.starts_with("tests/generated/") && entry.ends_with(".rs"))
+    {
+        let _ = fs::remove_file(path);
+    }
 }
 
 #[test]
@@ -135,4 +145,21 @@ fn cargo_valid_checks_all_example_models_from_file() {
     assert!(stdout.contains("\"runs\":["));
     assert!(stdout.contains("\"model_id\":\"counter\""));
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
+}
+
+#[test]
+fn cargo_valid_testgen_witness_generates_files() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("testgen")
+        .arg("counter")
+        .arg("--strategy=witness")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"generated_files\":["));
+    assert!(stdout.contains("tests/generated/"));
+    cleanup_generated_files(&stdout);
 }

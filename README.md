@@ -34,16 +34,16 @@ use valid::{
 
 valid_state! {
     struct State {
-        x: u8,
+        x: u8 [range = "0..=3"],
         locked: bool,
     }
 }
 
 valid_actions! {
     enum Action {
-        Inc => "INC",
-        Lock => "LOCK",
-        Unlock => "UNLOCK",
+        Inc => "INC" [reads = ["x", "locked"], writes = ["x"]],
+        Lock => "LOCK" [reads = ["locked"], writes = ["locked"]],
+        Unlock => "UNLOCK" [reads = ["locked"], writes = ["locked"]],
     }
 }
 
@@ -80,6 +80,7 @@ Save that as `examples/valid_models.rs` or `src/bin/valid_models.rs`, then run:
 cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs check counter --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
 ```
 

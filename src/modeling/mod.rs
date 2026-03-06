@@ -97,13 +97,28 @@ pub trait ModelingAction: Clone + Debug + Eq + Hash + Finite {
     }
 }
 
-pub trait StateSpec: ModelingState {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateFieldDescriptor {
+    pub name: &'static str,
+    pub rust_type: &'static str,
+    pub range: Option<&'static str>,
+}
 
-impl<T> StateSpec for T where T: ModelingState {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionDescriptor {
+    pub variant: &'static str,
+    pub action_id: &'static str,
+    pub reads: &'static [&'static str],
+    pub writes: &'static [&'static str],
+}
 
-pub trait ActionSpec: ModelingAction {}
+pub trait StateSpec: ModelingState {
+    fn state_fields() -> Vec<StateFieldDescriptor>;
+}
 
-impl<T> ActionSpec for T where T: ModelingAction {}
+pub trait ActionSpec: ModelingAction {
+    fn action_descriptors() -> Vec<ActionDescriptor>;
+}
 
 #[derive(Clone)]
 pub struct ModelProperty<S> {
@@ -173,11 +188,19 @@ pub fn property_ids<M: ModelSpec>() -> Vec<&'static str> {
         .collect()
 }
 
+pub fn state_field_descriptors<S: StateSpec>() -> Vec<StateFieldDescriptor> {
+    S::state_fields()
+}
+
+pub fn action_descriptors<A: ActionSpec>() -> Vec<ActionDescriptor> {
+    A::action_descriptors()
+}
+
 #[macro_export]
 macro_rules! valid_state {
     (
         struct $state:ident {
-            $($field:ident : $field_ty:ty),+ $(,)?
+            $($field:ident : $field_ty:ty $( [ range = $range:literal ] )? ),+ $(,)?
         }
     ) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -197,6 +220,26 @@ macro_rules! valid_state {
                 ])
             }
         }
+
+        impl $crate::modeling::StateSpec for $state {
+            fn state_fields() -> Vec<$crate::modeling::StateFieldDescriptor> {
+                vec![
+                    $(
+                        $crate::modeling::StateFieldDescriptor {
+                            name: stringify!($field),
+                            rust_type: stringify!($field_ty),
+                            range: $crate::valid_state!(@range $($range)?),
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
+    (@range $range:literal) => {
+        Some($range)
+    };
+    (@range) => {
+        None
     };
 }
 
@@ -204,7 +247,10 @@ macro_rules! valid_state {
 macro_rules! valid_actions {
     (
         enum $action:ident {
-            $($variant:ident => $action_id:literal),+ $(,)?
+            $(
+                $variant:ident => $action_id:literal
+                $( [ reads = [$($read:literal),* $(,)?], writes = [$($write:literal),* $(,)?] ] )?
+            ),+ $(,)?
         }
     ) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -225,6 +271,27 @@ macro_rules! valid_actions {
                 }
             }
         }
+
+        impl $crate::modeling::ActionSpec for $action {
+            fn action_descriptors() -> Vec<$crate::modeling::ActionDescriptor> {
+                vec![
+                    $(
+                        $crate::modeling::ActionDescriptor {
+                            variant: stringify!($variant),
+                            action_id: $action_id,
+                            reads: $crate::valid_actions!(@reads $($($read),*)?),
+                            writes: $crate::valid_actions!(@writes $($($write),*)?),
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
+    (@reads $($read:literal),*) => {
+        &[$($read),*]
+    };
+    (@writes $($write:literal),*) => {
+        &[$($write),*]
     };
 }
 
@@ -590,6 +657,23 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     vectors
 }
 
+pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
+    strategy: &str,
+) -> Vec<TestVector> {
+    let vectors = build_machine_test_vectors::<M>();
+    match strategy {
+        "counterexample" => vectors
+            .into_iter()
+            .filter(|vector| vector.strategy == "counterexample")
+            .collect(),
+        "transition" | "witness" => vectors
+            .into_iter()
+            .filter(|vector| vector.source_kind == "witness")
+            .collect(),
+        _ => vectors,
+    }
+}
+
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
     let property = primary_property::<M>();
     check_machine_outcome_for_property::<M>(request_id, property.property_id)
@@ -852,23 +936,24 @@ fn build_evidence_trace<M: VerifiedMachine>(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_machine_test_vectors, check_machine, check_machine_outcome, check_machine_outcomes,
-        collect_machine_coverage, explain_machine, property_ids, ModelingRunStatus,
+        action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
+        check_machine_outcomes, collect_machine_coverage, explain_machine, property_ids,
+        state_field_descriptors, ModelingRunStatus,
     };
     use crate::{engine::CheckOutcome, valid_actions, valid_state};
 
     valid_state! {
         struct State {
-            x: u8,
+            x: u8 [range = "0..=3"],
             locked: bool,
         }
     }
 
     valid_actions! {
         enum Action {
-            Inc => "INC",
-            Lock => "LOCK",
-            Unlock => "UNLOCK",
+            Inc => "INC" [reads = ["x", "locked"], writes = ["x"]],
+            Lock => "LOCK" [reads = ["locked"], writes = ["locked"]],
+            Unlock => "UNLOCK" [reads = ["locked"], writes = ["locked"]],
         }
     }
 
@@ -973,6 +1058,17 @@ mod tests {
         assert!(outcomes
             .iter()
             .all(|outcome| outcome.status == crate::engine::RunStatus::Pass));
+    }
+
+    #[test]
+    fn modeling_spec_exposes_state_and_action_metadata() {
+        let fields = state_field_descriptors::<State>();
+        assert_eq!(fields[0].name, "x");
+        assert_eq!(fields[0].range, Some("0..=3"));
+        let actions = action_descriptors::<Action>();
+        assert_eq!(actions[0].action_id, "INC");
+        assert_eq!(actions[0].reads, &["x", "locked"]);
+        assert_eq!(actions[0].writes, &["x"]);
     }
 
     #[test]

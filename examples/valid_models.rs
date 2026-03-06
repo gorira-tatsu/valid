@@ -5,16 +5,16 @@ use valid::{
 
 valid_state! {
     struct State {
-        x: u8,
+        x: u8 [range = "0..=3"],
         locked: bool,
     }
 }
 
 valid_actions! {
     enum Action {
-        Inc => "INC",
-        Lock => "LOCK",
-        Unlock => "UNLOCK",
+        Inc => "INC" [reads = ["x", "locked"], writes = ["x"]],
+        Lock => "LOCK" [reads = ["locked"], writes = ["locked"]],
+        Unlock => "UNLOCK" [reads = ["locked"], writes = ["locked"]],
     }
 }
 

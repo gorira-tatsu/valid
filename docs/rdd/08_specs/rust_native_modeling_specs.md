@@ -53,6 +53,8 @@ pub trait ModelSpec {
 ```
 
 `VerifiedMachine` は `ModelSpec` を満たす型に対して内部で与えられる探索契約とする。
+`valid_state!` は field range metadata を保持できる。
+`valid_actions!` は reads/writes metadata を保持できる。
 
 ## 2.1 表面 DSL
 
@@ -91,16 +93,16 @@ action 列、state metadata へ正規化されることを前提とする。
 ```rust
 valid_state! {
     struct State {
-        x: u8,
+        x: u8 [range = "0..=3"],
         locked: bool,
     }
 }
 
 valid_actions! {
     enum Action {
-        Inc => "INC",
-        Lock => "LOCK",
-        Unlock => "UNLOCK",
+        Inc => "INC" [reads = ["x", "locked"], writes = ["x"]],
+        Lock => "LOCK" [reads = ["locked"], writes = ["locked"]],
+        Unlock => "UNLOCK" [reads = ["locked"], writes = ["locked"]],
     }
 }
 
