@@ -5,8 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     evidence::EvidenceTrace,
     ir::{ModelIr, PropertyKind, Value},
-    kernel::{eval::eval_expr, replay::replay_actions, transition::build_initial_state},
-    support::artifact::generated_test_path,
+    kernel::{
+        eval::eval_expr,
+        replay::replay_actions,
+        transition::{apply_action, build_initial_state},
+    },
+    support::{artifact::generated_test_path, hash::stable_hash_hex},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +124,59 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
     vector.strategy = "transition_coverage".to_string();
     vector.minimized = false;
     Ok(vector)
+}
+
+pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Vec<TestVector> {
+    let initial = match build_initial_state(model) {
+        Ok(state) => state,
+        Err(_) => return Vec::new(),
+    };
+    model
+        .actions
+        .iter()
+        .filter_map(|action| {
+            let next = apply_action(model, &initial, &action.action_id)
+                .ok()
+                .flatten()?;
+            let state_before = model
+                .state_fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| (field.name.clone(), initial.values[index].clone()))
+                .collect::<BTreeMap<_, _>>();
+            let state_after = model
+                .state_fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| (field.name.clone(), next.values[index].clone()))
+                .collect::<BTreeMap<_, _>>();
+            let trace = EvidenceTrace {
+                schema_version: "1.0.0".to_string(),
+                evidence_id: format!(
+                    "ev-witness-{}",
+                    stable_hash_hex(&(model.model_id.clone() + &action.action_id))
+                        .replace("sha256:", "")
+                ),
+                run_id: format!("run-witness-{}", action.action_id),
+                property_id: property_id.to_string(),
+                evidence_kind: crate::evidence::EvidenceKind::Trace,
+                assurance_level: crate::engine::AssuranceLevel::Complete,
+                trace_hash: format!("trace:witness:{}", action.action_id),
+                steps: vec![crate::evidence::TraceStep {
+                    index: 0,
+                    from_state_id: "s-init".to_string(),
+                    action_id: Some(action.action_id.clone()),
+                    action_label: Some(action.label.clone()),
+                    to_state_id: format!("s-{}", action.action_id),
+                    depth: 1,
+                    state_before,
+                    state_after,
+                    note: Some("synthetic witness from initial state".to_string()),
+                }],
+            };
+            build_witness_vector(&trace).ok()
+        })
+        .collect()
 }
 
 pub fn minimize_counterexample_vector(
@@ -237,8 +294,9 @@ mod tests {
     };
 
     use super::{
-        build_counterexample_vector, build_transition_coverage_vectors, build_witness_vector,
-        minimize_counterexample_vector, render_rust_test,
+        build_counterexample_vector, build_synthetic_witness_vectors,
+        build_transition_coverage_vectors, build_witness_vector, minimize_counterexample_vector,
+        render_rust_test,
     };
 
     fn trace_with_actions(actions: &[&str]) -> EvidenceTrace {
@@ -365,6 +423,13 @@ mod tests {
         let traces = vec![trace_with_actions(&["Inc"]), trace_with_actions(&["Jump"])];
         let vectors =
             build_transition_coverage_vectors(&traces, &["Inc".to_string(), "Jump".to_string()]);
+        assert_eq!(vectors.len(), 2);
+        assert!(vectors.iter().all(|vector| vector.source_kind == "witness"));
+    }
+
+    #[test]
+    fn builds_synthetic_witness_vectors_from_model() {
+        let vectors = build_synthetic_witness_vectors(&minimization_model(), "SAFE");
         assert_eq!(vectors.len(), 2);
         assert!(vectors.iter().all(|vector| vector.source_kind == "witness"));
     }

@@ -185,14 +185,20 @@
     {
       "kind": "field_flip",
       "message": "bad changed from false to true at step 1"
+    },
+    {
+      "kind": "action_write_set",
+      "message": "review writes and postconditions of action A_MARK_BAD at failing step 1"
     }
   ],
   "repair_hints": [
     "review guard of action A_MARK_BAD",
-    "verify invariant P_NO_BAD is intended"
+    "verify invariant P_NO_BAD is intended",
+    "inspect the postcondition or implementation of action A_MARK_BAD"
   ],
   "best_practices": [
-    "keep write sets explicit so involved fields stay explainable"
+    "keep write sets explicit so involved fields stay explainable",
+    "add witness vectors for critical actions so explain results stay reproducible"
   ],
   "confidence": 0.72
 }
@@ -211,6 +217,8 @@
 - `candidate_causes`: 破綻理由の仮説
 
 この3つを混ぜないことで、AI が「今やること」と「今後守ること」を分離できる。
+
+`candidate_causes` は MVP でも複数候補を返してよい。少なくとも field 差分由来の候補と action write set 由来の候補を分離する。
 
 ## 6. H-4 Minimize API
 

@@ -12,7 +12,10 @@ use crate::{
         hash::stable_hash_hex,
         schema::{require_len_match, require_non_empty, require_schema_version},
     },
-    testgen::{build_counterexample_vector, minimize_counterexample_vector, MinimizeResult},
+    testgen::{
+        build_counterexample_vector, build_synthetic_witness_vectors,
+        minimize_counterexample_vector, MinimizeResult,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,22 +376,51 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 })
                 .collect::<Vec<_>>();
             let candidate_causes = if involved_fields.is_empty() {
-                vec![ExplainCandidateCause {
-                    kind: "terminal_violation".to_string(),
-                    message: format!(
-                        "property {} failed without a field diff at terminal step",
-                        trace.property_id
-                    ),
-                }]
+                vec![
+                    ExplainCandidateCause {
+                        kind: "terminal_violation".to_string(),
+                        message: format!(
+                            "property {} failed without a field diff at terminal step",
+                            trace.property_id
+                        ),
+                    },
+                    ExplainCandidateCause {
+                        kind: "action_semantics".to_string(),
+                        message: failure_step
+                            .action_id
+                            .as_ref()
+                            .map(|action| format!("{action} reached a violating state without a visible field delta"))
+                            .unwrap_or_else(|| "initial or terminal condition violated the property".to_string()),
+                    },
+                ]
             } else {
-                involved_fields
+                let mut causes = involved_fields
                     .iter()
                     .map(|field| ExplainCandidateCause {
                         kind: "field_flip".to_string(),
                         message: format!("{field} changed at step {}", failure_step.index),
                     })
-                    .collect()
+                    .collect::<Vec<_>>();
+                if let Some(action_id) = &failure_step.action_id {
+                    causes.push(ExplainCandidateCause {
+                        kind: "action_write_set".to_string(),
+                        message: format!(
+                            "review writes and postconditions of action {action_id} at failing step {}",
+                            failure_step.index
+                        ),
+                    });
+                }
+                causes
             };
+            let mut repair_hints = vec![
+                "review the guard and update set of the failing action".to_string(),
+                format!("verify invariant {} is intended", trace.property_id),
+            ];
+            if let Some(action_id) = &failure_step.action_id {
+                repair_hints.push(format!(
+                    "inspect the postcondition or implementation of action {action_id}"
+                ));
+            }
             Ok(ExplainResponse {
                 schema_version: "1.0.0".to_string(),
                 request_id: request.request_id.clone(),
@@ -398,13 +430,12 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 failure_step_index: failure_step.index,
                 involved_fields,
                 candidate_causes,
-                repair_hints: vec![
-                    "review the guard and update set of the failing action".to_string(),
-                    format!("verify invariant {} is intended", trace.property_id),
-                ],
+                repair_hints,
                 confidence: 0.72,
                 best_practices: vec![
                     "keep write sets explicit so involved fields stay explainable".to_string(),
+                    "add witness vectors for critical actions so explain results stay reproducible"
+                        .to_string(),
                 ],
             })
         }
@@ -536,7 +567,16 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .map(|action| action.action_id.clone())
             .collect::<Vec<_>>();
-        crate::testgen::build_transition_coverage_vectors(&traces, &action_ids)
+        let mut vectors = crate::testgen::build_transition_coverage_vectors(&traces, &action_ids);
+        if vectors.is_empty() {
+            let fallback_property_id = model
+                .properties
+                .first()
+                .map(|property| property.property_id.as_str())
+                .unwrap_or("P_SAFE");
+            vectors = build_synthetic_witness_vectors(&model, fallback_property_id);
+        }
+        vectors
     } else {
         traces
             .iter()
@@ -738,6 +778,10 @@ mod tests {
         assert_eq!(response.property_id, "P_SAFE");
         assert_eq!(response.failure_step_index, 0);
         assert_eq!(response.involved_fields, vec!["x".to_string()]);
+        assert!(response
+            .candidate_causes
+            .iter()
+            .any(|cause| cause.kind == "action_write_set"));
         validate_explain_response(&response).unwrap();
     }
 
@@ -769,6 +813,23 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             strategy: "counterexample".to_string(),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        assert_eq!(response.vector_ids.len(), 1);
+        validate_testgen_response(&response).unwrap();
+    }
+
+    #[test]
+    fn witness_testgen_can_fallback_to_synthetic_vectors() {
+        let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n";
+        let response = testgen_source(&TestgenRequest {
+            request_id: "req-witness".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+            strategy: "witness".to_string(),
             backend: None,
             solver_executable: None,
             solver_args: vec![],
