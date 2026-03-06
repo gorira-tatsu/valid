@@ -190,7 +190,12 @@ fn cli_command_backend_demo_script_normalizes_failures() {
 
 #[test]
 fn rust_native_examples_run_successfully() {
-    for example in ["iam_like_authz", "iam_policy_diff", "train_fare"] {
+    for example in [
+        "iam_like_authz",
+        "iam_policy_diff",
+        "train_fare",
+        "saas_entitlements",
+    ] {
         let output = Command::new("cargo")
             .arg("run")
             .arg("--example")

@@ -18,6 +18,9 @@ The intended primary modeling path is Rust-native, not a project-specific DSL.
   - train fare calculation with realistic business rules
   - explanation, rule coverage, and invariant checks around child fare, day
     pass behavior, and monotonic distance pricing
+- `saas_entitlements.rs`
+  - SaaS plan/role/feature entitlement verification
+  - checks enterprise-only features, admin-only APIs, and coverage of allow/deny paths
 
 Run them with:
 
@@ -25,6 +28,7 @@ Run them with:
 cargo run --example iam_like_authz
 cargo run --example iam_policy_diff
 cargo run --example train_fare
+cargo run --example saas_entitlements
 ```
 
 ## Legacy compatibility fixtures

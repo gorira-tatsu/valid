@@ -4,6 +4,7 @@
 //! the temporary `.valid` fixture frontend.
 
 pub mod authz;
+pub mod entitlements;
 pub mod fare;
 
 use std::{
