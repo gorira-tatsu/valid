@@ -54,7 +54,27 @@ pub trait VerifiedMachine {
 - 反例は action 列と state 列を含む trace に落とす。
 - `cargo test` で Rust-native model をそのまま検証できる。
 
-## 5. 将来拡張
+## 5. 現実的な Rust-native 例
+
+MVP 段階でも、教材的な counter だけではなく、現実の業務ドメインに近い例を repo 内に持つ。
+
+- IAM-like authorization
+  - deny precedence
+  - permissions boundary / session / SCP 風の制約
+  - policy diff による access widening 検出
+- train fare calculation
+  - child fare
+  - day pass
+  - transfer discount
+  - distance monotonicity
+- SaaS entitlements
+  - free / pro / enterprise
+  - member / admin / billing admin
+  - feature gating
+
+これらは `.valid` ではなく Rust-native module と example / test として維持する。
+
+## 6. 将来拡張
 
 - proc-macro による `#[model]`, `#[action]`, `#[invariant]`
 - `reads/writes` 抽出
@@ -62,7 +82,7 @@ pub trait VerifiedMachine {
 - IR 生成の自動化
 - solver adapter への直接 lowering
 
-## 6. 受け入れ条件
+## 7. 受け入れ条件
 
 - Rust struct / enum / impl だけで 1 モデルを記述できること
 - explicit engine 相当の探索で `PASS/FAIL` が返ること

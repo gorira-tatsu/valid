@@ -21,6 +21,7 @@ use valid::{
         write_vector_artifact,
     },
     frontend::compile_model,
+    native::demo::{render_demo_json, render_demo_text, run_demo, NativeDemoKind},
     reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{
@@ -45,10 +46,40 @@ fn main() {
         "testgen" => cmd_testgen(args.collect()),
         "coverage" => cmd_coverage(args.collect()),
         "selfcheck" => cmd_selfcheck(),
+        "native-demo" => cmd_native_demo(args.collect()),
         _ => {
-            eprintln!("usage: valid <check|inspect|capabilities|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck> ...");
+            eprintln!("usage: valid <check|inspect|capabilities|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck|native-demo> ...");
             process::exit(3);
         }
+    }
+}
+
+fn cmd_native_demo(args: Vec<String>) {
+    let mut json = false;
+    let mut demo = None;
+    for arg in args {
+        if arg == "--json" {
+            json = true;
+        } else if demo.is_none() {
+            demo = Some(arg);
+        } else {
+            eprintln!("usage: valid native-demo <iam-authz|iam-policy-diff|train-fare|saas-entitlements> [--json]");
+            process::exit(3);
+        }
+    }
+
+    let Some(kind) = demo.as_deref().and_then(NativeDemoKind::parse) else {
+        eprintln!(
+            "usage: valid native-demo <iam-authz|iam-policy-diff|train-fare|saas-entitlements> [--json]"
+        );
+        process::exit(3);
+    };
+
+    let report = run_demo(kind);
+    if json {
+        println!("{}", render_demo_json(&report));
+    } else {
+        print!("{}", render_demo_text(&report));
     }
 }
 

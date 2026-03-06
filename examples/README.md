@@ -29,6 +29,10 @@ cargo run --example iam_like_authz
 cargo run --example iam_policy_diff
 cargo run --example train_fare
 cargo run --example saas_entitlements
+valid native-demo iam-authz --json
+valid native-demo iam-policy-diff --json
+valid native-demo train-fare --json
+valid native-demo saas-entitlements --json
 ```
 
 ## Legacy compatibility fixtures
