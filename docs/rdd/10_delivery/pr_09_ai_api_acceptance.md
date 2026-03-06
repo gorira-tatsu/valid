@@ -4,8 +4,8 @@
 
 - FR: `FR-070`〜`FR-073`
 - Epic: `H-1`〜`H-5`
-- Specs: [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
-- 索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- Specs: [RDD-0001-14](../08_specs/ai_solver_selfcheck_specs.md)
+- 索引: [id_cross_reference.md](../09_reference/id_cross_reference.md)
 
 ## 1. 目的
 
@@ -17,6 +17,8 @@
 2. response schema validation が通る。
 3. `error_code` が失敗時に必須。
 4. explain が構造化フィールドを返す。
+5. `backend=explicit|mock-bmc|command` を request に乗せられる。
+6. `backend=command` の場合は `solver_executable` と `solver_args[]` を request 契約に含める。
 
 ## 3. DoD
 

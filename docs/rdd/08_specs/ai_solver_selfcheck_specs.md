@@ -1,23 +1,23 @@
 # AI, Solver, and Selfcheck Specs
 
 - ドキュメントID: `RDD-0001-14`
-- バージョン: `v0.2`
+- バージョン: `v0.3`
 - 目的: `H`, `I`, `J` エピックを AI 運用、solver adapter、selfcheck 実行まで落とし込む。
 - 依存章:
-  - [explicit_engine_and_evidence_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
-  - [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
-  - [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md)
-  - [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md)
+  - [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
+  - [testgen_contract_coverage_specs.md](testgen_contract_coverage_specs.md)
+  - [../09_reference/json_schemas.md](../09_reference/json_schemas.md)
+  - [../09_reference/error_codes.md](../09_reference/error_codes.md)
 - 関連ID:
   - FR: `FR-023`, `FR-070`〜`FR-073`
   - NFR: `NFR-040`〜`NFR-042`
   - Epic: `H-1`〜`H-5`, `I-1`〜`I-4`, `J-1`〜`J-3`
   - PR: `PR-09`, `PR-10`, `PR-11`
-  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - 参照索引: [../09_reference/id_cross_reference.md](../09_reference/id_cross_reference.md)
 - 補助参照:
-  - [../09_reference/repository_structure.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/repository_structure.md)
-  - [../09_reference/implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md)
-  - [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
+  - [../09_reference/repository_structure.md](../09_reference/repository_structure.md)
+  - [../09_reference/implementation_pr_plan.md](../09_reference/implementation_pr_plan.md)
+  - [../10_delivery/README.md](../10_delivery/README.md)
 
 ## 1. 対象範囲
 
@@ -37,11 +37,12 @@
 ## 2. 設計原則
 
 - AI 向けI/Fは全文字列自由形式を避け、安定 JSON schema を返す。
-- solver 結果は共通 trace へ正規化してから上位へ返す。
+- solver 結果は共通 result 形式へ正規化し、`FAIL` の replay 可能証拠は `Evidence::Trace` として返す。
 - selfcheck は通常 CI と分離し、通常 run の信頼性に影響を与えない。
 - explain は補助情報であり、意味論上の真実源ではない。
 - backend 能力差は capability matrix で明示する。
 - 失敗応答は `diagnostics` を持ち、segment と conflict を返す。
+- backend 発見は registry-based discovery を前提とし、CLI/API は backend config を adapter 境界へ引き渡す。
 
 ## 3. H-1 Inspect API
 
@@ -97,20 +98,12 @@
 {
   "schema_version": "1.0.0",
   "request_id": "req-check-0001",
-  "model_ref": {
-    "kind": "path",
-    "value": "specs/counterlock.valid"
-  },
-  "run_plan": {
-    "backend": "explicit",
-    "strategy": "bfs",
-    "property_selection": { "kind": "all" },
-    "limits": {
-      "max_states": 10000,
-      "max_depth": 50,
-      "time_limit_ms": 1000
-    }
-  }
+  "source_name": "specs/counterlock.valid",
+  "source": "model Counter ...",
+  "property_id": "P_SAFE",
+  "backend": "command",
+  "solver_executable": "sh",
+  "solver_args": ["-c", "printf 'STATUS=UNKNOWN\\nACTIONS=Jump'"]
 }
 ```
 
@@ -121,14 +114,15 @@
 
 ```json
 {
-  "schema_version": "1.0.0",
-  "request_id": "req-check-0001",
-  "status": "ok",
-  "result": {
+  "kind": "completed",
+  "manifest": {
+    "request_id": "req-check-0001",
     "run_id": "run-20260306-0001",
-    "backend": "explicit",
-    "status": "FAIL"
-  }
+    "backend_name": "mock-bmc",
+    "backend_version": "external"
+  },
+  "status": "UNKNOWN",
+  "assurance_level": "incomplete"
 }
 ```
 
@@ -290,7 +284,7 @@ pub trait SolverAdapter {
     fn backend_kind(&self) -> BackendKind;
     fn capabilities(&self) -> CapabilityMatrix;
     fn build_plan(&self, model: &ModelIr, run_plan: &RunPlan) -> Result<SolverRunPlan, SolverPlanError>;
-    fn run(&self, plan: &SolverRunPlan) -> Result<RawSolverResult, SolverExecutionError>;
+    fn run(&self, model: &ModelIr, plan: &SolverRunPlan) -> Result<RawSolverResult, SolverExecutionError>;
     fn normalize(
         &self,
         model: &ModelIr,
@@ -305,8 +299,19 @@ pub trait SolverAdapter {
 - `build_plan` で backend 固有変換を閉じ込める。
 - `normalize` で top-level schema の共通化を担保する。
 - adapter は `ModelIr` を受け取るが、上位層に solver 固有 AST を漏らさない。
+- `run` は model を受け取り、command backend を含む外部実行でも property selection と manifest を維持する。
 
-## 9. I-2 BMC Run Plan
+### 8.3 backend config
+
+MVP で受け付ける backend config は次の3種類とする。
+
+- `explicit`
+- `mock-bmc`
+- `command { solver_executable, solver_args[] }`
+
+`command` は最小の外部プロセス adapter であり、protocol は `STATUS=<PASS|FAIL|UNKNOWN>` と `ACTIONS=a,b,c` を受け付ける。
+
+## 9. I-2 BMC / command Run Plan
 
 ### 9.1 Rust構造
 
@@ -326,6 +331,7 @@ pub struct SolverRunPlan {
 - BMC では `horizon` 必須。
 - explicit backend では `horizon` 不要。
 - `encoded_model_hash` は solver 入力の再現性確認に使う。
+- command backend では `VALID_RUN_ID` を環境変数として外部プロセスへ渡す。
 
 ## 10. I-3 assignment -> trace 変換ルール
 
@@ -336,6 +342,11 @@ pub struct SolverRunPlan {
 3. `state_i -> state_{i+1}` の差分を作る。
 4. `TraceStep` へ正規化する。
 5. explicit trace と同じ `EvidenceTrace` schema に落とす。
+
+補足:
+
+- command backend は `ACTIONS` を replay して `EvidenceTrace` を再構築する。
+- `FAIL` で action 列が無い場合は Completed ではなく Error envelope とする。
 
 ### 10.2 擬似コード
 
@@ -369,15 +380,12 @@ function assignment_to_trace(assignment):
 
 ### 11.1 項目
 
-- `invariant`
-- `reachability`
-- `deadlock`
-- `liveness`
-- `counterexample`
-- `witness`
-- `shortest_counterexample`
-- `coverage_sampling`
-- `contract_sensitive`
+- `backend_name`
+- `supports_explicit`
+- `supports_bmc`
+- `supports_certificate`
+- `supports_trace`
+- `supports_witness`
 - `selfcheck_compatible`
 
 ### 11.2 JSON例
@@ -386,19 +394,17 @@ function assignment_to_trace(assignment):
 {
   "backend": "explicit",
   "capabilities": {
-    "invariant": true,
-    "reachability": true,
-    "deadlock": true,
-    "liveness": false,
-    "counterexample": true,
-    "witness": false,
-    "shortest_counterexample": true,
-    "coverage_sampling": false,
-    "contract_sensitive": true,
+    "supports_explicit": true,
+    "supports_bmc": false,
+    "supports_certificate": false,
+    "supports_trace": true,
+    "supports_witness": false,
     "selfcheck_compatible": true
   }
 }
 ```
+
+`supports_trace = false` の backend は `FAIL` の本番ゲートに使わない。`command` backend は `ACTIONS` を返す限り `supports_trace = true` とみなす。
 
 ## 12. J-1 Selfcheck対象
 

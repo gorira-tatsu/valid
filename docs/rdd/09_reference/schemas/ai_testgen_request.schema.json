@@ -2,12 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.testgen.request",
   "type": "object",
-  "required": ["schema_version", "request_id", "source", "strategy", "render_mode"],
+  "required": ["request_id", "source_name", "source", "strategy"],
   "properties": {
-    "schema_version": { "type": "string" },
-    "request_id": { "type": "string" },
-    "source": { "type": "object" },
-    "strategy": { "type": "string" },
-    "render_mode": { "type": "string" }
-  }
+    "request_id": { "type": "string", "minLength": 1 },
+    "source_name": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "strategy": { "type": "string", "minLength": 1 },
+    "backend": {
+      "type": ["string", "null"],
+      "enum": ["explicit", "mock-bmc", "command", null]
+    },
+    "solver_executable": { "type": ["string", "null"] },
+    "solver_args": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
 }
