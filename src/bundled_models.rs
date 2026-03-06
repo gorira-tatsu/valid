@@ -126,6 +126,10 @@ pub fn is_bundled_model_ref(name: &str) -> bool {
     parse_model_ref(name).is_some()
 }
 
+pub fn list_bundled_models() -> Vec<&'static str> {
+    vec!["counter", "failing-counter"]
+}
+
 pub fn inspect_bundled_model(request_id: &str, model_ref: &str) -> Result<InspectResponse, String> {
     match parse_model_ref(model_ref) {
         Some(BundledModel::Counter) => Ok(build_inspect_response::<CounterModel>(request_id)),
@@ -242,8 +246,8 @@ enum BundledModel {
 
 fn parse_model_ref(model_ref: &str) -> Option<BundledModel> {
     match model_ref {
-        "rust:counter" => Some(BundledModel::Counter),
-        "rust:failing-counter" => Some(BundledModel::FailingCounter),
+        "counter" | "rust:counter" => Some(BundledModel::Counter),
+        "failing-counter" | "rust:failing-counter" => Some(BundledModel::FailingCounter),
         _ => None,
     }
 }

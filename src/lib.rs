@@ -10,6 +10,7 @@ pub mod kernel;
 pub mod modeling;
 pub mod orchestrator;
 pub mod reporter;
+pub mod registry;
 pub mod selfcheck;
 pub mod solver;
 pub mod support;

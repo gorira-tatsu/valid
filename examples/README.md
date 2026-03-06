@@ -5,6 +5,34 @@ boundary.
 
 The intended primary modeling path is Rust-defined models, not a project-specific DSL.
 
+## Registry example
+
+`valid_models.rs` is the current minimal example of the Rust-first flow.
+It keeps the model definitions in Rust and declares the exported registry with:
+
+```rust
+run_registry_cli(valid_models![
+    "counter" => CounterModel,
+    "failing-counter" => FailingCounterModel,
+]);
+```
+
+Run it through the cargo subcommand with:
+
+```sh
+cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-counter --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
+```
+
+Command meanings:
+
+- `list`: show the model names exported by the registry file
+- `inspect <model>`: show the model shape without verifying it
+- `check <model>`: verify one model
+- `all`: run `check` for every model exported by the registry file
+
 ## Rust model examples
 
 - `iam_like_authz.rs`
@@ -73,6 +101,15 @@ Bundled Rust-native models exposed through the main CLI path:
 cargo run -- inspect rust:counter --json
 cargo run -- check rust:failing-counter --json
 cargo run -- coverage rust:counter --json
+```
+
+If you install the cargo subcommand binary, you can also use:
+
+```sh
+cargo valid list --json
+cargo valid inspect counter --json
+cargo valid check failing-counter --json
+cargo valid --file examples/valid_models.rs all --json
 ```
 
 ## Current capability boundary
