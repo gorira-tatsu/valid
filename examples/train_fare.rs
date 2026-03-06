@@ -1,4 +1,4 @@
-#[path = "support/fare.rs"]
+#[path = "../tests/support/fare.rs"]
 mod fare;
 
 use fare::{

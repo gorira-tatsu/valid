@@ -1,4 +1,4 @@
-#[path = "support/authz.rs"]
+#[path = "../tests/support/authz.rs"]
 mod authz;
 
 use authz::{

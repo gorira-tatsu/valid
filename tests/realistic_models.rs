@@ -1,8 +1,8 @@
-#[path = "../examples/support/authz.rs"]
+#[path = "support/authz.rs"]
 mod authz;
-#[path = "../examples/support/entitlements.rs"]
+#[path = "support/entitlements.rs"]
 mod entitlements;
-#[path = "../examples/support/fare.rs"]
+#[path = "support/fare.rs"]
 mod fare;
 
 use authz::{

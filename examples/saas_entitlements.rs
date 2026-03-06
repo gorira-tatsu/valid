@@ -1,4 +1,4 @@
-#[path = "support/entitlements.rs"]
+#[path = "../tests/support/entitlements.rs"]
 mod entitlements;
 
 use entitlements::{
