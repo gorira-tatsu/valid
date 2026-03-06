@@ -1,8 +1,14 @@
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::process::Command;
 
 fn cargo_valid_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cargo-valid"))
+}
+
+fn cargo_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn manifest_path() -> PathBuf {
@@ -17,6 +23,7 @@ fn example_registry_file() -> PathBuf {
 
 #[test]
 fn cargo_valid_lists_registered_models() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("list")
         .arg("--json")
@@ -30,6 +37,7 @@ fn cargo_valid_lists_registered_models() {
 
 #[test]
 fn cargo_valid_inspects_registered_model() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("inspect")
         .arg("counter")
@@ -43,6 +51,7 @@ fn cargo_valid_inspects_registered_model() {
 
 #[test]
 fn cargo_valid_checks_registered_model() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("check")
         .arg("failing-counter")
@@ -56,6 +65,7 @@ fn cargo_valid_checks_registered_model() {
 
 #[test]
 fn cargo_valid_lists_example_models() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -73,6 +83,7 @@ fn cargo_valid_lists_example_models() {
 
 #[test]
 fn cargo_valid_checks_example_model() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -90,6 +101,7 @@ fn cargo_valid_checks_example_model() {
 
 #[test]
 fn cargo_valid_lists_example_models_from_file() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -107,6 +119,7 @@ fn cargo_valid_lists_example_models_from_file() {
 
 #[test]
 fn cargo_valid_checks_all_example_models_from_file() {
+    let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())

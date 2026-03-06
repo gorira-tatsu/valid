@@ -23,6 +23,40 @@ use crate::{
     testgen::{build_counterexample_vector, TestVector, VectorActionStep},
 };
 
+pub trait IntoModelValue {
+    fn into_model_value(self) -> Value;
+}
+
+impl IntoModelValue for bool {
+    fn into_model_value(self) -> Value {
+        Value::Bool(self)
+    }
+}
+
+impl IntoModelValue for u8 {
+    fn into_model_value(self) -> Value {
+        Value::UInt(self as u64)
+    }
+}
+
+impl IntoModelValue for u16 {
+    fn into_model_value(self) -> Value {
+        Value::UInt(self as u64)
+    }
+}
+
+impl IntoModelValue for u32 {
+    fn into_model_value(self) -> Value {
+        Value::UInt(self as u64)
+    }
+}
+
+impl IntoModelValue for u64 {
+    fn into_model_value(self) -> Value {
+        Value::UInt(self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelingRunStatus {
     Pass,
@@ -72,6 +106,97 @@ pub trait VerifiedMachine {
     fn init_states() -> Vec<Self::State>;
     fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State>;
     fn holds(state: &Self::State) -> bool;
+}
+
+#[macro_export]
+macro_rules! valid_state {
+    (
+        struct $state:ident {
+            $($field:ident : $field_ty:ty),+ $(,)?
+        }
+    ) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        struct $state {
+            $( $field: $field_ty, )+
+        }
+
+        impl $crate::modeling::ModelingState for $state {
+            fn snapshot(&self) -> std::collections::BTreeMap<String, $crate::ir::Value> {
+                std::collections::BTreeMap::from([
+                    $(
+                        (
+                            stringify!($field).to_string(),
+                            $crate::modeling::IntoModelValue::into_model_value(self.$field.clone()),
+                        )
+                    ),+
+                ])
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! valid_actions {
+    (
+        enum $action:ident {
+            $($variant:ident => $action_id:literal),+ $(,)?
+        }
+    ) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        enum $action {
+            $( $variant, )+
+        }
+
+        impl $crate::modeling::Finite for $action {
+            fn all() -> Vec<Self> {
+                vec![$(Self::$variant),+]
+            }
+        }
+
+        impl $crate::modeling::ModelingAction for $action {
+            fn action_id(&self) -> String {
+                match self {
+                    $( Self::$variant => $action_id.to_string(), )+
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! valid_model {
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        property $property:ident;
+        init [$($init_state:expr),* $(,)?];
+        step |$state:ident, $action:ident| $step_body:block
+        invariant |$holds_state:ident| $holds_expr:expr;
+    ) => {
+        struct $model;
+
+        impl $crate::modeling::VerifiedMachine for $model {
+            type State = $state_ty;
+            type Action = $action_ty;
+
+            fn model_id() -> &'static str {
+                stringify!($model)
+            }
+
+            fn property_id() -> &'static str {
+                stringify!($property)
+            }
+
+            fn init_states() -> Vec<Self::State> {
+                vec![$($init_state),*]
+            }
+
+            fn step($state: &Self::State, $action: &Self::Action) -> Vec<Self::State> $step_body
+
+            fn holds($holds_state: &Self::State) -> bool {
+                $holds_expr
+            }
+        }
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -594,75 +719,35 @@ fn build_evidence_trace<M: VerifiedMachine>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::{
         build_machine_test_vectors, check_machine, check_machine_outcome, collect_machine_coverage,
-        explain_machine, Finite, ModelingAction, ModelingRunStatus, ModelingState,
-        VerifiedMachine,
+        explain_machine, ModelingRunStatus,
     };
-    use crate::{engine::CheckOutcome, ir::Value};
+    use crate::{engine::CheckOutcome, valid_actions, valid_state};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    struct State {
-        x: u8,
-        locked: bool,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    enum Action {
-        Inc,
-        Lock,
-        Unlock,
-    }
-
-    impl Finite for Action {
-        fn all() -> Vec<Self> {
-            vec![Self::Inc, Self::Lock, Self::Unlock]
+    valid_state! {
+        struct State {
+            x: u8,
+            locked: bool,
         }
     }
 
-    impl ModelingAction for Action {
-        fn action_id(&self) -> String {
-            match self {
-                Action::Inc => "INC".to_string(),
-                Action::Lock => "LOCK".to_string(),
-                Action::Unlock => "UNLOCK".to_string(),
-            }
+    valid_actions! {
+        enum Action {
+            Inc => "INC",
+            Lock => "LOCK",
+            Unlock => "UNLOCK",
         }
     }
 
-    impl ModelingState for State {
-        fn snapshot(&self) -> BTreeMap<String, Value> {
-            BTreeMap::from([
-                ("x".to_string(), Value::UInt(self.x as u64)),
-                ("locked".to_string(), Value::Bool(self.locked)),
-            ])
-        }
-    }
-
-    struct CounterModel;
-
-    impl VerifiedMachine for CounterModel {
-        type State = State;
-        type Action = Action;
-
-        fn model_id() -> &'static str {
-            "CounterModel"
-        }
-
-        fn property_id() -> &'static str {
-            "P_RANGE"
-        }
-
-        fn init_states() -> Vec<Self::State> {
-            vec![State {
-                x: 0,
-                locked: false,
-            }]
-        }
-
-        fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
+    crate::valid_model! {
+        model CounterModel<State, Action>;
+        property P_RANGE;
+        init [State {
+            x: 0,
+            locked: false,
+        }];
+        step |state, action| {
             match action {
                 Action::Inc if !state.locked && state.x < 3 => vec![State {
                     x: state.x + 1,
@@ -679,37 +764,34 @@ mod tests {
                 _ => Vec::new(),
             }
         }
-
-        fn holds(state: &Self::State) -> bool {
-            state.x <= 3
-        }
+        invariant |state| state.x <= 3;
     }
 
-    struct FailingCounterModel;
-
-    impl VerifiedMachine for FailingCounterModel {
-        type State = State;
-        type Action = Action;
-
-        fn model_id() -> &'static str {
-            "FailingCounterModel"
+    crate::valid_model! {
+        model FailingCounterModel<State, Action>;
+        property P_FAIL;
+        init [State {
+            x: 0,
+            locked: false,
+        }];
+        step |state, action| {
+            match action {
+                Action::Inc if !state.locked && state.x < 3 => vec![State {
+                    x: state.x + 1,
+                    locked: state.locked,
+                }],
+                Action::Lock => vec![State {
+                    x: state.x,
+                    locked: true,
+                }],
+                Action::Unlock => vec![State {
+                    x: state.x,
+                    locked: false,
+                }],
+                _ => Vec::new(),
+            }
         }
-
-        fn property_id() -> &'static str {
-            "P_FAIL"
-        }
-
-        fn init_states() -> Vec<Self::State> {
-            CounterModel::init_states()
-        }
-
-        fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
-            CounterModel::step(state, action)
-        }
-
-        fn holds(state: &Self::State) -> bool {
-            state.x <= 1
-        }
+        invariant |state| state.x <= 1;
     }
 
     #[test]

@@ -11,6 +11,29 @@ The intended primary modeling path is Rust-defined models, not a project-specifi
 It keeps the model definitions in Rust and declares the exported registry with:
 
 ```rust
+valid_state! {
+    struct State {
+        x: u8,
+        locked: bool,
+    }
+}
+
+valid_actions! {
+    enum Action {
+        Inc => "INC",
+        Lock => "LOCK",
+        Unlock => "UNLOCK",
+    }
+}
+
+valid_model! {
+    model CounterModel<State, Action>;
+    property P_RANGE;
+    init [State { x: 0, locked: false }];
+    step |state, action| { /* transition logic */ }
+    invariant |state| state.x <= 3;
+}
+
 run_registry_cli(valid_models![
     "counter" => CounterModel,
     "failing-counter" => FailingCounterModel,
