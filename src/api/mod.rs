@@ -1,6 +1,7 @@
 //! Machine-readable API layer for AI and CLI integration.
 
 use crate::{
+    contract::snapshot_model,
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
@@ -181,6 +182,8 @@ pub fn capabilities_response(
 pub fn orchestrate_source(
     request: &OrchestrateRequest,
 ) -> Result<OrchestrateResponse, CheckErrorEnvelope> {
+    let backend_fallback =
+        backend_config_from_orchestrate_request(request).unwrap_or(AdapterConfig::Explicit);
     let model =
         frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
             manifest: RunManifest {
@@ -193,20 +196,15 @@ pub fn orchestrate_source(
                 source_hash: stable_hash_hex(&request.source),
                 contract_hash: "sha256:unknown".to_string(),
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: backend_kind_for_config(
-                    &backend_config_from_orchestrate_request(request)
-                        .unwrap_or(AdapterConfig::Explicit),
-                ),
-                backend_version: backend_version_for_config(
-                    &backend_config_from_orchestrate_request(request)
-                        .unwrap_or(AdapterConfig::Explicit),
-                ),
+                backend_name: backend_kind_for_config(&backend_fallback),
+                backend_version: backend_version_for_config(&backend_fallback),
                 seed: None,
             },
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics,
         })?;
+    let snapshot = snapshot_model(&model);
     let backend =
         backend_config_from_orchestrate_request(request).map_err(|message| CheckErrorEnvelope {
             manifest: RunManifest {
@@ -217,7 +215,7 @@ pub fn orchestrate_source(
                 ),
                 schema_version: "1.0.0".to_string(),
                 source_hash: stable_hash_hex(&request.source),
-                contract_hash: stable_hash_hex(&model.model_id),
+                contract_hash: snapshot.contract_hash.clone(),
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
                 backend_name: crate::engine::BackendKind::Explicit,
                 backend_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -261,6 +259,7 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
     let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
     match frontend::compile_model(&request.source) {
         Ok(model) => {
+            let snapshot = snapshot_model(&model);
             let property_id = request
                 .property_id
                 .clone()
@@ -281,7 +280,7 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 ),
                 schema_version: "1.0.0".to_string(),
                 source_hash,
-                contract_hash: stable_hash_hex(&model.model_id),
+                contract_hash: snapshot.contract_hash,
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
                 backend_name: backend_kind_for_config(&adapter),
                 backend_version: backend_version_for_config(&adapter),
@@ -547,6 +546,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
 
 pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
     require_non_empty(&request.source, "source")?;
     if let Some(backend) = &request.backend {
         require_non_empty(backend, "backend")?;
@@ -554,17 +554,38 @@ pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), String> {
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
+    require_non_empty(&response.model_id, "model_id")?;
+    Ok(())
+}
+
+pub fn validate_explain_request(request: &CheckRequest) -> Result<(), String> {
+    validate_check_request(request)
+}
+
 pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), String> {
     require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
     require_non_empty(&response.evidence_id, "evidence_id")?;
+    require_non_empty(&response.property_id, "property_id")?;
     if !(0.0..=1.0).contains(&response.confidence) {
         return Err("confidence must be between 0.0 and 1.0".to_string());
     }
     Ok(())
 }
 
+pub fn validate_minimize_request(request: &MinimizeRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
+    require_non_empty(&request.source, "source")?;
+    Ok(())
+}
+
 pub fn validate_minimize_response(response: &MinimizeResponse) -> Result<(), String> {
     require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
     require_non_empty(&response.vector_id, "vector_id")?;
     if response.minimized_steps > response.original_steps {
         return Err("minimized_steps must not exceed original_steps".to_string());
@@ -574,12 +595,28 @@ pub fn validate_minimize_response(response: &MinimizeResponse) -> Result<(), Str
 
 pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), String> {
     require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
     require_len_match(
         response.vector_ids.len(),
         response.generated_files.len(),
         "vector_ids",
         "generated_files",
     )?;
+    Ok(())
+}
+
+pub fn validate_capabilities_request(
+    request_id: &str,
+    backend: Option<&str>,
+    solver_executable: Option<&str>,
+) -> Result<(), String> {
+    require_non_empty(request_id, "request_id")?;
+    if let Some(backend) = backend {
+        require_non_empty(backend, "backend")?;
+        if backend == "command" && solver_executable.is_none() {
+            return Err("solver_executable is required when backend=command".to_string());
+        }
+    }
     Ok(())
 }
 
@@ -629,10 +666,12 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
 mod tests {
     use super::{
         capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_capabilities_response, validate_check_request,
-        validate_explain_response, validate_minimize_response, validate_orchestrate_response,
-        validate_testgen_request, validate_testgen_response, CheckRequest, MinimizeRequest,
-        OrchestrateRequest, TestgenRequest,
+        orchestrate_source, testgen_source, validate_capabilities_request,
+        validate_capabilities_response, validate_check_request, validate_explain_request,
+        validate_explain_response, validate_inspect_response, validate_minimize_request,
+        validate_minimize_response, validate_orchestrate_response, validate_testgen_request,
+        validate_testgen_response, CheckRequest, MinimizeRequest, OrchestrateRequest,
+        TestgenRequest,
     };
     use crate::engine::CheckOutcome;
 
@@ -642,6 +681,7 @@ mod tests {
         let response = inspect_source("req-1", source).unwrap();
         assert_eq!(response.model_id, "A");
         assert_eq!(response.properties, vec!["P_SAFE"]);
+        validate_inspect_response(&response).unwrap();
     }
 
     #[test]
@@ -661,7 +701,7 @@ mod tests {
     #[test]
     fn explain_returns_structured_failure_causes() {
         let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n";
-        let response = explain_source(&CheckRequest {
+        let request = CheckRequest {
             request_id: "req-explain".to_string(),
             source_name: "a.valid".to_string(),
             source: source.to_string(),
@@ -669,8 +709,9 @@ mod tests {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
-        })
-        .unwrap();
+        };
+        validate_explain_request(&request).unwrap();
+        let response = explain_source(&request).unwrap();
         assert_eq!(response.property_id, "P_SAFE");
         assert_eq!(response.failure_step_index, 0);
         assert_eq!(response.involved_fields, vec!["x".to_string()]);
@@ -680,7 +721,7 @@ mod tests {
     #[test]
     fn minimize_returns_shorter_vector_when_failure_is_preserved() {
         let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Inc:\n  pre: true\n  post:\n    x = x + 1\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n";
-        let response = minimize_source(&MinimizeRequest {
+        let request = MinimizeRequest {
             request_id: "req-min".to_string(),
             source_name: "a.valid".to_string(),
             source: source.to_string(),
@@ -688,8 +729,9 @@ mod tests {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
-        })
-        .unwrap();
+        };
+        validate_minimize_request(&request).unwrap();
+        let response = minimize_source(&request).unwrap();
         assert_eq!(response.original_steps, 1);
         assert_eq!(response.minimized_steps, 1);
         assert!(response.vector_id.contains("vec-"));
@@ -715,6 +757,7 @@ mod tests {
 
     #[test]
     fn capabilities_can_be_reported_for_command_backend() {
+        validate_capabilities_request("req-cap", Some("command"), Some("sh")).unwrap();
         let response = capabilities_response(
             "req-cap",
             Some("command".to_string()),
