@@ -453,6 +453,7 @@ for each guard:
     "transition_coverage_percent": 100,
     "guard_full_coverage_percent": 50,
     "visited_state_count": 12,
+    "repeated_state_count": 3,
     "step_count": 12,
     "max_depth_observed": 4
   },
@@ -461,7 +462,14 @@ for each guard:
     { "action_id": "A_LOCK", "covered": true, "count": 2 }
   ],
   "guards": [
-    { "action_id": "A_INC", "true_seen": true, "false_seen": false }
+    {
+      "action_id": "A_INC",
+      "true_seen": true,
+      "false_seen": false,
+      "true_count": 5,
+      "false_count": 0,
+      "covered_both": false
+    }
   ],
   "depth_histogram": {
     "0": 1,
@@ -488,6 +496,7 @@ COVERAGE model=counterlock
 transition_coverage_percent=100
 guard_full_coverage_percent=50
 visited_state_count=12
+repeated_state_count=3
 max_depth_observed=4
 uncovered_guards=A_INC:false
 ```

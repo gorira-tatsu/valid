@@ -12,6 +12,7 @@
         "transition_coverage_percent",
         "guard_full_coverage_percent",
         "visited_state_count",
+        "repeated_state_count",
         "step_count",
         "max_depth_observed"
       ],
@@ -19,6 +20,7 @@
         "transition_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "guard_full_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "visited_state_count": { "type": "integer", "minimum": 0 },
+        "repeated_state_count": { "type": "integer", "minimum": 0 },
         "step_count": { "type": "integer", "minimum": 0 },
         "max_depth_observed": { "type": "integer", "minimum": 0 }
       }
@@ -39,11 +41,14 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["action_id", "true_seen", "false_seen"],
+        "required": ["action_id", "true_seen", "false_seen", "true_count", "false_count", "covered_both"],
         "properties": {
           "action_id": { "type": "string" },
           "true_seen": { "type": "boolean" },
-          "false_seen": { "type": "boolean" }
+          "false_seen": { "type": "boolean" },
+          "true_count": { "type": "integer", "minimum": 0 },
+          "false_count": { "type": "integer", "minimum": 0 },
+          "covered_both": { "type": "boolean" }
         }
       }
     },

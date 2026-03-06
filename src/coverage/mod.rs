@@ -25,9 +25,13 @@ pub struct CoverageReport {
     pub total_actions: BTreeSet<String>,
     pub action_execution_counts: BTreeMap<String, usize>,
     pub visited_state_count: usize,
+    pub repeated_state_count: usize,
     pub max_depth_observed: u32,
     pub guard_true_actions: BTreeSet<String>,
     pub guard_false_actions: BTreeSet<String>,
+    pub guard_true_counts: BTreeMap<String, usize>,
+    pub guard_false_counts: BTreeMap<String, usize>,
+    pub uncovered_guards: Vec<String>,
     pub depth_histogram: BTreeMap<u32, usize>,
     pub step_count: usize,
 }
@@ -55,9 +59,12 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         .collect::<BTreeSet<_>>();
     let mut covered_actions = BTreeSet::new();
     let mut visited_states = BTreeSet::new();
+    let mut all_seen_states = 0usize;
     let mut max_depth_observed = 0u32;
     let mut guard_true_actions = BTreeSet::new();
     let mut guard_false_actions = BTreeSet::new();
+    let mut guard_true_counts = BTreeMap::new();
+    let mut guard_false_counts = BTreeMap::new();
     let mut action_execution_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut step_count = 0usize;
@@ -66,6 +73,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         for step in &trace.steps {
             step_count += 1;
             max_depth_observed = max_depth_observed.max(step.depth);
+            all_seen_states += 2;
             visited_states.insert(step.from_state_id.clone());
             visited_states.insert(step.to_state_id.clone());
             state_depths
@@ -86,9 +94,11 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                     match evaluate_guard(model, &state, action) {
                         Ok(true) => {
                             guard_true_actions.insert(action.action_id.clone());
+                            *guard_true_counts.entry(action.action_id.clone()).or_insert(0) += 1;
                         }
                         Ok(false) => {
                             guard_false_actions.insert(action.action_id.clone());
+                            *guard_false_counts.entry(action.action_id.clone()).or_insert(0) += 1;
                         }
                         Err(_) => {}
                     }
@@ -115,6 +125,20 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     } else {
         ((fully_covered_guards * 100) / total_actions.len()) as u32
     };
+    let uncovered_guards = total_actions
+        .iter()
+        .filter_map(|action| {
+            if guard_true_actions.contains(action) && guard_false_actions.contains(action) {
+                None
+            } else if guard_true_actions.contains(action) {
+                Some(format!("{action}:false"))
+            } else if guard_false_actions.contains(action) {
+                Some(format!("{action}:true"))
+            } else {
+                Some(format!("{action}:true,false"))
+            }
+        })
+        .collect::<Vec<_>>();
     CoverageReport {
         schema_version: "1.0.0".to_string(),
         model_id: model.model_id.clone(),
@@ -124,9 +148,13 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         total_actions,
         action_execution_counts,
         visited_state_count: visited_states.len(),
+        repeated_state_count: all_seen_states.saturating_sub(visited_states.len()),
         max_depth_observed,
         guard_true_actions,
         guard_false_actions,
+        guard_true_counts,
+        guard_false_counts,
+        uncovered_guards,
         depth_histogram,
         step_count,
     }
@@ -162,10 +190,11 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
     out.push_str(&format!(",\"model_id\":\"{}\"", report.model_id));
     out.push_str(&format!(
-        ",\"summary\":{{\"transition_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"visited_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
+        ",\"summary\":{{\"transition_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
         report.transition_coverage_percent,
         report.guard_full_coverage_percent,
         report.visited_state_count,
+        report.repeated_state_count,
         report.step_count,
         report.max_depth_observed
     ));
@@ -188,10 +217,13 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"true_seen\":{},\"false_seen\":{}}}",
+            "{{\"action_id\":\"{}\",\"true_seen\":{},\"false_seen\":{},\"true_count\":{},\"false_count\":{},\"covered_both\":{}}}",
             action,
             report.guard_true_actions.contains(action),
-            report.guard_false_actions.contains(action)
+            report.guard_false_actions.contains(action),
+            report.guard_true_counts.get(action).copied().unwrap_or(0),
+            report.guard_false_counts.get(action).copied().unwrap_or(0),
+            report.guard_true_actions.contains(action) && report.guard_false_actions.contains(action)
         ));
     }
     out.push(']');
@@ -206,6 +238,10 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out.push_str(&format!(
         ",\"visited_state_count\":{}",
         report.visited_state_count
+    ));
+    out.push_str(&format!(
+        ",\"repeated_state_count\":{}",
+        report.repeated_state_count
     ));
     out.push_str(&format!(
         ",\"max_depth_observed\":{}",
@@ -247,37 +283,20 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
 
 pub fn render_coverage_text(report: &CoverageReport) -> String {
     let gate = evaluate_coverage_gate(report, 80);
-    let uncovered_guards = report
-        .total_actions
-        .iter()
-        .filter_map(|action| {
-            if report.guard_true_actions.contains(action) && report.guard_false_actions.contains(action)
-            {
-                None
-            } else if report.guard_true_actions.contains(action) {
-                Some(format!("{action}:false"))
-            } else if report.guard_false_actions.contains(action) {
-                Some(format!("{action}:true"))
-            } else {
-                Some(format!("{action}:true,false"))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
     format!(
-        "COVERAGE model={}\ntransition_coverage_percent={}\nguard_full_coverage_percent={}\nvisited_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
+        "COVERAGE model={}\ntransition_coverage_percent={}\nguard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
         report.model_id,
         report.transition_coverage_percent,
         report.guard_full_coverage_percent,
         report.visited_state_count,
+        report.repeated_state_count,
         report.step_count,
         report.max_depth_observed,
         coverage_gate_status_label(&gate.status),
-        if uncovered_guards.is_empty() {
+        if report.uncovered_guards.is_empty() {
             "uncovered_guards=".to_string()
         } else {
-            format!("uncovered_guards={uncovered_guards}")
+            format!("uncovered_guards={}", report.uncovered_guards.join(", "))
         }
     )
 }
@@ -304,6 +323,16 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
             return Err("action_execution_counts must reference declared actions only".to_string());
         }
     }
+    for action in report.guard_true_counts.keys() {
+        if !report.total_actions.contains(action) {
+            return Err("guard_true_counts must reference declared actions only".to_string());
+        }
+    }
+    for action in report.guard_false_counts.keys() {
+        if !report.total_actions.contains(action) {
+            return Err("guard_false_counts must reference declared actions only".to_string());
+        }
+    }
     Ok(())
 }
 
@@ -321,6 +350,7 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
     require_number_field(summary, "transition_coverage_percent")?;
     require_number_field(summary, "guard_full_coverage_percent")?;
     require_number_field(summary, "visited_state_count")?;
+    require_number_field(summary, "repeated_state_count")?;
     require_number_field(summary, "step_count")?;
     require_number_field(summary, "max_depth_observed")?;
     for action in require_array_field(object, "actions")? {
@@ -334,6 +364,9 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         require_string_field(guard_object, "action_id")?;
         require_bool_field(guard_object, "true_seen")?;
         require_bool_field(guard_object, "false_seen")?;
+        require_number_field(guard_object, "true_count")?;
+        require_number_field(guard_object, "false_count")?;
+        require_bool_field(guard_object, "covered_both")?;
     }
     require_object(
         object
@@ -418,11 +451,13 @@ mod tests {
         assert_eq!(report.transition_coverage_percent, 50);
         assert_eq!(report.guard_full_coverage_percent, 0);
         assert_eq!(report.visited_state_count, 2);
+        assert_eq!(report.repeated_state_count, 0);
         assert_eq!(report.max_depth_observed, 1);
         assert_eq!(report.action_execution_counts.get("A_INC"), Some(&1));
         assert!(report.guard_true_actions.contains("A_INC"));
         assert!(report.guard_true_actions.contains("A_DEC"));
         assert!(!report.guard_false_actions.contains("A_DEC"));
+        assert_eq!(report.guard_true_counts.get("A_INC"), Some(&1));
         assert_eq!(report.depth_histogram.get(&0), Some(&1));
         assert_eq!(report.depth_histogram.get(&1), Some(&1));
         assert_eq!(evaluate_coverage_gate(&report, 60).status, CoverageGateStatus::Fail);
@@ -433,6 +468,7 @@ mod tests {
         let text = render_coverage_text(&report);
         assert!(text.contains("gate_status=fail"));
         assert!(text.contains("transition_coverage_percent=50"));
+        assert!(text.contains("repeated_state_count=0"));
     }
 
     #[test]
