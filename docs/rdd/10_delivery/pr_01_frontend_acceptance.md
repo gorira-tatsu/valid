@@ -1,5 +1,12 @@
 # PR-01 Frontend Acceptance
 
+関連ID:
+
+- FR: `FR-001`〜`FR-014`
+- Epic: `A-1`〜`A-4`
+- Specs: [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+- 索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+
 ## 1. 範囲
 
 - `src/frontend/`

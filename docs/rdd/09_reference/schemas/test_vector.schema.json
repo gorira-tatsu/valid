@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.test_vector",
+  "type": "object",
+  "required": ["schema_version", "vector_id", "source_kind", "strategy", "generator_version", "actions", "oracle_kind", "metadata"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "vector_id": { "type": "string" },
+    "source_kind": { "type": "string" },
+    "evidence_id": { "type": ["string", "null"] },
+    "strategy": { "type": "string" },
+    "generator_version": { "type": "string" },
+    "seed": { "type": ["integer", "null"] },
+    "initial_state": { "type": ["object", "null"] },
+    "actions": { "type": "array", "items": { "type": "object" } },
+    "expected_observations": { "type": "array", "items": { "type": "object" } },
+    "oracle_kind": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

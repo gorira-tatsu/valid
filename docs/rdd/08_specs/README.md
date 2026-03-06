@@ -1,5 +1,15 @@
 # 08 Specs
 
+## このフォルダの役割
+
+`08_specs` は実装前提の詳細仕様を置く。方針ではなく、入出力契約、schema、疑似コード、テストケースを定義する場所である。
+
+## 前提として読む章
+
+- [../03_architecture/architecture.md](/Users/tatsuhiko/code/valid/docs/rdd/03_architecture/architecture.md)
+- [../04_domain/business_logic_and_data_model.md](/Users/tatsuhiko/code/valid/docs/rdd/04_domain/business_logic_and_data_model.md)
+- [../07_planning/feature_breakdown.md](/Users/tatsuhiko/code/valid/docs/rdd/07_planning/feature_breakdown.md)
+
 - [mvp_frontend_and_kernel_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
 - [explicit_engine_and_evidence_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 - [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
@@ -23,3 +33,8 @@
 4. `ai_solver_selfcheck_specs.md`
 5. `full_technology_usage_plan.md`
 6. `../09_reference`
+
+実装との接続先:
+
+- 参照契約: [../09_reference/README.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/README.md)
+- PR 単位受け入れ: [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)

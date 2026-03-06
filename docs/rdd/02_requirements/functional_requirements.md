@@ -2,7 +2,7 @@
 
 - ドキュメントID: `RDD-0001-02`
 - バージョン: `v0.2`
-- 目的: 機能要件を実装可能な粒度で定義し、DDD/クリーンアーキテクチャ/STO/ソルバ統合との対応を明示する。
+- 目的: 機能要件を実装可能な粒度で定義し、DDD/クリーンアーキテクチャ/SSOT/ソルバ統合との対応を明示する。
 
 ## 1. 機能要件設計ポリシー
 
@@ -11,38 +11,62 @@
 - `REQ-ID` との追跡可能性を必須化する。
 - FAIL/UNKNOWN/ERRORを判定系として明確に分離する。
 
+## 1.1 上流REQマッピング
+
+この章は `FR-*` を定義する章だが、上流要求は [requirements_catalog.md](/Users/tatsuhiko/code/valid/docs/rdd/11_requirements_catalog/requirements_catalog.md) にある `REQ-*` を一次ソースとする。以下を固定マッピングとし、以後の変更は `REQ-*` を先に更新してから `FR-*` へ反映する。
+
+| REQ | 内容 | 対応FR |
+| --- | --- | --- |
+| `REQ-001` | モデルは有限状態として記述できること | `FR-001`〜`FR-005`, `FR-010`, `FR-012` |
+| `REQ-002` | PASS / FAIL / UNKNOWN / ERROR を明確に区別すること | `FR-020`〜`FR-024`, `FR-072` |
+| `REQ-003` | FAIL は replay 可能な証拠を持つこと | `FR-021`, `FR-030`, `FR-031`, `FR-032` |
+| `REQ-004` | 反例は回帰テストへ変換できること | `FR-040`, `FR-041`, `FR-043` |
+| `REQ-005` | coverage を測れること | `FR-042`, `FR-050`〜`FR-053` |
+| `REQ-006` | Rust 実装境界の契約変更を検知できること | `FR-060`〜`FR-063` |
+| `REQ-007` | AI が inspect / check / explain / minimize / testgen を機械可読に扱えること | `FR-070`〜`FR-073` |
+| `REQ-008` | backend 追加時も上位契約が壊れないこと | `FR-023`, `FR-071` |
+| `REQ-009` | kernel の重要性質を自己検証できること | `FR-011`, `FR-073` |
+| `REQ-010` | 文書、schema、artifact の真実源が一貫していること | `FR-032`, `FR-062`, `FR-063` |
+
 ## 2. モデル記述要件
 
 ### FR-001 状態宣言
+- 関連ID: `REQ-001`, `A-1`, `A-3`, `A-4`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 - 入力: 状態変数定義（Bool, Enum, Bounded Int, Struct, 将来Set/Rel）。
 - 処理: 型検査、有限性確認。
 - 出力: 内部StateSchema。
 - 失敗: 型不整合、無限型、重複名。
 
 ### FR-002 初期条件
+- 関連ID: `REQ-001`, `A-1`, `A-4`, `C-1`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), `PR-01`, `PR-03`
 - 複数初期状態を許容。
 - 初期条件充足不能の場合はERRORではなく`UNSAT_INIT`として明示。
 
 ### FR-003 遷移定義
+- 関連ID: `REQ-001`, `A-1`, `A-3`, `A-4`, `B-3`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`, `PR-02`
 - guard + 同時代入を必須。
 - 未更新変数はフレーム条件で保持。
 - 同一遷移内の二重代入は禁止。
 
 ### FR-004 性質定義
+- 関連ID: `REQ-001`, `REQ-003`, `A-1`, `A-4`, `C-2`, `D-1`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), `PR-01`, `PR-03`, `PR-04`
 - invariant/reachability/deadlockはMVP必須。
 - propertyはIDと説明文を持つ。
 
 ### FR-005 依存情報
+- 関連ID: `REQ-001`, `A-4`, `E-3`, `G-2`, `H-3`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 - actionごとに`reads/writes`を持つ。
 - 将来POR、影響分析、explain生成で利用する。
 
 ## 3. Rust埋め込み要件
 
 ### FR-010 `Finite` derive
+- 関連ID: `REQ-001`, `A-3`, `A-4`, `Phase 2`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 - enum/struct/boundedに対応。
 - 列挙順序は決定的。
 
 ### FR-011 `VerifiedMachine` trait
+- 関連ID: `REQ-009`, `H-2`, `I-1`, `Phase 2`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-09`, `PR-10`
 - `init_states()`
 - `step(state,input)`
 - `observe(state)`
@@ -50,6 +74,7 @@
 - optional: `enabled_inputs(state)`
 
 ### FR-012 macro生成
+- 関連ID: `REQ-001`, `A-1`〜`A-4`, `F-1`, `Phase 2`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 - モデル定義から次を生成:
   - Contract trait
   - IR
@@ -57,95 +82,121 @@
   - メタデータ（action/property/relation）
 
 ### FR-013 debug連携
+- 関連ID: `REQ-009`, `PR-02`, `Phase 2`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
 - `debug_assertions`時に軽量検証を実行可能。
 
 ### FR-014 release安全性
+- 関連ID: `REQ-001`, `NFR-030`〜`NFR-032`, `Phase 2`, [RDD-0001-03](/Users/tatsuhiko/code/valid/docs/rdd/02_requirements/non_functional_requirements.md)
 - releaseで検証依存を除去可能。
 
 ## 4. 検証実行要件
 
 ### FR-020 明示探索
+- 関連ID: `REQ-002`, `C-2`, `C-3`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), `PR-03`
 - BFS/DFSを選択可能。
 - 状態ハッシュで訪問済み管理。
 
 ### FR-021 反例復元
+- 関連ID: `REQ-002`, `REQ-003`, `C-5`, `D-1`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), `PR-03`, `PR-04`
 - predecessor管理で最短トレース（BFS時）を復元。
 
 ### FR-022 上限制御
+- 関連ID: `REQ-002`, `C-6`, `NFR-010`〜`NFR-012`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), `PR-03`
 - `max_states`, `max_depth`, `time_limit`。
 
 ### FR-023 BMC拡張
+- 関連ID: `REQ-008`, `I-1`, `I-2`, `I-3`, `Phase 4`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-10`
 - k-step展開。
 - SAT/SMTへの制約変換。
 
 ### FR-024 UNKNOWN
+- 関連ID: `REQ-002`, `C-6`, `H-2`, `NFR-001`〜`NFR-003`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 - 制限超過・未対応をUNKNOWN返却。
 
 ## 5. 可視化/説明要件
 
 ### FR-030 Mermaid
+- 関連ID: `REQ-003`, `REQ-010`, `D-3`, `D-4`, `FR-062`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 - stateDiagram/sequenceDiagram生成。
 
 ### FR-031 テキスト説明
+- 関連ID: `REQ-003`, `REQ-007`, `D-3`, `H-3`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-04`
 - 差分表示、失敗地点、有効遷移候補。
 
 ### FR-032 JSON
+- 関連ID: `REQ-003`, `REQ-007`, `REQ-010`, `D-2`, `G-4`, `H-1`〜`H-5`, [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md), `PR-04`, `PR-08`, `PR-09`
 - schema_version必須。
 
 ## 6. テスト生成要件
 
 ### FR-040 反例->回帰
+- 関連ID: `REQ-004`, `E-1`, `E-2`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 - 反例トレースからRust testを生成。
 
 ### FR-041 vector出力
+- 関連ID: `REQ-004`, `E-1`, `E-3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-06`
 - actions/expected/oracle/seedを保存。
 
 ### FR-042 カバレッジ指向
+- 関連ID: `REQ-004`, `REQ-005`, `E-3`, `G-1`, `G-2`, `G-5`, `Phase 3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-06`, `PR-08`
 - transition/guard/boundary/random戦略。
 
 ### FR-043 最小化
+- 関連ID: `REQ-004`, `REQ-007`, `E-4`, `H-4`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-06`, `PR-09`
 - 目的保持のままtrace縮約。
 
 ## 7. カバレッジ要件
 
 ### FR-050 transition
+- 関連ID: `REQ-005`, `G-1`, `G-4`, `KPI-03`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-08](/Users/tatsuhiko/code/valid/docs/rdd/07_planning/kpi_roadmap_risks.md), `PR-08`
 - 実行されたaction数/総action数。
 
 ### FR-051 guard
+- 関連ID: `REQ-005`, `G-2`, `G-4`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-08`
 - true/false分岐実行率。
 
 ### FR-052 state/depth
+- 関連ID: `REQ-005`, `C-7`, `G-3`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-03`, `PR-08`
 - 訪問状態数、深さ分布。
 
 ### FR-053 report
+- 関連ID: `REQ-005`, `REQ-010`, `G-4`, `G-5`, `FR-032`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-08`
 - JSONと人間可読テキスト。
 
 ## 8. CI/契約管理要件
 
 ### FR-060 contract hash
+- 関連ID: `REQ-006`, `F-1`, `F-2`, `KPI-05`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-08](/Users/tatsuhiko/code/valid/docs/rdd/07_planning/kpi_roadmap_risks.md), `PR-07`
 - trait/API変化をハッシュ化。
 
 ### FR-061 lock check
+- 関連ID: `REQ-006`, `F-2`, `F-3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-07`
 - `--check` で不一致を失敗扱い。
 
 ### FR-062 doc check
+- 関連ID: `REQ-010`, `F-4`, `FR-030`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), `PR-07`
 - 生成仕様書差分を検知。
 
 ### FR-063 artifact
+- 関連ID: `REQ-010`, `D-2`, `F-4`, [artifact_naming.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/artifact_naming.md), `PR-04`, `PR-07`
 - trace/vector/reportを保存。
 
 ## 9. AI API要件
 
 ### FR-070 inspect
+- 関連ID: `REQ-007`, `H-1`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-09`
 - モデル構造、型、property一覧を返す。
 
 ### FR-071 stable schema
+- 関連ID: `REQ-007`, `REQ-008`, `H-2`, `H-5`, `json_schemas`, [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md), `PR-09`
 - 破壊変更はメジャーバージョン。
 
 ### FR-072 error code
+- 関連ID: `REQ-002`, `REQ-007`, `H-2`, `H-3`, `error_codes`, [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md), `PR-09`
 - 失敗分類コードを返す。
 
 ### FR-073 explain
+- 関連ID: `REQ-007`, `REQ-009`, `H-3`, `D-5`, `FR-031`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md), `PR-09`
 - 変数寄与、最小再現、修復ヒント。
 
 ## 10. DDD対応
@@ -176,7 +227,7 @@
 - Entity層にState/Action/Traceを定義。
 - External層依存はInterface経由。
 
-## 12. STO/SSOT対応
+## 12. SSOT対応
 
 - 一次ソースをモデル定義に固定。
 - FRはすべて一次ソースから導出可能にする。
@@ -411,7 +462,7 @@
 - SolverProcessAdapter
 - FileStorageAdapter
 
-## 32. STO拡張要件
+## 32. SSOT拡張要件
 
 - モデル一次ソースは署名付きメタデータを持つ。
 - 生成物は必ず`source_hash`を保持。
@@ -502,7 +553,7 @@
 
 ## 45. 章末統合サマリ
 
-本章は、要件を単なる箇条書きではなく、実装と運用へ落とし込むための詳細仕様として定義した。特に、DDD（境界と集約）、クリーンアーキテクチャ（依存逆転）、STO（一次ソース固定）、ソルバ中立（IR正規化）を機能要件に直接埋め込み、後工程で抜け漏れが発生しない構造にしている。
+本章は、要件を単なる箇条書きではなく、実装と運用へ落とし込むための詳細仕様として定義した。特に、DDD（境界と集約）、クリーンアーキテクチャ（依存逆転）、SSOT（一次ソース固定）、ソルバ中立（IR正規化）を機能要件に直接埋め込み、後工程で抜け漏れが発生しない構造にしている。
 
 ## 46. 追加補遺
 
@@ -532,8 +583,7 @@
 
 - FR一覧が実装項目と1対1で追跡可能。
 - すべての要件に失敗時挙動が定義済み。
-- DDD/CA/STO/Solverとの対応節が存在。
-- 10,000字以上。
+- DDD/CA/SSOT/Solverとの対応節が存在。
 
 ## 51. 追加補遺6: 要件レビュー手順
 
@@ -595,19 +645,8 @@
 本章のFRは、実装タスク分解、受け入れ試験、CIゲート、監査証跡の基準として兼用できるよう設計している。これにより、仕様から運用までの断絶を抑制する。
 
 
-## 60. 完了
+## 60. 章末確認
 
-本章を確定する。
-補足: 更新時はFR-ID追跡を維持。
-補足2: 互換性規則順守。
-補足3: 章確定。
-以上。
-完了。
-確定。
-済。
-終。
-了。
-記録
-完
-了
-。
+- FR 追加時は `REQ-*` との対応を更新する。
+- 互換性規則を変える場合は関連 schema と acceptance 条件を同時に更新する。
+- 実装着手時は [implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md) と整合していることを確認する。

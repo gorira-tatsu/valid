@@ -3,6 +3,10 @@
 - ドキュメントID: `RDD-0001-09`
 - バージョン: `v0.1`
 - 目的: 実際に何の機能をどの順序で作るかを、実装可能な粒度まで分解する。
+- ID参照:
+  - [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - 詳細仕様: [../08_specs/README.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/README.md)
+  - PR受け入れ: [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
 
 ## 1. 本章の位置づけ
 
@@ -35,6 +39,8 @@
 
 ### A-1 モデルソース読込
 
+関連ID: `FR-001`, `FR-002`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+
 目的:
 
 - モデル定義ファイルまたはRust macro入力を読み込む。
@@ -52,6 +58,8 @@
 - 単純な状態宣言とaction宣言をパースできる。
 
 ### A-2 名前解決
+
+関連ID: `FR-001`, `FR-004`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -72,6 +80,8 @@
 
 ### A-3 型付け
 
+関連ID: `FR-001`, `FR-003`, `FR-010`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
+
 目的:
 
 - bounded int, enum, bool, structの型整合を保証する。
@@ -81,6 +91,8 @@
 - typed model
 
 ### A-4 IR生成
+
+関連ID: `FR-001`〜`FR-005`, `FR-012`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), `PR-01`
 
 目的:
 
@@ -96,6 +108,8 @@
 
 ### A-5 モデル検証
 
+関連ID: `FR-004`, `FR-005`, `Phase 0`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+
 目的:
 
 - 到達不能action、未使用property、unsat init候補などを静的検査する。
@@ -107,6 +121,8 @@
 ## 5. Epic B: Core Kernel
 
 ### B-1 式評価器
+
+関連ID: `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -123,11 +139,15 @@
 
 ### B-2 ガード評価
 
+関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
+
 目的:
 
 - actionのguardを評価し、enabled/disabledを返す。
 
 ### B-3 遷移適用
+
+関連ID: `FR-003`, `FR-011`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
 
 目的:
 
@@ -135,11 +155,15 @@
 
 ### B-4 Property評価
 
+関連ID: `FR-004`, `FR-020`, `Phase 1`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - invariant/reachability/deadlockの最小評価ロジックを持つ。
 
 ### B-5 Trace Replay
+
+関連ID: `FR-021`, `NFR-002`, `J-1`, `PR-02`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -151,11 +175,15 @@
 
 ### C-1 初期状態列挙
 
+関連ID: `FR-002`, `FR-020`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - initから探索開始点を生成する。
 
 ### C-2 BFS探索
+
+関連ID: `FR-020`, `FR-021`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -163,11 +191,15 @@
 
 ### C-3 DFS探索
 
+関連ID: `FR-020`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - メモリ節約用途の探索を提供する。
 
 ### C-4 訪問済み状態管理
+
+関連ID: `FR-020`, `FR-022`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -175,17 +207,23 @@
 
 ### C-5 predecessor記録
 
+関連ID: `FR-021`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - FAIL時にtrace復元可能にする。
 
 ### C-6 上限制御
 
+関連ID: `FR-022`, `FR-024`, `NFR-010`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - max states / depth / timeを執行する。
 
 ### C-7 実行統計
+
+関連ID: `FR-052`, `NFR-011`, `PR-03`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -195,11 +233,15 @@
 
 ### D-1 Evidence生成
 
+関連ID: `FR-021`, `FR-031`, `FR-040`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - FAILまたはwitnessからEvidenceTraceを生成する。
 
 ### D-2 Trace JSON出力
+
+関連ID: `FR-032`, `FR-063`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 
 目的:
 
@@ -207,17 +249,23 @@
 
 ### D-3 テキスト要約
 
+関連ID: `FR-031`, `FR-053`, `PR-04`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
+
 目的:
 
 - 人間向けに最小情報を表示する。
 
 ### D-4 Mermaid生成
 
+関連ID: `FR-030`, `FR-062`, `Phase 3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - stateDiagram/sequenceDiagramを生成する。
 
 ### D-5 Explain基礎
+
+関連ID: `FR-073`, `H-3`, `Phase 5`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -227,11 +275,15 @@
 
 ### E-1 Counterexample to Vector
 
+関連ID: `FR-040`, `FR-041`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - 反例traceをvectorへ変換する。
 
 ### E-2 Vector to Rust Test
+
+関連ID: `FR-040`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -239,17 +291,23 @@
 
 ### E-3 Witness Test Generation
 
+関連ID: `FR-041`, `FR-042`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - 成功トレースやcoverage目的のvectorを生成する。
 
 ### E-4 Trace Minimization
 
+関連ID: `FR-043`, `H-4`, `PR-06`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - shorter reproducerを作る。
 
 ### E-5 Test Rendering Modes
+
+関連ID: `FR-040`, `FR-041`, `Phase 3`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -262,11 +320,15 @@
 
 ### F-1 Contract Snapshot生成
 
+関連ID: `FR-060`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - trait/API境界のハッシュを計算する。
 
 ### F-2 Lock照合
+
+関連ID: `FR-061`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -274,11 +336,15 @@
 
 ### F-3 Drift出力
 
+関連ID: `FR-061`, `KPI-05`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - 差分理由をJSONとtextで返す。
 
 ### F-4 Document Drift検知
+
+関連ID: `FR-062`, `PR-07`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -288,11 +354,15 @@
 
 ### G-1 Transition Coverage
 
+関連ID: `FR-050`, `KPI-03`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - action単位の実行率を測る。
 
 ### G-2 Guard Coverage
+
+関連ID: `FR-051`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -300,17 +370,23 @@
 
 ### G-3 State/Depth Summary
 
+関連ID: `FR-052`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - 探索深さ分布と状態観測量を保存する。
 
 ### G-4 Coverage Report
 
+関連ID: `FR-053`, `KPI-03`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+
 目的:
 
 - JSON/textでレポート化する。
 
 ### G-5 Coverage Gate Evaluation
+
+関連ID: `FR-042`, `FR-053`, `PR-08`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 目的:
 
@@ -320,11 +396,15 @@
 
 ### H-1 Inspect API
 
+関連ID: `FR-070`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - AIがモデル構造を読む。
 
 ### H-2 Check API
+
+関連ID: `FR-071`, `FR-072`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -332,17 +412,23 @@
 
 ### H-3 Explain API
 
+関連ID: `FR-073`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - AIが原因候補と修復ヒントを受ける。
 
 ### H-4 Minimize API
 
+関連ID: `FR-043`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - AIが反例を短くできる。
 
 ### H-5 Testgen API
+
+関連ID: `FR-040`, `FR-041`, `PR-09`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -352,11 +438,15 @@
 
 ### I-1 Solver Adapter Interface
 
+関連ID: `FR-023`, `NFR-041`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - backend能力と結果形式を共通化する。
 
 ### I-2 BMC Run Plan
+
+関連ID: `FR-023`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -364,11 +454,15 @@
 
 ### I-3 Assignment to Trace
 
+関連ID: `FR-023`, `FR-032`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - solver結果をEvidenceTraceへ変換する。
 
 ### I-4 Capability Matrix
+
+関連ID: `FR-070`〜`FR-073`, `PR-10`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -378,17 +472,23 @@
 
 ### J-1 Selfcheck Spec群
 
+関連ID: `NFR-002`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - kernelの重要関数を検証するspecを管理する。
 
 ### J-2 Selfcheck Runner
 
+関連ID: `NFR-040`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 目的:
 
 - CIで自己検証を走らせる。
 
 ### J-3 Selfcheck Report
+
+関連ID: `NFR-042`, `Phase 6`, `PR-11`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 目的:
 
@@ -397,6 +497,8 @@
 ## 14. フェーズ別の機能作成順
 
 ### Phase 0
+
+関連ID: `A-1`〜`A-4`, `B-1`〜`B-3`, [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md)
 
 - A-1
 - A-2
@@ -407,6 +509,8 @@
 - B-3
 
 ### Phase 1
+
+関連ID: `B-4`, `C-1`〜`C-6`, `D-1`〜`D-3`, [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md)
 
 - B-4
 - C-1
@@ -420,6 +524,8 @@
 
 ### Phase 2
 
+関連ID: `F-1`, `F-2`, `F-4`, `H-1`, `H-2`, `PR-07`, `PR-09`
+
 - F-1
 - F-2
 - F-4
@@ -427,6 +533,8 @@
 - H-2
 
 ### Phase 3
+
+関連ID: `E-1`, `E-2`, `E-4`, `G-1`, `G-2`, `G-4`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
 
 - E-1
 - E-2
@@ -437,6 +545,8 @@
 
 ### Phase 4
 
+関連ID: `I-1`〜`I-4`, `E-3`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 - I-1
 - I-2
 - I-3
@@ -445,6 +555,8 @@
 
 ### Phase 5
 
+関連ID: `G-3`, `G-5`, `H-3`, `H-4`, `H-5`, [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
 - G-3
 - G-5
 - H-3
@@ -452,6 +564,8 @@
 - H-5
 
 ### Phase 6
+
+関連ID: `J-1`, `J-2`, `J-3`, [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
 
 - J-1
 - J-2
@@ -496,7 +610,7 @@
 
 たとえば `I-1 Solver Adapter Interface` はAdapter層、`B-3 遷移適用` はEntity/Kernel層、`E-2 Vector to Rust Test` はAdapter寄りのUse Caseである。
 
-## 19. STO/SSOT対応
+## 19. SSOT対応
 
 機能追加時に守るべき原則:
 

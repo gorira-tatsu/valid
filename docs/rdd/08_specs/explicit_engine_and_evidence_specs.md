@@ -8,6 +8,16 @@
   - [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md)
   - [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md)
   - [artifact_naming.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/artifact_naming.md)
+- 関連ID:
+  - FR: `FR-020`〜`FR-032`
+  - NFR: `NFR-001`〜`NFR-003`, `NFR-010`〜`NFR-012`
+  - Epic: `C-1`〜`C-7`, `D-1`〜`D-3`
+  - PR: `PR-03`, `PR-04`
+  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- 次に読む:
+  - [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+  - [../10_delivery/pr_03_explicit_engine_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_03_explicit_engine_acceptance.md)
+  - [../10_delivery/pr_04_evidence_reporter_acceptance.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/pr_04_evidence_reporter_acceptance.md)
 
 ## 1. 対象範囲
 
@@ -841,7 +851,7 @@ ExplicitEngine -> Kernel
 Reporter -> Result DTO
 ```
 
-## 22. STO/SSOT 対応
+## 22. SSOT 対応
 
 - 一次ソースは `ModelIr` と `RunPlan` である。
 - `ExplicitRunResult` は派生物だが、再現・監査のため保存対象とする。

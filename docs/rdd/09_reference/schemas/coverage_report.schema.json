@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.coverage_report",
+  "type": "object",
+  "required": ["schema_version", "model_id", "summary", "actions", "guards", "depth_histogram"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "model_id": { "type": "string" },
+    "summary": { "type": "object" },
+    "actions": { "type": "array", "items": { "type": "object" } },
+    "guards": { "type": "array", "items": { "type": "object" } },
+    "depth_histogram": { "type": "object" }
+  }
+}

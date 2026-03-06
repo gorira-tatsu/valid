@@ -8,6 +8,16 @@
   - [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
   - [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md)
   - [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md)
+- 関連ID:
+  - FR: `FR-023`, `FR-070`〜`FR-073`
+  - NFR: `NFR-040`〜`NFR-042`
+  - Epic: `H-1`〜`H-5`, `I-1`〜`I-4`, `J-1`〜`J-3`
+  - PR: `PR-09`, `PR-10`, `PR-11`
+  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- 補助参照:
+  - [../09_reference/repository_structure.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/repository_structure.md)
+  - [../09_reference/implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md)
+  - [../10_delivery/README.md](/Users/tatsuhiko/code/valid/docs/rdd/10_delivery/README.md)
 
 ## 1. 対象範囲
 
@@ -31,6 +41,7 @@
 - selfcheck は通常 CI と分離し、通常 run の信頼性に影響を与えない。
 - explain は補助情報であり、意味論上の真実源ではない。
 - backend 能力差は capability matrix で明示する。
+- 失敗応答は `diagnostics` を持ち、segment と conflict を返す。
 
 ## 3. H-1 Inspect API
 
@@ -121,6 +132,32 @@
 }
 ```
 
+### 4.3 diagnostics 仕様
+
+`check` は `ERROR` と `UNKNOWN` の両方で `diagnostics` を返す。特に `UNKNOWN` では「不明だった」だけで終わらせず、停止セグメントと次の選択肢を返す。
+
+```json
+{
+  "error_code": "UNKNOWN_TIME_LIMIT_REACHED",
+  "segment": "engine.search",
+  "severity": "warning",
+  "message": "time limit reached before property set was exhausted",
+  "conflicts": [
+    "time_limit_ms=1000",
+    "frontier_size=2819"
+  ],
+  "help": [
+    "increase time_limit_ms",
+    "narrow property_selection",
+    "switch to a symbolic backend if available"
+  ],
+  "best_practices": [
+    "treat UNKNOWN as non-passing in CI",
+    "record limits used for every run"
+  ]
+}
+```
+
 ## 5. H-3 Explain API
 
 ### 5.1 返却フィールド
@@ -137,6 +174,7 @@
 - `candidate_causes`
 - `repair_hints`
 - `confidence`
+- `best_practices`
 
 ### 5.2 response 例
 
@@ -159,6 +197,9 @@
     "review guard of action A_MARK_BAD",
     "verify invariant P_NO_BAD is intended"
   ],
+  "best_practices": [
+    "keep write sets explicit so involved fields stay explainable"
+  ],
   "confidence": 0.72
 }
 ```
@@ -168,6 +209,14 @@
 - 自動修正の確定
 - 論理的完全性の主張
 - solver 内部証明の説明
+
+### 5.4 help と best practice の区別
+
+- `repair_hints`: 直近の修正候補
+- `best_practices`: 今後同種の問題を減らす設計規約
+- `candidate_causes`: 破綻理由の仮説
+
+この3つを混ぜないことで、AI が「今やること」と「今後守ること」を分離できる。
 
 ## 6. H-4 Minimize API
 
@@ -472,7 +521,7 @@ valid selfcheck run --suite kernel-core --json
 - selfcheck runner は use case。
 - normalized result / capability matrix / explain DTO は interface 向け DTO。
 
-## 19. STO/SSOT対応
+## 19. SSOT対応
 
 - AI API は source を更新しない。
 - solver assignment は一次ソースではなく、正規化前の中間 artifact にすぎない。

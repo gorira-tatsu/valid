@@ -3,6 +3,31 @@
 - ドキュメントID: `RDD-0001-03`
 - バージョン: `v0.3`
 - 目的: 本システムの品質特性を、実装・運用・監査まで含めて定義する。
+- ID参照:
+  - 文書索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+  - 関連仕様: [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+
+## NFR逆参照
+
+| NFR ID | 主題 | 関連FR | 関連仕様 |
+|---|---|---|---|
+| `NFR-001` | 誤PASS防止 | `FR-020`〜`FR-024` | [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md) |
+| `NFR-002` | 証拠再生可能性 | `FR-021`, `FR-040` | [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md) |
+| `NFR-003` | UNKNOWN/ERROR分離 | `FR-024`, `FR-072` | [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-004` | 診断の局所性 | `FR-072`, `FR-073` | [RDD-0001-06](/Users/tatsuhiko/code/valid/docs/rdd/05_interfaces/interfaces_cli_api_ci.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-005` | 修復可能性 | `FR-031`, `FR-073` | [RDD-0001-06](/Users/tatsuhiko/code/valid/docs/rdd/05_interfaces/interfaces_cli_api_ci.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-010` | 状態規模性能 | `FR-020`, `FR-022` | [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md) |
+| `NFR-011` | 計測可能性 | `FR-052`, `FR-053` | [RDD-0001-12](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/explicit_engine_and_evidence_specs.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md) |
+| `NFR-012` | coverage overhead | `FR-050`〜`FR-053` | [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md) |
+| `NFR-020` | CLI安定性 | `FR-032`, `FR-072` | [RDD-0001-06](/Users/tatsuhiko/code/valid/docs/rdd/05_interfaces/interfaces_cli_api_ci.md) |
+| `NFR-021` | 可搬性 | `FR-071` | [RDD-0001-06](/Users/tatsuhiko/code/valid/docs/rdd/05_interfaces/interfaces_cli_api_ci.md) |
+| `NFR-022` | CI再現性 | `FR-061`, `FR-063` | [RDD-0001-06](/Users/tatsuhiko/code/valid/docs/rdd/05_interfaces/interfaces_cli_api_ci.md), [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md) |
+| `NFR-030` | 入力安全性 | `FR-001`〜`FR-003`, `FR-072` | [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-031` | Mermaid安全性 | `FR-030`, `FR-062` | [RDD-0001-13](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md) |
+| `NFR-032` | 外部backend安全性 | `FR-023`, `FR-070`〜`FR-073` | [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-040` | kernel最小化 | `FR-011`, `FR-023` | [RDD-0001-10](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/mvp_frontend_and_kernel_specs.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-041` | backend追加容易性 | `FR-023`, `FR-070` | [RDD-0001-11](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/full_technology_usage_plan.md), [RDD-0001-14](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md) |
+| `NFR-042` | schema互換性 | `FR-032`, `FR-071` | [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md) |
 
 ## 1. 本章の位置づけ
 
@@ -93,6 +118,29 @@
 - 同一seed再現失敗率: 1%未満
 - 同一trace再生不一致率: 0%
 - 契約ハッシュ誤差検出漏れ: 0%
+
+### 4.5 診断品質
+
+AI と人間の双方が修復ループを回すために、診断は単なるエラーコードでは足りない。少なくとも次を返せることを非機能要件とする。
+
+- どのセグメントで止まったか
+- どの入力要素が原因か
+- どの制約や定義が競合しているか
+- 次に確認すべき候補
+- 既知のベストプラクティスのうち何が適用可能か
+
+#### NFR-004 診断の局所性
+
+- すべての `ERROR` と多くの `UNKNOWN` は `segment` を持つ。
+- `segment` は最低でも `frontend.parse`, `frontend.resolve`, `frontend.typecheck`, `kernel.eval`, `engine.search`, `solver.normalize`, `report.render`, `contract.check`, `selfcheck.run` のいずれかに分類される。
+- 1つの診断は 1つの主原因を持ち、二次原因は `related_diagnostics` へ分離する。
+
+#### NFR-005 修復可能性
+
+- 診断は `help` と `best_practices` を返す。
+- `help` は直近の修復行動を1〜3件返す。
+- `best_practices` は一般論ではなく、現在の失敗カテゴリに紐づく規約を返す。
+- 修復ヒントは `error_code` と矛盾してはならない。
 
 ## 5. 監査性
 
@@ -296,9 +344,9 @@ AdaptersはDomain Errorを外部表現へマッピングする。性能や可用
 
 外部ソルバ、FS、CI環境は最も不安定な層であり、非機能リスクの主因である。したがって、この層の異常は必ず構造化して上位へ伝える。
 
-## 15. STO/SSOTから見た非機能要件
+## 15. SSOTから見た非機能要件
 
-STO違反は品質劣化そのものである。一次ソースと派生物が食い違う状態を許すと、再現性・監査性・正確性が同時に崩れる。そのため、以下を必須とする。
+SSOT違反は品質劣化そのものである。一次ソースと派生物が食い違う状態を許すと、再現性・監査性・正確性が同時に崩れる。そのため、以下を必須とする。
 
 - 一次ソースに `source_hash` を付与する。
 - 生成物は `source_hash` を保持する。
@@ -419,7 +467,7 @@ contract/doc/checkを通らない変更を自動反映しない。
 
 - 本章だけで品質属性の優先順位が理解できる。
 - 各属性に測定方法または判断基準がある。
-- DDD/CA/STO/ソルバ観点が独立節として定義されている。
+- DDD/CA/SSOT/ソルバ観点が独立節として定義されている。
 - 実装チームがSLOとゲート条件をそのままCIへ落とし込める。
 
 ## 23. 章固有の文書管理規約
@@ -573,6 +621,6 @@ contract/doc/checkを通らない変更を自動反映しない。
 
 この条件を満たさない技術は、研究価値が高くても本番ゲートへは採用しない。
 
-## 37. 最終補足
+## 37. 章末補足
 
 本章の品質要件は、今後の各章更新時に常に参照されるべき共通制約である。機能追加、アーキテクチャ変更、データモデル変更、研究成果導入、KPI変更のすべては、本章の正確性・再現性・監査性・安全性を損なわないことを前提条件とする。

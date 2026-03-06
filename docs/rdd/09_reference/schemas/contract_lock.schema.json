@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.contract_lock",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "entries"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "entries": { "type": "array", "items": { "type": "object" } }
+  }
+}

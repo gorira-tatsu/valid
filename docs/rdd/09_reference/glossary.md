@@ -14,4 +14,4 @@
 - `ArtifactIndex`: run に紐づく artifact path の索引。
 - `Selfcheck`: kernel や trace replay の性質を自分自身で検証する suite。
 - `SSOT`: Single Source of Truth。本計画では spec source と contract metadata。
-- `STO`: Source of Truth Operationally。運用上の真実源。JSON artifact や lock file の管理指針を含む。
+- `SSOT`: Single Source of Truth。本プロジェクトでの唯一の一次ソース。JSON artifact や lock file は派生成果物であり、SSOT ではない。

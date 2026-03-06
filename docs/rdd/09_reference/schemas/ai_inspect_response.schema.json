@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.ai.inspect.response",
+  "type": "object",
+  "required": ["schema_version", "request_id", "status", "model"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "request_id": { "type": "string" },
+    "status": { "type": "string" },
+    "model": { "type": "object" }
+  }
+}

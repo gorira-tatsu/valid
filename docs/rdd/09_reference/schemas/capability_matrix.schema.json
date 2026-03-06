@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.capability_matrix",
+  "type": "object",
+  "required": ["backend", "capabilities"],
+  "properties": {
+    "backend": { "type": "string" },
+    "capabilities": { "type": "object" }
+  }
+}

@@ -8,6 +8,14 @@
   - [json_schemas.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/json_schemas.md)
   - [error_codes.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/error_codes.md)
   - [artifact_naming.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/artifact_naming.md)
+- 関連ID:
+  - FR: `FR-040`〜`FR-043`, `FR-050`〜`FR-053`, `FR-060`〜`FR-063`
+  - Epic: `E-1`〜`E-5`, `F-1`〜`F-4`, `G-1`〜`G-5`
+  - PR: `PR-06`, `PR-07`, `PR-08`
+  - 参照索引: [id_cross_reference.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/id_cross_reference.md)
+- 次に読む:
+  - [ai_solver_selfcheck_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/ai_solver_selfcheck_specs.md)
+  - [../09_reference/implementation_pr_plan.md](/Users/tatsuhiko/code/valid/docs/rdd/09_reference/implementation_pr_plan.md)
 
 ## 1. 対象範囲
 
@@ -538,7 +546,7 @@ pub fn compute_coverage(
 - test renderer / lock storage / drift reporter は adapter。
 - contract hash の正規化は domain service。
 
-## 20. STO/SSOT対応
+## 20. SSOT対応
 
 - 一次ソースは spec と contract metadata。
 - vector、generated tests、lock、coverage report はすべて派生物。
