@@ -59,6 +59,14 @@ fn main() {
     if parsed.command == "clean" {
         cmd_clean(&parsed);
     }
+    if parsed.manifest_path.is_none()
+        && parsed.example.is_none()
+        && parsed.bin.is_none()
+        && parsed.file.is_none()
+        && !parsed.extra_positionals.is_empty()
+    {
+        usage_exit(&primary_usage());
+    }
     if parsed.manifest_path.is_some()
         || parsed.example.is_some()
         || parsed.bin.is_some()
@@ -116,7 +124,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -190,6 +198,7 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             benchmark_models: Vec::new(),
             write_path: None,
             check: false,
+            extra_positionals: Vec::new(),
         })
         .output()
         .unwrap_or_else(|err| {
@@ -269,6 +278,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
             benchmark_models: Vec::new(),
             write_path: None,
             check: false,
+            extra_positionals: Vec::new(),
         });
         let output = command.output().unwrap_or_else(|err| {
             message_exit(
@@ -327,6 +337,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     command.arg(&parsed.command);
     if let Some(model) = &parsed.model {
         command.arg(model);
+    }
+    for extra in &parsed.extra_positionals {
+        command.arg(extra);
     }
     if parsed.command == "benchmark" && parsed.repeat > 0 {
         command.arg(format!("--repeat={}", parsed.repeat));
@@ -411,6 +424,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         benchmark_models: Vec::new(),
         write_path: None,
         check: false,
+        extra_positionals: Vec::new(),
     })
     .output()
     .unwrap_or_else(|err| {
@@ -1019,6 +1033,7 @@ struct CliArgs {
     file: Option<String>,
     command: String,
     model: Option<String>,
+    extra_positionals: Vec<String>,
     repeat: usize,
     baseline_mode: Option<String>,
     threshold_percent: Option<u32>,
@@ -1117,7 +1132,7 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             _ if parsed.command.is_empty() => parsed.command = normalize_command(&arg),
             _ if parsed.model.is_none() => parsed.model = Some(arg),
-            _ => usage_exit(&primary_usage()),
+            _ => parsed.extra_positionals.push(arg),
         }
     }
     if parsed.command.is_empty() {
@@ -1823,5 +1838,50 @@ fn apply_project_runtime_config(config: &ProjectConfig) {
     }
     if let Some(default_graph_format) = &config.default_graph_format {
         env::set_var("VALID_DEFAULT_GRAPH_FORMAT", default_graph_format);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cli_keeps_extra_positionals_for_external_commands() {
+        let parsed = parse_cli(vec![
+            "contract".to_string(),
+            "check".to_string(),
+            "valid.lock.json".to_string(),
+            "--json".to_string(),
+        ]);
+
+        assert_eq!(parsed.command, "contract");
+        assert_eq!(parsed.model.as_deref(), Some("check"));
+        assert_eq!(parsed.extra_positionals, vec!["valid.lock.json"]);
+        assert!(parsed.json);
+    }
+
+    #[test]
+    fn build_external_command_appends_extra_positionals_after_model() {
+        let command = build_external_command(&CliArgs {
+            manifest_path: Some("Cargo.toml".to_string()),
+            file: Some("examples/valid_models.rs".to_string()),
+            command: "contract".to_string(),
+            model: Some("check".to_string()),
+            extra_positionals: vec!["valid.lock.json".to_string()],
+            json: true,
+            ..CliArgs::default()
+        });
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(args.ends_with(&[
+            "--".to_string(),
+            "contract".to_string(),
+            "check".to_string(),
+            "valid.lock.json".to_string(),
+            "--json".to_string(),
+        ]));
     }
 }
