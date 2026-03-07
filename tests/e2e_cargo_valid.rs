@@ -121,7 +121,11 @@ fn cargo_subcommand_style_prefix_is_accepted() {
         .arg("--json")
         .output()
         .expect("cargo-valid should accept cargo subcommand style prefix");
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"prod-deploy-safe\""));
 }
@@ -188,6 +192,32 @@ fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
 }
 
 #[test]
+fn cargo_valid_graph_supports_dot_and_svg_formats() {
+    let _guard = cargo_lock().lock().unwrap();
+    let dot_output = Command::new(cargo_valid_path())
+        .arg("graph")
+        .arg("refund-control")
+        .arg("--format=dot")
+        .output()
+        .expect("cargo-valid graph dot should run");
+    assert!(dot_output.status.success());
+    let dot = String::from_utf8_lossy(&dot_output.stdout);
+    assert!(dot.contains("digraph model"));
+    assert!(dot.contains("ISSUE_REFUND"));
+
+    let svg_output = Command::new(cargo_valid_path())
+        .arg("graph")
+        .arg("refund-control")
+        .arg("--format=svg")
+        .output()
+        .expect("cargo-valid graph svg should run");
+    assert!(svg_output.status.success());
+    let svg = String::from_utf8_lossy(&svg_output.stdout);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("RefundControlModel"));
+}
+
+#[test]
 fn cargo_valid_graph_marks_step_models_as_explicit_only() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
@@ -219,6 +249,8 @@ fn cargo_valid_checks_registered_model() {
     assert_eq!(output.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
+    assert!(stdout.contains("\"ci\":{\"exit_code\":2"));
+    assert!(stdout.contains("\"review_summary\""));
 }
 
 #[test]
@@ -236,6 +268,22 @@ fn cargo_valid_lints_registered_model_with_migration_hints() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"code\":\"opaque_step_closure\""));
     assert!(stdout.contains("\"code\":\"missing_declarative_transitions\""));
+}
+
+#[test]
+fn cargo_valid_explain_includes_review_metadata() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("explain")
+        .arg("breakglass-access-regression")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid explain should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"failing_action_id\""));
+    assert!(stdout.contains("\"next_steps\""));
+    assert!(stdout.contains("\"review_summary\""));
 }
 
 #[test]

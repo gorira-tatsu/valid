@@ -6,6 +6,9 @@ pub fn valid_model(input: TokenStream) -> TokenStream {
     if let Err(message) = validate_valid_model_header(&tokens) {
         return compile_error_tokens(&message);
     }
+    if let Err(message) = validate_valid_model_shape(&tokens) {
+        return compile_error_tokens(&message);
+    }
     wrap_valid_model_tokens(input)
 }
 
@@ -187,6 +190,61 @@ fn validate_valid_model_header(tokens: &[TokenTree]) -> Result<(), String> {
     if !saw_generics {
         return Err(
             "valid_model! requires explicit state/action types. Use `model Name<State, Action>;`."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
+    let mut top_level_idents = Vec::new();
+    let mut after_header = false;
+    let mut generic_depth = 0usize;
+    for token in tokens {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == '<' && !after_header => {
+                generic_depth += 1;
+            }
+            TokenTree::Punct(punct) if punct.as_char() == '>' && !after_header => {
+                generic_depth = generic_depth.saturating_sub(1);
+            }
+            TokenTree::Punct(punct)
+                if punct.as_char() == ';' && !after_header && generic_depth == 0 =>
+            {
+                after_header = true;
+            }
+            TokenTree::Ident(ident) if after_header => {
+                top_level_idents.push(ident.to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let has_init = top_level_idents.iter().any(|ident| ident == "init");
+    let has_step = top_level_idents.iter().any(|ident| ident == "step");
+    let has_transitions = top_level_idents.iter().any(|ident| ident == "transitions");
+    let has_properties = top_level_idents.iter().any(|ident| ident == "properties");
+    let has_legacy_property = top_level_idents.iter().any(|ident| ident == "property");
+    let has_legacy_invariant = top_level_idents.iter().any(|ident| ident == "invariant");
+
+    if !has_init {
+        return Err("valid_model! requires `init [...]` after the model header".to_string());
+    }
+    if has_step && has_transitions {
+        return Err(
+            "valid_model! must choose either `step |state, action| { ... }` or `transitions { ... }`, not both"
+                .to_string(),
+        );
+    }
+    if !has_step && !has_transitions {
+        return Err(
+            "valid_model! requires either `step |state, action| { ... }` or `transitions { ... }`"
+                .to_string(),
+        );
+    }
+    if !has_properties && !(has_legacy_property && has_legacy_invariant) {
+        return Err(
+            "valid_model! requires `properties { ... }` or legacy `property ...; invariant ...;`"
                 .to_string(),
         );
     }
@@ -431,7 +489,7 @@ fn as_group(token: &TokenTree) -> Option<Group> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_valid_model_header;
+    use super::{validate_valid_model_header, validate_valid_model_shape};
 
     #[test]
     fn valid_model_header_requires_explicit_state_and_action_types() {
@@ -450,5 +508,33 @@ mod tests {
         let error = validate_valid_model_header(&tokens.into_iter().collect::<Vec<_>>())
             .expect_err("shorthand form should be rejected");
         assert!(error.contains("explicit state/action types"));
+    }
+
+    #[test]
+    fn valid_model_shape_requires_init_and_properties() {
+        let tokens = "model CounterModel<State, Action>; step |state, action| { Vec::new() }"
+            .parse()
+            .unwrap();
+        let error = validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>())
+            .expect_err("missing init/properties should be rejected");
+        assert!(error.contains("init ["));
+    }
+
+    #[test]
+    fn valid_model_shape_rejects_step_and_transitions_together() {
+        let tokens = "model CounterModel<State, Action>; init []; step |state, action| { Vec::new() } transitions { transition Go when |state| true => []; } properties { invariant P |state| true; }"
+            .parse()
+            .unwrap();
+        let error = validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>())
+            .expect_err("step and transitions should not coexist");
+        assert!(error.contains("not both"));
+    }
+
+    #[test]
+    fn valid_model_shape_accepts_transitions_and_properties() {
+        let tokens = "model CounterModel<State, Action>; init []; transitions { transition Go when |state| true => []; } properties { invariant P |state| true; }"
+            .parse()
+            .unwrap();
+        assert!(validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>()).is_ok());
     }
 }

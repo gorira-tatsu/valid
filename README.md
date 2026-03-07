@@ -124,7 +124,7 @@ Primary commands:
 - `inspect <model>`
   Show model structure without running verification
 - `graph <model>`
-  Render a Mermaid diagram for the model structure
+  Render a model diagram in Mermaid, DOT, SVG, text, or JSON
 - `readiness <model>`
   Report capability-based migration findings and analysis-readiness gaps
 - `verify <model>`
@@ -153,6 +153,8 @@ cargo valid init
 cargo valid models
 cargo valid inspect refund-control
 cargo valid graph refund-control
+cargo valid graph refund-control --format=dot
+cargo valid graph refund-control --format=svg
 cargo valid readiness breakglass-access-regression
 cargo valid verify breakglass-access-regression
 cargo valid verify breakglass-access-regression --json
@@ -191,8 +193,12 @@ such as `allow_path`, `deny_path`, `boundary_path`, `guard_path`, and
 coverage, explain, and test generation.
 
 `graph` is built from the same inspect data. Declarative models render guard
-conditions, concrete field updates, and path tags in Mermaid. Step-only models
-are explicitly marked `explicit-only / opaque-step`.
+conditions, concrete field updates, and path tags in Mermaid, DOT, and SVG.
+Step-only models are explicitly marked `explicit-only / opaque-step`.
+
+`verify --json` now includes CI-oriented summary fields such as `ci.exit_code`
+and `review_summary`, while `explain` includes failing action metadata,
+write-overlap hints, and reviewer-oriented next steps.
 
 ## Rust DSL
 

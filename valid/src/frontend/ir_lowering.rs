@@ -183,6 +183,20 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = split_top_level(trimmed, "!=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::NotEqual,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level(trimmed, ">=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::GreaterThanOrEqual,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = split_top_level(trimmed, "<=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThanOrEqual,
@@ -190,9 +204,30 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = split_top_level(trimmed, ">") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::GreaterThan,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level(trimmed, "<") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::LessThan,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = split_top_level(trimmed, "==") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Equal,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level(trimmed, "-") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Sub,
             left: Box::new(lower_expr(left.trim())?),
             right: Box::new(lower_expr(right.trim())?),
         });
@@ -321,5 +356,31 @@ property P_SAFE:
         let typed = typecheck_model(resolved).expect("type");
         let model = super::lower_model(typed).expect("lower");
         assert_eq!(model.properties[0].property_id, "P_SAFE");
+    }
+
+    #[test]
+    fn lowers_extended_comparison_expressions() {
+        let source = r#"
+model RefundLike
+state:
+  risk: u8[0..7]
+  approved: bool
+init:
+  risk = 1
+  approved = false
+action Escalate:
+  pre: risk - 1 > 0 && approved != true && risk >= 1 && risk < 5
+  post:
+    risk = risk - 1
+property P_SAFE:
+  invariant: risk >= 0 && approved != true
+"#;
+        let model = compile_model(source).expect("compile");
+        let guard = format!("{:?}", model.actions[0].guard);
+        assert!(guard.contains("Sub"));
+        assert!(guard.contains("GreaterThan"));
+        assert!(guard.contains("NotEqual"));
+        assert!(guard.contains("GreaterThanOrEqual"));
+        assert!(guard.contains("LessThan"));
     }
 }

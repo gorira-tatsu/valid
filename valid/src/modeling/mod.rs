@@ -1068,6 +1068,10 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
     let transition = machine_transition_ir::<M>()
         .into_iter()
         .find(|transition| transition.action_id == action_id);
+    let mut action_reads = Vec::new();
+    let mut action_writes = Vec::new();
+    let mut action_path_tags = Vec::new();
+    let mut write_overlap_fields = Vec::new();
     let mut candidate_causes = Vec::new();
     if involved_fields.is_empty() {
         candidate_causes.push(ExplainCandidateCause {
@@ -1108,6 +1112,21 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         });
     }
     if let Some(transition) = transition {
+        action_reads = transition
+            .reads
+            .iter()
+            .map(|item| item.to_string())
+            .collect();
+        action_writes = transition
+            .writes
+            .iter()
+            .map(|item| item.to_string())
+            .collect();
+        write_overlap_fields = involved_fields
+            .iter()
+            .filter(|field| transition.writes.contains(&field.as_str()))
+            .cloned()
+            .collect();
         let path_tags = decision_path_tags(
             &transition.path_tags,
             transition.action_id,
@@ -1116,6 +1135,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             transition.guard,
             transition.effect,
         );
+        action_path_tags = path_tags.clone();
         if !path_tags.is_empty() {
             candidate_causes.push(ExplainCandidateCause {
                 kind: "decision_path_tags".to_string(),
@@ -1130,12 +1150,23 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         "review the action semantics that lead into the violating state".to_string(),
         format!("verify invariant {} is intended", trace.property_id),
     ];
+    if !write_overlap_fields.is_empty() {
+        repair_hints.push(format!(
+            "narrow or guard writes [{}] in the failing action",
+            write_overlap_fields.join(", ")
+        ));
+    }
     if !involved_fields.is_empty() {
         repair_hints.push(format!(
             "focus on fields [{}] when reviewing the failing transition",
             involved_fields.join(", ")
         ));
     }
+    let next_steps = vec![
+        "inspect the model graph to review guard and update structure".to_string(),
+        "generate a regression test from the failing path".to_string(),
+        "review readiness output if solver lowering is expected".to_string(),
+    ];
     let confidence = (0.45_f32
         + if !involved_fields.is_empty() {
             0.2_f32
@@ -1165,9 +1196,15 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         evidence_id: trace.evidence_id,
         property_id: trace.property_id,
         failure_step_index: failure_step.index,
+        failing_action_id: Some(action_id.clone()),
+        failing_action_reads: action_reads,
+        failing_action_writes: action_writes,
+        failing_action_path_tags: action_path_tags,
+        write_overlap_fields,
         involved_fields,
         candidate_causes,
         repair_hints,
+        next_steps,
         confidence,
         best_practices: vec![
             "keep actions small so violating transitions stay explainable".to_string(),
@@ -1766,6 +1803,20 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_machine_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = split_top_level_machine(normalized, "!=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::NotEqual,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level_machine(normalized, ">=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::GreaterThanOrEqual,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = split_top_level_machine(normalized, "<=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThanOrEqual,
@@ -1773,9 +1824,30 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_machine_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = split_top_level_machine(normalized, ">") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::GreaterThan,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level_machine(normalized, "<") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::LessThan,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = split_top_level_machine(normalized, "==") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Equal,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level_machine(normalized, "-") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Sub,
             left: Box::new(lower_machine_expr(left.trim())?),
             right: Box::new(lower_machine_expr(right.trim())?),
         });
@@ -2207,9 +2279,9 @@ fn build_evidence_trace<M: VerifiedMachine>(
 mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
-        check_machine_outcomes, collect_machine_coverage, explain_machine, lower_machine_model,
-        machine_capability_report, machine_transition_ir, property_ids, state_field_descriptors,
-        transition_descriptors, ModelingRunStatus, ModelingState,
+        check_machine_outcomes, collect_machine_coverage, explain_machine, lower_machine_expr,
+        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
+        state_field_descriptors, transition_descriptors, ModelingRunStatus, ModelingState,
     };
     use crate::{
         engine::CheckOutcome,
@@ -2496,6 +2568,18 @@ mod tests {
             }
         ));
         assert_eq!(model.actions[0].updates[0].field, "attached");
+    }
+
+    #[test]
+    fn lower_machine_expr_supports_extended_numeric_ops() {
+        let expr = lower_machine_expr("state.risk_score - 1 > 0 && state.risk_score >= 1 && state.risk_score < 3 && state.manager_approved != false")
+            .expect("extended machine expr should lower");
+        let debug = format!("{expr:?}");
+        assert!(debug.contains("Sub"));
+        assert!(debug.contains("GreaterThan"));
+        assert!(debug.contains("GreaterThanOrEqual"));
+        assert!(debug.contains("LessThan"));
+        assert!(debug.contains("NotEqual"));
     }
 
     #[test]

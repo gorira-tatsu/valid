@@ -3,13 +3,14 @@ use std::{env, fs, process};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, lint_source,
-        minimize_source, orchestrate_source, render_inspect_json, render_inspect_text,
-        render_lint_json, render_lint_text, testgen_source, validate_capabilities_request,
-        validate_capabilities_response, validate_check_request, validate_explain_response,
-        validate_inspect_request, validate_inspect_response, validate_minimize_response,
-        validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
-        validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
-        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        minimize_source, orchestrate_source, render_explain_json, render_explain_text,
+        render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
+        testgen_source, validate_capabilities_request, validate_capabilities_response,
+        validate_check_request, validate_explain_response, validate_inspect_request,
+        validate_inspect_response, validate_minimize_response, validate_orchestrate_request,
+        validate_orchestrate_response, validate_testgen_request, validate_testgen_response,
+        CapabilitiesRequest, CapabilitiesResponse, CheckRequest, InspectRequest, MinimizeRequest,
+        OrchestrateRequest, TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, is_bundled_model_ref},
     contract::{
@@ -22,7 +23,10 @@ use valid::{
         render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts,
     },
     frontend::compile_model,
-    reporter::{render_model_mermaid, render_trace_mermaid, render_trace_sequence_mermaid},
+    reporter::{
+        render_model_dot, render_model_mermaid, render_model_svg, render_trace_mermaid,
+        render_trace_sequence_mermaid,
+    },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::render_replay_json,
 };
@@ -128,28 +132,9 @@ fn cmd_explain(args: Vec<String>) {
                 process::exit(3);
             }
             if parsed.json {
-                println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"involved_fields\":[{}],\"candidate_causes\":[{}],\"repair_hints\":[{}],\"confidence\":{},\"best_practices\":[{}]}}",
-                    response.schema_version,
-                    response.request_id,
-                    response.status,
-                    response.evidence_id,
-                    response.property_id,
-                    response.failure_step_index,
-                    response.involved_fields.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.candidate_causes.iter().map(|c| format!("{{\"kind\":\"{}\",\"message\":\"{}\"}}", c.kind, c.message)).collect::<Vec<_>>().join(","),
-                    response.repair_hints.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.confidence,
-                    response.best_practices.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                );
+                println!("{}", render_explain_json(&response));
             } else {
-                println!("property_id: {}", response.property_id);
-                println!("evidence_id: {}", response.evidence_id);
-                println!("failure_step_index: {}", response.failure_step_index);
-                println!("involved_fields: {}", response.involved_fields.join(", "));
-                for cause in response.candidate_causes {
-                    println!("cause[{}]: {}", cause.kind, cause.message);
-                }
+                print!("{}", render_explain_text(&response));
             }
         }
         Err(error) => {
@@ -248,7 +233,7 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|text|json]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json]",
         |_arg, _parsed| false,
     );
     let source = if is_bundled_model_ref(&parsed.path) {
@@ -271,6 +256,8 @@ fn cmd_graph(args: Vec<String>) {
         Ok(response) => match render_format {
             "json" => println!("{}", render_inspect_json(&response)),
             "text" => print!("{}", render_inspect_text(&response)),
+            "dot" => println!("{}", render_model_dot(&response)),
+            "svg" => println!("{}", render_model_svg(&response)),
             _ => println!("{}", render_model_mermaid(&response)),
         },
         Err(diagnostics) => {

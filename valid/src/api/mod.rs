@@ -123,9 +123,15 @@ pub struct ExplainResponse {
     pub evidence_id: String,
     pub property_id: String,
     pub failure_step_index: usize,
+    pub failing_action_id: Option<String>,
+    pub failing_action_reads: Vec<String>,
+    pub failing_action_writes: Vec<String>,
+    pub failing_action_path_tags: Vec<String>,
+    pub write_overlap_fields: Vec<String>,
     pub involved_fields: Vec<String>,
     pub candidate_causes: Vec<ExplainCandidateCause>,
     pub repair_hints: Vec<String>,
+    pub next_steps: Vec<String>,
     pub confidence: f32,
     pub best_practices: Vec<String>,
 }
@@ -833,6 +839,11 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     ));
                 }
             }
+            let next_steps = vec![
+                "run explain in text mode for a reviewer-friendly narrative".to_string(),
+                "inspect the graph to review guard and update structure".to_string(),
+                "generate a regression test from the failing path".to_string(),
+            ];
             let mut confidence = 0.45f32;
             if failure_step.action_id.is_some() {
                 confidence += 0.1;
@@ -863,9 +874,24 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 evidence_id: trace.evidence_id.clone(),
                 property_id: trace.property_id.clone(),
                 failure_step_index: failure_step.index,
+                failing_action_id: failure_step.action_id.clone(),
+                failing_action_reads: action_metadata
+                    .as_ref()
+                    .map(|(_, reads, _, _)| reads.clone())
+                    .unwrap_or_default(),
+                failing_action_writes: action_metadata
+                    .as_ref()
+                    .map(|(_, _, writes, _)| writes.clone())
+                    .unwrap_or_default(),
+                failing_action_path_tags: action_metadata
+                    .as_ref()
+                    .map(|(_, _, _, path_tags)| path_tags.clone())
+                    .unwrap_or_default(),
+                write_overlap_fields: write_overlap.clone(),
                 involved_fields,
                 candidate_causes,
                 repair_hints,
+                next_steps,
                 confidence,
                 best_practices: vec![
                     "keep write sets explicit so involved fields stay explainable".to_string(),
@@ -1388,6 +1414,116 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
     out
 }
 
+pub fn render_explain_json(response: &ExplainResponse) -> String {
+    format!(
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        escape_json(&response.schema_version),
+        escape_json(&response.request_id),
+        escape_json(&response.status),
+        escape_json(&response.evidence_id),
+        escape_json(&response.property_id),
+        response.failure_step_index,
+        response
+            .failing_action_id
+            .as_ref()
+            .map(|value| format!("\"{}\"", escape_json(value)))
+            .unwrap_or_else(|| "null".to_string()),
+        render_string_array(&response.failing_action_reads),
+        render_string_array(&response.failing_action_writes),
+        render_string_array(&response.failing_action_path_tags),
+        render_string_array(&response.write_overlap_fields),
+        render_string_array(&response.involved_fields),
+        response
+            .candidate_causes
+            .iter()
+            .map(|cause| format!(
+                "{{\"kind\":\"{}\",\"message\":\"{}\"}}",
+                escape_json(&cause.kind),
+                escape_json(&cause.message)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        render_string_array(&response.repair_hints),
+        render_string_array(&response.next_steps),
+        response.confidence,
+        render_string_array(&response.best_practices),
+        escape_json(&format!(
+            "{} at step {} for property {}",
+            response
+                .failing_action_id
+                .clone()
+                .unwrap_or_else(|| "terminal violation".to_string()),
+            response.failure_step_index,
+            response.property_id
+        )),
+        if response.confidence >= 0.8 {
+            "high"
+        } else if response.confidence >= 0.6 {
+            "medium"
+        } else {
+            "low"
+        }
+    )
+}
+
+pub fn render_explain_text(response: &ExplainResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("property_id: {}\n", response.property_id));
+    out.push_str(&format!("evidence_id: {}\n", response.evidence_id));
+    out.push_str(&format!(
+        "failure_step_index: {}\n",
+        response.failure_step_index
+    ));
+    if let Some(action_id) = &response.failing_action_id {
+        out.push_str(&format!("failing_action_id: {}\n", action_id));
+    }
+    if !response.failing_action_reads.is_empty() || !response.failing_action_writes.is_empty() {
+        out.push_str(&format!(
+            "failing_action_io: reads=[{}] writes=[{}]\n",
+            response.failing_action_reads.join(", "),
+            response.failing_action_writes.join(", ")
+        ));
+    }
+    if !response.failing_action_path_tags.is_empty() {
+        out.push_str(&format!(
+            "failing_action_path_tags: {}\n",
+            response.failing_action_path_tags.join(", ")
+        ));
+    }
+    if !response.write_overlap_fields.is_empty() {
+        out.push_str(&format!(
+            "write_overlap_fields: {}\n",
+            response.write_overlap_fields.join(", ")
+        ));
+    }
+    if !response.involved_fields.is_empty() {
+        out.push_str(&format!(
+            "involved_fields: {}\n",
+            response.involved_fields.join(", ")
+        ));
+    }
+    if !response.candidate_causes.is_empty() {
+        out.push_str("candidate_causes:\n");
+        for cause in &response.candidate_causes {
+            out.push_str(&format!("- [{}] {}\n", cause.kind, cause.message));
+        }
+    }
+    if !response.repair_hints.is_empty() {
+        out.push_str("repair_hints:\n");
+        for hint in &response.repair_hints {
+            out.push_str(&format!("- {}\n", hint));
+        }
+    }
+    if !response.next_steps.is_empty() {
+        out.push_str("next_steps:\n");
+        for step in &response.next_steps {
+            out.push_str(&format!("- {}\n", step));
+        }
+    }
+    out.push_str(&format!("confidence: {:.2}\n", response.confidence));
+    out
+}
+
 fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
     match expr {
         crate::ir::ExprIr::Literal(value) => match value {
@@ -1401,8 +1537,13 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
         crate::ir::ExprIr::Binary { op, left, right } => {
             let operator = match op {
                 crate::ir::BinaryOp::Add => "+",
+                crate::ir::BinaryOp::Sub => "-",
+                crate::ir::BinaryOp::LessThan => "<",
                 crate::ir::BinaryOp::LessThanOrEqual => "<=",
+                crate::ir::BinaryOp::GreaterThan => ">",
+                crate::ir::BinaryOp::GreaterThanOrEqual => ">=",
                 crate::ir::BinaryOp::Equal => "==",
+                crate::ir::BinaryOp::NotEqual => "!=",
                 crate::ir::BinaryOp::And => "&&",
                 crate::ir::BinaryOp::Or => "||",
             };

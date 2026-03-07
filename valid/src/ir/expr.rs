@@ -23,8 +23,13 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
+    Sub,
+    LessThan,
     LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
     Equal,
+    NotEqual,
     And,
     Or,
 }

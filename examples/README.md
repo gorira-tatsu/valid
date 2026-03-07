@@ -73,7 +73,7 @@ Command meanings:
 
 - `models`: show the model names exported by the registry file
 - `inspect <model>`: show the model shape without verifying it
-- `graph <model>`: render a Mermaid diagram for the model shape
+- `graph <model>`: render a Mermaid, DOT, or SVG diagram for the model shape
 - `readiness <model>`: show capability-based migration hints and readiness findings
 - `verify <model>`: verify one model
 - `replay <model>`: replay an explicit action sequence and inspect the terminal state
@@ -135,6 +135,7 @@ cargo valid --registry examples/practical_use_cases_registry.rs readiness prod-d
 cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-control
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
+cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control --format=svg
 cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
 cargo valid --registry examples/practical_use_cases_registry.rs suite
 ```

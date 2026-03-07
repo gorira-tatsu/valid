@@ -164,6 +164,32 @@ fn cli_graph_renders_mermaid_for_valid_model() {
 }
 
 #[test]
+fn cli_graph_supports_dot_and_svg_formats() {
+    let safe = repo_path("examples/models/safe_counter.valid");
+    let dot_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&safe)
+        .arg("--format=dot")
+        .output()
+        .expect("graph dot should run");
+    assert_eq!(dot_output.status.code(), Some(0));
+    let dot = String::from_utf8_lossy(&dot_output.stdout);
+    assert!(dot.contains("digraph model"));
+    assert!(dot.contains("SafeCounter"));
+
+    let svg_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&safe)
+        .arg("--format=svg")
+        .output()
+        .expect("graph svg should run");
+    assert_eq!(svg_output.status.code(), Some(0));
+    let svg = String::from_utf8_lossy(&svg_output.stdout);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("SafeCounter"));
+}
+
+#[test]
 fn lint_reports_clean_valid_models() {
     let source = read_fixture("examples/models/safe_counter.valid");
     let response = lint_source(&InspectRequest {

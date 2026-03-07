@@ -10,16 +10,16 @@ use crate::{
         collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
         property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
-    reporter::render_model_mermaid,
+    reporter::{render_model_dot, render_model_mermaid, render_model_svg},
     solver::AdapterConfig,
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
 };
 
 use crate::api::{
-    lint_from_inspect, render_inspect_json, render_inspect_text, render_lint_json,
-    render_lint_text, ExplainResponse, InspectAction, InspectCapabilities, InspectProperty,
-    InspectResponse, InspectStateField, InspectTransition, InspectTransitionUpdate,
-    OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
+    lint_from_inspect, render_explain_json, render_explain_text, render_inspect_json,
+    render_inspect_text, render_lint_json, render_lint_text, ExplainResponse, InspectAction,
+    InspectCapabilities, InspectProperty, InspectResponse, InspectStateField, InspectTransition,
+    InspectTransitionUpdate, OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
 };
 
 pub struct RegisteredModel {
@@ -129,6 +129,8 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
     match parsed.format.as_deref().unwrap_or("mermaid") {
         "json" => println!("{}", render_inspect_json(&response)),
         "text" => print!("{}", render_inspect_text(&response)),
+        "dot" => println!("{}", render_model_dot(&response)),
+        "svg" => println!("{}", render_model_svg(&response)),
         _ => println!("{}", render_model_mermaid(&response)),
     }
 }
@@ -186,23 +188,9 @@ fn cmd_explain(models: &[RegisteredModel], args: Vec<String>) {
     match (model.explain)("registry-explain") {
         Ok(response) => {
             if parsed.json {
-                println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"involved_fields\":[{}],\"candidate_causes\":[{}],\"repair_hints\":[{}],\"confidence\":{},\"best_practices\":[{}]}}",
-                    response.schema_version,
-                    response.request_id,
-                    response.status,
-                    response.evidence_id,
-                    response.property_id,
-                    response.failure_step_index,
-                    response.involved_fields.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.candidate_causes.iter().map(|c| format!("{{\"kind\":\"{}\",\"message\":\"{}\"}}", c.kind, c.message)).collect::<Vec<_>>().join(","),
-                    response.repair_hints.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.confidence,
-                    response.best_practices.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                );
+                println!("{}", render_explain_json(&response));
             } else {
-                println!("property_id: {}", response.property_id);
-                println!("evidence_id: {}", response.evidence_id);
+                print!("{}", render_explain_text(&response));
             }
         }
         Err(message) => {
@@ -663,6 +651,6 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
     process::exit(3);
 }

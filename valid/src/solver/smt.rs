@@ -341,8 +341,13 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             let right = render_expr(model, right, step)?;
             match op {
                 BinaryOp::Add => Ok(format!("(+ {left} {right})")),
+                BinaryOp::Sub => Ok(format!("(- {left} {right})")),
+                BinaryOp::LessThan => Ok(format!("(< {left} {right})")),
                 BinaryOp::LessThanOrEqual => Ok(format!("(<= {left} {right})")),
+                BinaryOp::GreaterThan => Ok(format!("(> {left} {right})")),
+                BinaryOp::GreaterThanOrEqual => Ok(format!("(>= {left} {right})")),
                 BinaryOp::Equal => Ok(format!("(= {left} {right})")),
+                BinaryOp::NotEqual => Ok(format!("(not (= {left} {right}))")),
                 BinaryOp::And => Ok(format!("(and {left} {right})")),
                 BinaryOp::Or => Ok(format!("(or {left} {right})")),
             }
@@ -381,6 +386,20 @@ mod tests {
         assert!(query
             .check_smtlib
             .contains("(not (or (= enabled_1 true) (<= x_1 7)))"));
+    }
+
+    #[test]
+    fn render_expr_supports_extended_numeric_ops() {
+        let model = compile_model(
+            "model A\nstate:\n  x: u8[0..7]\n  enabled: bool\ninit:\n  x = 2\n  enabled = false\naction Inc:\n  pre: x - 1 > 0 && x >= 1 && x < 7 && enabled != true\n  post:\n    x = x - 1\nproperty P_SAFE:\n  invariant: x >= 0 && enabled != true\n",
+        )
+        .unwrap();
+        let query = build_invariant_bmc_query(&model, &["P_SAFE".to_string()], 1).unwrap();
+        assert!(query.check_smtlib.contains("(- x_0 1)"));
+        assert!(query.check_smtlib.contains("(> (- x_0 1) 0)"));
+        assert!(query.check_smtlib.contains("(>= x_0 1)"));
+        assert!(query.check_smtlib.contains("(< x_0 7)"));
+        assert!(query.check_smtlib.contains("(not (= enabled_0 true))"));
     }
 
     #[test]

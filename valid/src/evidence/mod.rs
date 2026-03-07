@@ -319,10 +319,12 @@ pub fn validate_rendered_diagnostics_json(body: &str) -> Result<(), String> {
 fn render_completed_text(result: &ExplicitRunResult) -> String {
     let mut out = String::new();
     out.push_str(match result.status {
-        RunStatus::Pass => "PASS explicit\n",
-        RunStatus::Fail => "FAIL explicit\n",
-        RunStatus::Unknown => "UNKNOWN explicit\n",
+        RunStatus::Pass => "PASS ",
+        RunStatus::Fail => "FAIL ",
+        RunStatus::Unknown => "UNKNOWN ",
     });
+    out.push_str(backend_label(result.manifest.backend_name));
+    out.push('\n');
     out.push_str(&format!("run_id: {}\n", result.manifest.run_id));
     out.push_str(&format!("request_id: {}\n", result.manifest.request_id));
     out.push_str(&format!(
@@ -347,13 +349,22 @@ fn render_completed_text(result: &ExplicitRunResult) -> String {
     }
     if let Some(trace) = &result.trace {
         out.push_str(&format!("trace_steps: {}\n", trace.steps.len()));
+        if let Some(action_id) = trace
+            .steps
+            .last()
+            .and_then(|step| step.action_id.as_deref())
+        {
+            out.push_str(&format!("failing_action_id: {action_id}\n"));
+        }
     }
     out
 }
 
 fn render_error_text(error: &CheckErrorEnvelope) -> String {
     let mut out = String::new();
-    out.push_str("ERROR explicit\n");
+    out.push_str("ERROR ");
+    out.push_str(backend_label(error.manifest.backend_name));
+    out.push('\n');
     out.push_str(&format!("run_id: {}\n", error.manifest.run_id));
     out.push_str(&format!("request_id: {}\n", error.manifest.request_id));
     out.push_str(&format!(
@@ -365,6 +376,32 @@ fn render_error_text(error: &CheckErrorEnvelope) -> String {
 }
 
 fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
+    let trace_steps = result
+        .trace
+        .as_ref()
+        .map(|trace| trace.steps.len())
+        .unwrap_or(0);
+    let action_sequence = result
+        .trace
+        .as_ref()
+        .map(|trace| {
+            trace
+                .steps
+                .iter()
+                .filter_map(|step| step.action_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let failing_action_id = result
+        .trace
+        .as_ref()
+        .and_then(|trace| trace.steps.last())
+        .and_then(|step| step.action_id.clone());
+    let ci_exit_code = match result.status {
+        RunStatus::Pass => 0,
+        RunStatus::Fail => 2,
+        RunStatus::Unknown => 4,
+    };
     let mut out = String::new();
     out.push('{');
     out.push_str("\"kind\":\"completed\"");
@@ -439,6 +476,56 @@ fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
     } else {
         out.push_str(",\"trace\":null");
     }
+    out.push_str(&format!(
+        ",\"ci\":{{\"exit_code\":{},\"status\":\"{}\",\"backend\":\"{}\"}}",
+        ci_exit_code,
+        status_label(result.status),
+        backend_label(result.manifest.backend_name)
+    ));
+    out.push_str(",\"review_summary\":{");
+    out.push_str(&format!(
+        "\"headline\":\"{}\"",
+        escape_json(&format!(
+            "{} {} for {}",
+            status_label(result.status),
+            result.property_result.property_id,
+            model_id
+        ))
+    ));
+    out.push_str(&format!(",\"trace_steps\":{}", trace_steps));
+    if let Some(action_id) = failing_action_id {
+        out.push_str(&format!(
+            ",\"failing_action_id\":\"{}\"",
+            escape_json(&action_id)
+        ));
+    } else {
+        out.push_str(",\"failing_action_id\":null");
+    }
+    out.push_str(&format!(
+        ",\"action_sequence\":[{}]",
+        action_sequence
+            .iter()
+            .map(|action| format!("\"{}\"", escape_json(action)))
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    let mut next_steps =
+        vec!["run `cargo valid explain <model>` for a reviewer-oriented diagnosis".to_string()];
+    if matches!(result.status, RunStatus::Fail) {
+        next_steps.push(
+            "run `cargo valid generate-tests <model> --strategy=counterexample` to capture a regression"
+                .to_string(),
+        );
+    }
+    out.push_str(&format!(
+        ",\"next_steps\":[{}]",
+        next_steps
+            .iter()
+            .map(|step| format!("\"{}\"", escape_json(step)))
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    out.push('}');
     out.push('}');
     out
 }
@@ -460,6 +547,11 @@ fn render_error_json(model_id: &str, error: &CheckErrorEnvelope) -> String {
     out.push_str(&format!(
         ",\"diagnostics\":{}",
         render_diagnostics_json(&error.diagnostics)
+    ));
+    out.push_str(",\"ci\":{\"exit_code\":3,\"status\":\"ERROR\"");
+    out.push_str(&format!(
+        ",\"backend\":\"{}\"}}",
+        backend_label(error.manifest.backend_name)
     ));
     out.push('}');
     out
@@ -646,6 +738,8 @@ mod tests {
         assert!(json.contains("\"kind\":\"completed\""));
         assert!(json.contains("\"request_id\":\"req-1\""));
         assert!(json.contains("\"status\":\"FAIL\""));
+        assert!(json.contains("\"ci\":{\"exit_code\":2"));
+        assert!(json.contains("\"review_summary\""));
         validate_rendered_outcome_json(&json).unwrap();
     }
 
