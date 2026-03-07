@@ -105,10 +105,17 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
 
     let mut properties = Vec::new();
     for property in &parsed.properties {
+        let Some(kind) = PropertyKind::parse(&property.kind) else {
+            errors.push(lowering_error(
+                format!("unsupported property kind `{}`", property.kind),
+                property.line,
+            ));
+            continue;
+        };
         match lower_expr(&property.expr) {
             Some(expr) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
-                kind: PropertyKind::Invariant,
+                kind,
                 expr,
             }),
             None => errors.push(lowering_error(
@@ -571,5 +578,24 @@ property P_SAFE:
                 max: 500000
             }
         ));
+    }
+
+    #[test]
+    fn lowers_reachability_properties() {
+        let source = r#"
+model DoorControl
+state:
+  open: bool
+init:
+  open = false
+property P_OPEN:
+  reachability: open == true
+"#;
+
+        let model = compile_model(source).expect("compile");
+        assert_eq!(
+            model.properties[0].kind,
+            crate::ir::PropertyKind::Reachability
+        );
     }
 }

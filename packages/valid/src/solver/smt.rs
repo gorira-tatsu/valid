@@ -101,7 +101,7 @@ pub fn build_invariant_bmc_query(
     if property.kind != PropertyKind::Invariant {
         return Err(format!(
             "SMT adapter only supports invariant properties, got `{}`",
-            property.property_id
+            property.kind
         ));
     }
 

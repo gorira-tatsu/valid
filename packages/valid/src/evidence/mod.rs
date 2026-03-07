@@ -23,6 +23,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvidenceKind {
     Trace,
+    Counterexample,
+    Witness,
     Certificate,
 }
 
@@ -716,9 +718,7 @@ fn error_status_label(status: ErrorStatus) -> &'static str {
     }
 }
 fn property_kind_label(kind: &crate::ir::PropertyKind) -> &'static str {
-    match kind {
-        crate::ir::PropertyKind::Invariant => "invariant",
-    }
+    kind.as_str()
 }
 fn assurance_label(level: AssuranceLevel) -> &'static str {
     match level {
@@ -745,6 +745,8 @@ fn backend_label(kind: crate::engine::BackendKind) -> &'static str {
 fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {
     match kind {
         EvidenceKind::Trace => "trace",
+        EvidenceKind::Counterexample => "counterexample",
+        EvidenceKind::Witness => "witness",
         EvidenceKind::Certificate => "certificate",
     }
 }

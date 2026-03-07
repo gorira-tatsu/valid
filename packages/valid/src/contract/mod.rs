@@ -241,9 +241,7 @@ fn field_type_label(field_type: &FieldType) -> String {
 }
 
 fn property_kind_label(kind: &PropertyKind) -> &'static str {
-    match kind {
-        PropertyKind::Invariant => "invariant",
-    }
+    kind.as_str()
 }
 
 fn extract_json_string(body: &str, key: &str) -> Option<String> {

@@ -228,7 +228,7 @@ impl SolverAdapter for ExplicitAdapter {
             supports_bmc: false,
             supports_certificate: false,
             supports_trace: true,
-            supports_witness: false,
+            supports_witness: true,
             selfcheck_compatible: true,
         }
     }
@@ -764,7 +764,7 @@ fn normalize_protocol_result(
             evidence_id: format!("ev-{}", run_plan.manifest.run_id),
             run_id: run_plan.manifest.run_id.clone(),
             property_id: property_id.clone(),
-            evidence_kind: EvidenceKind::Trace,
+            evidence_kind: protocol_trace_kind(property_kind, protocol.status.as_str()),
             assurance_level,
             trace_hash: stable_hash_hex(&protocol.actions.join("\u{1f}")),
             steps: vec![TraceStep {
@@ -903,6 +903,14 @@ fn normalize_protocol_result(
     };
 
     Ok(NormalizedRunResult { outcome, trace })
+}
+
+fn protocol_trace_kind(property_kind: crate::ir::PropertyKind, status: &str) -> EvidenceKind {
+    match (property_kind, status) {
+        (crate::ir::PropertyKind::Invariant, "FAIL") => EvidenceKind::Counterexample,
+        (crate::ir::PropertyKind::Reachability, "FAIL") => EvidenceKind::Witness,
+        _ => EvidenceKind::Trace,
+    }
 }
 
 fn rebase_normalized_outcome(

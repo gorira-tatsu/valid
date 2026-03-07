@@ -872,7 +872,10 @@ fn validate_varisat_model(model: &ModelIr, target_property_ids: &[String]) -> Re
         .find(|property| &property.property_id == property_id)
         .ok_or_else(|| format!("unknown property `{property_id}`"))?;
     if property.kind != PropertyKind::Invariant {
-        return Err("backend=sat-varisat currently supports invariant properties only".to_string());
+        return Err(format!(
+            "backend=sat-varisat currently supports invariant properties only, got `{}`",
+            property.kind
+        ));
     }
     for field in &model.state_fields {
         if !matches!(

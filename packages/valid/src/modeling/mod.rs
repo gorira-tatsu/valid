@@ -2223,9 +2223,13 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             });
         }
     }
+    let property_kind = find_property::<M>(&trace.property_id).property_kind;
     let mut repair_hints = vec![
         "review the action semantics that lead into the violating state".to_string(),
-        format!("verify invariant {} is intended", trace.property_id),
+        format!(
+            "verify {} property {} is intended",
+            property_kind, trace.property_id
+        ),
     ];
     if !write_overlap_fields.is_empty() {
         repair_hints.push(format!(

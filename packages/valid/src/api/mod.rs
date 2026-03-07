@@ -23,7 +23,7 @@ use crate::{
     },
     testgen::{
         build_counterexample_vector, build_model_test_vectors_for_strategy,
-        build_synthetic_witness_vectors, minimize_counterexample_vector,
+        build_synthetic_witness_vectors, build_witness_vector, minimize_counterexample_vector,
         write_generated_test_files, MinimizeResult, ReplayTarget,
     },
 };
@@ -430,7 +430,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .iter()
             .map(|property| InspectProperty {
                 property_id: property.property_id.clone(),
-                kind: format!("{:?}", property.kind),
+                kind: property.kind.to_string(),
                 expr: Some(render_expr_ir(&property.expr)),
             })
             .collect(),
@@ -839,6 +839,16 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             let coverage_report = compiled_model
                 .as_ref()
                 .map(|model| collect_coverage(model, std::slice::from_ref(&trace)));
+            let property_kind = compiled_model
+                .as_ref()
+                .and_then(|model| {
+                    model
+                        .properties
+                        .iter()
+                        .find(|property| property.property_id == trace.property_id)
+                        .map(|property| property.kind)
+                })
+                .unwrap_or(crate::ir::PropertyKind::Invariant);
             let write_overlap = action_metadata
                 .as_ref()
                 .map(|(_, _, writes, _)| {
@@ -854,8 +864,8 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     ExplainCandidateCause {
                         kind: "terminal_violation".to_string(),
                         message: format!(
-                            "property {} failed without a field diff at terminal step",
-                            trace.property_id
+                            "{} property {} reached its terminal condition without a field diff",
+                            property_kind, trace.property_id
                         ),
                     },
                     ExplainCandidateCause {
@@ -863,14 +873,37 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         message: failure_step
                             .action_id
                             .as_ref()
-                            .map(|action| format!("{action} reached a violating state without a visible field delta"))
-                            .unwrap_or_else(|| "initial or terminal condition violated the property".to_string()),
+                            .map(|action| match property_kind {
+                                crate::ir::PropertyKind::Invariant => {
+                                    format!("{action} reached a violating state without a visible field delta")
+                                }
+                                crate::ir::PropertyKind::Reachability => {
+                                    format!("{action} reached the target state without a visible field delta")
+                                }
+                            })
+                            .unwrap_or_else(|| match property_kind {
+                                crate::ir::PropertyKind::Invariant => {
+                                    "initial or terminal condition violated the property".to_string()
+                                }
+                                crate::ir::PropertyKind::Reachability => {
+                                    "initial or terminal condition satisfied the reachability target".to_string()
+                                }
+                            }),
                     },
                 ]
             } else {
                 let mut causes = Vec::new();
                 if let Some((action_id, reads, writes, decision_path)) = &action_metadata {
                     let path_tags = decision_path.legacy_path_tags();
+                    if property_kind == crate::ir::PropertyKind::Reachability {
+                        causes.push(ExplainCandidateCause {
+                            kind: "reachability_target".to_string(),
+                            message: format!(
+                                "action {action_id} reached the target state at step {}",
+                                failure_step.index
+                            ),
+                        });
+                    }
                     if !write_overlap.is_empty() {
                         causes.push(ExplainCandidateCause {
                             kind: "write_set_overlap".to_string(),
@@ -936,7 +969,10 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             };
             let mut repair_hints = vec![
                 "review the guard and update set of the failing action".to_string(),
-                format!("verify invariant {} is intended", trace.property_id),
+                format!(
+                    "verify {} property {} is intended",
+                    property_kind, trace.property_id
+                ),
             ];
             if let Some(action_id) = &failure_step.action_id {
                 repair_hints.push(format!(
@@ -1205,6 +1241,34 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .filter_map(|trace| build_counterexample_vector(trace).ok())
             .collect::<Vec<_>>()
+    } else if request.strategy == "witness" {
+        let trace_vectors = traces
+            .iter()
+            .filter_map(|trace| build_witness_vector(trace).ok())
+            .collect::<Vec<_>>();
+        if trace_vectors.is_empty() {
+            let mut vectors = build_model_test_vectors_for_strategy(
+                &model,
+                target_property_id,
+                &request.strategy,
+            )
+            .map_err(|message| CheckErrorEnvelope {
+                manifest: result.manifest.clone(),
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            })?;
+            if vectors.is_empty() {
+                vectors = build_synthetic_witness_vectors(&model, target_property_id);
+            }
+            vectors
+        } else {
+            trace_vectors
+        }
     } else {
         let mut vectors =
             build_model_test_vectors_for_strategy(&model, target_property_id, &request.strategy)
@@ -2823,8 +2887,21 @@ mod tests {
             response.state_field_details[0].range.as_deref(),
             Some("0..=7")
         );
-        assert_eq!(response.property_details[0].kind, "Invariant");
+        assert_eq!(response.property_details[0].kind, "invariant");
         assert!(response.transition_details.is_empty());
+        validate_inspect_response(&response).unwrap();
+    }
+
+    #[test]
+    fn inspect_reports_reachability_kind() {
+        let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\nproperty P_REACH:\n  reachability: x == 2\n";
+        let request = InspectRequest {
+            request_id: "req-inspect-reach".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+        };
+        let response = inspect_source(&request).unwrap();
+        assert_eq!(response.property_details[0].kind, "reachability");
         validate_inspect_response(&response).unwrap();
     }
 
@@ -3004,6 +3081,30 @@ mod tests {
     }
 
     #[test]
+    fn explain_uses_reachability_specific_wording() {
+        let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_REACH:\n  reachability: x == 2\n";
+        let request = CheckRequest {
+            request_id: "req-explain-reach".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_REACH".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        };
+        let response = explain_source(&request).unwrap();
+        assert!(response
+            .repair_hints
+            .iter()
+            .any(|hint| hint.contains("verify reachability property P_REACH is intended")));
+        assert!(response
+            .candidate_causes
+            .iter()
+            .any(|cause| cause.message.contains("target state")));
+        validate_explain_response(&response).unwrap();
+    }
+
+    #[test]
     fn minimize_returns_shorter_vector_when_failure_is_preserved() {
         let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Inc:\n  pre: true\n  post:\n    x = x + 1\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n";
         let request = MinimizeRequest {
@@ -3057,6 +3158,26 @@ mod tests {
         })
         .unwrap();
         assert!(response.vector_ids.len() >= 1);
+        validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
+    }
+
+    #[test]
+    fn witness_testgen_uses_reachability_trace_when_available() {
+        let source = "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_REACH:\n  reachability: x == 2\n";
+        let response = testgen_source(&TestgenRequest {
+            request_id: "req-witness-reach".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_REACH".to_string()),
+            strategy: "witness".to_string(),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        assert_eq!(response.vector_ids.len(), 1);
+        assert_eq!(response.vectors[0].source_kind, "witness");
         validate_testgen_response(&response).unwrap();
         cleanup_generated_files(&response.generated_files);
     }
