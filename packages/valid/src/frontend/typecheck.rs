@@ -59,7 +59,7 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
     }
 
     for property in &resolved.parsed.properties {
-        if property.kind != "invariant" {
+        if crate::ir::PropertyKind::parse(&property.kind).is_none() {
             errors.push(type_error(
                 format!("unsupported property kind `{}`", property.kind),
                 property.line,
@@ -152,5 +152,21 @@ property P_SAFE:
         let parsed = parse_model(source).expect("parse");
         let resolved = resolve_model(parsed).expect("resolve");
         typecheck_model(resolved).expect("u32 fields should typecheck");
+    }
+
+    #[test]
+    fn accepts_reachability_properties() {
+        let source = r#"
+model DoorControl
+state:
+  open: bool
+init:
+  open = false
+property P_OPEN:
+  reachability: open == true
+"#;
+        let parsed = parse_model(source).expect("parse");
+        let resolved = resolve_model(parsed).expect("resolve");
+        typecheck_model(resolved).expect("reachability properties should typecheck");
     }
 }

@@ -923,7 +923,7 @@ mod tests {
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
-                kind: "Invariant".to_string(),
+                kind: "invariant".to_string(),
                 expr: None,
             }],
         };
@@ -976,7 +976,7 @@ mod tests {
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
-                kind: "Invariant".to_string(),
+                kind: "invariant".to_string(),
                 expr: None,
             }],
         };
@@ -1029,7 +1029,7 @@ mod tests {
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
-                kind: "Invariant".to_string(),
+                kind: "invariant".to_string(),
                 expr: None,
             }],
         };
@@ -1099,7 +1099,7 @@ mod tests {
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
-                kind: "Invariant".to_string(),
+                kind: "invariant".to_string(),
                 expr: None,
             }],
         };

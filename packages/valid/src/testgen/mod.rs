@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use crate::{
-    evidence::EvidenceTrace,
+    evidence::{EvidenceKind, EvidenceTrace},
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
@@ -78,6 +78,13 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
     if trace.steps.is_empty() {
         return Err("cannot build a counterexample vector from an empty trace".to_string());
     }
+    if trace.evidence_kind == EvidenceKind::Witness {
+        return Err("cannot build a counterexample vector from a witness trace".to_string());
+    }
+    build_base_vector_from_trace(trace)
+}
+
+fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, String> {
     let actions = trace
         .steps
         .iter()
@@ -162,7 +169,10 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
     if trace.steps.is_empty() {
         return Err("cannot build a witness vector from an empty trace".to_string());
     }
-    let mut vector = build_counterexample_vector(trace)?;
+    if trace.evidence_kind == EvidenceKind::Counterexample {
+        return Err("cannot build a witness vector from a counterexample trace".to_string());
+    }
+    let mut vector = build_base_vector_from_trace(trace)?;
     vector.source_kind = "witness".to_string();
     vector.strictness = "strict".to_string();
     vector.derivation = "witness_trace".to_string();
@@ -173,6 +183,13 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
 }
 
 pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Vec<TestVector> {
+    let Some(property) = model
+        .properties
+        .iter()
+        .find(|property| property.property_id == property_id)
+    else {
+        return Vec::new();
+    };
     let initial = match build_initial_state(model) {
         Ok(state) => state,
         Err(_) => return Vec::new(),
@@ -187,6 +204,9 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
         else {
             continue;
         };
+        if !state_satisfies_property(model, property, &first_state) {
+            continue;
+        }
 
         let single = synthetic_trace_from_states(
             model,
@@ -223,6 +243,9 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
             else {
                 continue;
             };
+            if !state_satisfies_property(model, property, &second_state) {
+                continue;
+            }
             let Some(trace) = synthetic_trace_from_states(
                 model,
                 property_id,
@@ -365,11 +388,22 @@ fn synthetic_trace_from_states(
         ),
         run_id: format!("run-witness-{}", action_signature.replace("->", "-")),
         property_id: property_id.to_string(),
-        evidence_kind: crate::evidence::EvidenceKind::Trace,
+        evidence_kind: crate::evidence::EvidenceKind::Witness,
         assurance_level: crate::engine::AssuranceLevel::Complete,
         trace_hash: format!("trace:witness:{action_signature}"),
         steps,
     })
+}
+
+fn state_satisfies_property(
+    model: &ModelIr,
+    property: &crate::ir::PropertyIr,
+    state: &MachineState,
+) -> bool {
+    matches!(
+        eval_expr(model, state, &property.expr),
+        Ok(Value::Bool(true))
+    )
 }
 
 pub fn minimize_counterexample_vector(
@@ -1345,7 +1379,7 @@ mod tests {
             evidence_id: format!("ev-{}", actions.join("-")),
             run_id: "run-1".to_string(),
             property_id: "SAFE".to_string(),
-            evidence_kind: EvidenceKind::Trace,
+            evidence_kind: EvidenceKind::Witness,
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:trace".to_string(),
             steps,
@@ -1415,7 +1449,7 @@ mod tests {
             evidence_id: "ev-000001".to_string(),
             run_id: "run-1".to_string(),
             property_id: "P_SAFE".to_string(),
-            evidence_kind: EvidenceKind::Trace,
+            evidence_kind: EvidenceKind::Counterexample,
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:x".to_string(),
             steps: vec![TraceStep {
@@ -1452,9 +1486,11 @@ mod tests {
     #[test]
     fn builds_synthetic_witness_vectors_from_model() {
         let vectors = build_synthetic_witness_vectors(&minimization_model(), "SAFE");
-        assert_eq!(vectors.len(), 6);
+        assert_eq!(vectors.len(), 1);
         assert!(vectors.iter().all(|vector| vector.source_kind == "witness"));
-        assert!(vectors.iter().any(|vector| vector.actions.len() == 2));
+        assert!(vectors
+            .iter()
+            .all(|vector| vector.expected_property_holds == Some(true)));
     }
 
     #[test]

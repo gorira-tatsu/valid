@@ -124,7 +124,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         }
 
         let node = nodes[node_index].clone();
-        if !property_holds(model, &node.state, property)? {
+        if property_triggered(model, &node.state, property)? {
             return Ok(fail_result(model, plan, property, &nodes, node_index));
         }
 
@@ -166,7 +166,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             }
         }
 
-        if plan.detect_deadlocks && enabled == 0 {
+        if plan.detect_deadlocks && enabled == 0 && property.kind == PropertyKind::Invariant {
             return Ok(deadlock_result(model, plan, property, &nodes, node_index));
         }
     }
@@ -183,22 +183,14 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         assurance_level: assurance,
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
-            property_kind: property.kind.clone(),
+            property_kind: property.kind,
             status: RunStatus::Pass,
             assurance_level: assurance,
-            reason_code: Some(if assurance == AssuranceLevel::Bounded {
-                "BOUNDED_SPACE_EXHAUSTED".to_string()
-            } else {
-                "COMPLETE_SPACE_EXHAUSTED".to_string()
-            }),
+            reason_code: Some(pass_reason_code(property.kind, assurance).to_string()),
             unknown_reason: None,
             terminal_state_id: None,
             evidence_id: None,
-            summary: if assurance == AssuranceLevel::Bounded {
-                "no violating state found within the configured depth bound".to_string()
-            } else {
-                "no violating state found in the reachable state space".to_string()
-            },
+            summary: pass_summary(property, assurance),
         },
         explored_states: visited.len(),
         explored_transitions,
@@ -229,24 +221,34 @@ fn selected_property<'a>(model: &'a ModelIr, plan: &RunPlan) -> Result<&'a Prope
         })
 }
 
-fn property_holds(
+fn property_triggered(
     model: &ModelIr,
     state: &MachineState,
     property: &PropertyIr,
 ) -> Result<bool, Diagnostic> {
-    match property.kind {
-        PropertyKind::Invariant => match eval_expr(model, state, &property.expr)? {
-            Value::Bool(value) => Ok(value),
-            _ => Err(Diagnostic::new(
-                ErrorCode::EvalError,
-                DiagnosticSegment::EngineSearch,
-                format!(
-                    "property `{}` did not evaluate to bool",
-                    property.property_id
-                ),
-            )
-            .with_help("keep invariant properties boolean after lowering")),
-        },
+    let value = property_value(model, state, property)?;
+    Ok(match property.kind {
+        PropertyKind::Invariant => !value,
+        PropertyKind::Reachability => value,
+    })
+}
+
+fn property_value(
+    model: &ModelIr,
+    state: &MachineState,
+    property: &PropertyIr,
+) -> Result<bool, Diagnostic> {
+    match eval_expr(model, state, &property.expr)? {
+        Value::Bool(value) => Ok(value),
+        _ => Err(Diagnostic::new(
+            ErrorCode::EvalError,
+            DiagnosticSegment::EngineSearch,
+            format!(
+                "property `{}` did not evaluate to bool",
+                property.property_id
+            ),
+        )
+        .with_help("keep lowered properties boolean regardless of property kind")),
     }
 }
 
@@ -269,17 +271,14 @@ fn fail_result(
         assurance_level: assurance,
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
-            property_kind: property.kind.clone(),
+            property_kind: property.kind,
             status: RunStatus::Fail,
             assurance_level: assurance,
-            reason_code: Some("PROPERTY_FAILED".to_string()),
+            reason_code: Some(fail_reason_code(property.kind).to_string()),
             unknown_reason: None,
             terminal_state_id: Some(format!("s-{failing_index:06}")),
             evidence_id: Some(evidence_id.clone()),
-            summary: format!(
-                "property `{}` failed during explicit exploration",
-                property.property_id
-            ),
+            summary: fail_summary(property),
         },
         explored_states: nodes.len(),
         explored_transitions: nodes.len().saturating_sub(1),
@@ -288,9 +287,10 @@ fn fail_result(
             &evidence_id,
             &plan.manifest.run_id,
             &property.property_id,
+            property_evidence_kind(property.kind),
             nodes,
             failing_index,
-            None,
+            Some(fail_note(property.kind).to_string()),
             assurance,
         )),
     }
@@ -315,7 +315,7 @@ fn deadlock_result(
         assurance_level: assurance,
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
-            property_kind: property.kind.clone(),
+            property_kind: property.kind,
             status: RunStatus::Fail,
             assurance_level: assurance,
             reason_code: Some("DEADLOCK_REACHED".to_string()),
@@ -331,6 +331,7 @@ fn deadlock_result(
             &evidence_id,
             &plan.manifest.run_id,
             &property.property_id,
+            EvidenceKind::Trace,
             nodes,
             deadlock_index,
             Some("deadlock detected".to_string()),
@@ -347,15 +348,20 @@ fn unknown_result(
     reason: UnknownReason,
 ) -> ExplicitRunResult {
     let last_index = nodes.len().saturating_sub(1);
+    let property = selected_property(model, plan).ok();
     ExplicitRunResult {
         manifest: plan.manifest.clone(),
         status: RunStatus::Unknown,
         assurance_level: AssuranceLevel::Incomplete,
         property_result: PropertyResult {
-            property_id: selected_property(model, plan)
-                .map(|p| p.property_id.clone())
-                .unwrap_or_else(|_| "unknown".to_string()),
-            property_kind: PropertyKind::Invariant,
+            property_id: property
+                .as_ref()
+                .map(|property| property.property_id.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            property_kind: property
+                .as_ref()
+                .map(|property| property.kind)
+                .unwrap_or(PropertyKind::Invariant),
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
             reason_code: None,
@@ -373,9 +379,11 @@ fn unknown_result(
             model,
             &format!("dbg-{}", plan.manifest.run_id),
             &plan.manifest.run_id,
-            &selected_property(model, plan)
-                .map(|p| p.property_id.clone())
-                .unwrap_or_else(|_| "unknown".to_string()),
+            property
+                .as_ref()
+                .map(|property| property.property_id.as_str())
+                .unwrap_or("unknown"),
+            EvidenceKind::Trace,
             nodes,
             last_index,
             Some(format!("search stopped: {}", unknown_reason_label(reason))),
@@ -422,6 +430,7 @@ fn build_trace(
     evidence_id: &str,
     run_id: &str,
     property_id: &str,
+    evidence_kind: EvidenceKind,
     nodes: &[NodeRecord],
     end_index: usize,
     final_note: Option<String>,
@@ -465,10 +474,70 @@ fn build_trace(
         evidence_id: evidence_id.to_string(),
         run_id: run_id.to_string(),
         property_id: property_id.to_string(),
-        evidence_kind: EvidenceKind::Trace,
+        evidence_kind,
         assurance_level,
         trace_hash: format!("trace:{}:{}", evidence_id, steps.len()),
         steps,
+    }
+}
+
+fn property_evidence_kind(kind: PropertyKind) -> EvidenceKind {
+    match kind {
+        PropertyKind::Invariant => EvidenceKind::Counterexample,
+        PropertyKind::Reachability => EvidenceKind::Witness,
+    }
+}
+
+fn fail_reason_code(kind: PropertyKind) -> &'static str {
+    match kind {
+        PropertyKind::Invariant => "PROPERTY_FAILED",
+        PropertyKind::Reachability => "TARGET_REACHED",
+    }
+}
+
+fn pass_reason_code(kind: PropertyKind, assurance: AssuranceLevel) -> &'static str {
+    match (kind, assurance) {
+        (PropertyKind::Invariant, AssuranceLevel::Bounded) => "BOUNDED_SPACE_EXHAUSTED",
+        (PropertyKind::Invariant, _) => "COMPLETE_SPACE_EXHAUSTED",
+        (PropertyKind::Reachability, AssuranceLevel::Bounded) => "TARGET_NOT_REACHED_WITHIN_BOUND",
+        (PropertyKind::Reachability, _) => "TARGET_UNREACHABLE",
+    }
+}
+
+fn fail_summary(property: &PropertyIr) -> String {
+    match property.kind {
+        PropertyKind::Invariant => format!(
+            "property `{}` failed during explicit exploration",
+            property.property_id
+        ),
+        PropertyKind::Reachability => format!(
+            "reachability target for `{}` was reached during explicit exploration",
+            property.property_id
+        ),
+    }
+}
+
+fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
+    match (property.kind, assurance) {
+        (PropertyKind::Invariant, AssuranceLevel::Bounded) => {
+            "no violating state found within the configured depth bound".to_string()
+        }
+        (PropertyKind::Invariant, _) => {
+            "no violating state found in the reachable state space".to_string()
+        }
+        (PropertyKind::Reachability, AssuranceLevel::Bounded) => {
+            "reachability target was not reached within the configured depth bound".to_string()
+        }
+        (PropertyKind::Reachability, _) => {
+            "reachability target was not found in the reachable state space".to_string()
+        }
+    }
+}
+
+fn fail_note(kind: PropertyKind) -> &'static str {
+    match kind {
+        PropertyKind::Invariant => "property violated",
+        PropertyKind::Reachability => "reachability target reached",
     }
 }
 
@@ -479,6 +548,7 @@ mod tests {
             check_explicit, AssuranceLevel, CheckOutcome, PropertySelection, ResourceLimits,
             RunPlan, RunStatus, SearchBounds, SearchStrategy, UnknownReason,
         },
+        evidence::EvidenceKind,
         ir::{
             ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
             PropertyKind, SourceSpan, StateField, UpdateIr, Value,
@@ -548,6 +618,27 @@ mod tests {
     fn default_plan() -> RunPlan {
         RunPlan {
             property_selection: PropertySelection::ExactlyOne("SAFE".to_string()),
+            ..RunPlan::default()
+        }
+    }
+
+    fn reachability_model(target: u64) -> ModelIr {
+        let mut model = counter_model();
+        model.properties = vec![PropertyIr {
+            property_id: "REACH".to_string(),
+            kind: PropertyKind::Reachability,
+            expr: ExprIr::Binary {
+                op: BinaryOp::Equal,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(target))),
+            },
+        }];
+        model
+    }
+
+    fn reachability_plan() -> RunPlan {
+        RunPlan {
+            property_selection: PropertySelection::ExactlyOne("REACH".to_string()),
             ..RunPlan::default()
         }
     }
@@ -629,6 +720,40 @@ mod tests {
             result.property_result.unknown_reason,
             Some(UnknownReason::TimeLimitReached)
         );
+    }
+
+    #[test]
+    fn reachability_returns_witness_when_target_is_reachable() {
+        let model = reachability_model(2);
+        let outcome = check_explicit(&model, &reachability_plan());
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Fail);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("TARGET_REACHED")
+        );
+        let trace = result.trace.expect("reachability should emit a witness");
+        assert_eq!(trace.evidence_kind, EvidenceKind::Witness);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].action_id.as_deref(), Some("Jump"));
+    }
+
+    #[test]
+    fn reachability_returns_pass_when_target_is_unreachable() {
+        let model = reachability_model(4);
+        let outcome = check_explicit(&model, &reachability_plan());
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Pass);
+        assert_eq!(result.assurance_level, AssuranceLevel::Complete);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("TARGET_UNREACHABLE")
+        );
+        assert!(result.trace.is_none());
     }
 
     #[test]
