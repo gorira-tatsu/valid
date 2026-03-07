@@ -5,7 +5,8 @@ edition = "2021"
 
 [features]
 default = []
-varisat-backend = ["dep:varisat"]
+verification-runtime = []
+varisat-backend = ["verification-runtime", "dep:varisat"]
 
 [workspace]
 members = ["packages/valid_derive"]
@@ -17,10 +18,12 @@ path = "packages/valid/src/lib.rs"
 [[bin]]
 name = "valid"
 path = "packages/valid/src/bin/valid.rs"
+required-features = ["verification-runtime"]
 
 [[bin]]
 name = "cargo-valid"
 path = "packages/valid/src/bin/cargo-valid.rs"
+required-features = ["verification-runtime"]
 
 [[bin]]
 name = "valid-mcp"
@@ -29,14 +32,72 @@ path = "packages/valid/src/bin/valid-mcp.rs"
 [[example]]
 name = "practical_use_cases_registry"
 path = "benchmarks/registries/practical_use_cases_registry.rs"
+required-features = ["verification-runtime"]
 
 [[example]]
 name = "enterprise_scale_registry"
 path = "benchmarks/registries/enterprise_scale_registry.rs"
+required-features = ["verification-runtime"]
 
 [[example]]
 name = "iam_enterprise_registry"
 path = "benchmarks/registries/iam_enterprise_registry.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "fizzbuzz"
+path = "examples/fizzbuzz.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "iam_transition_registry"
+path = "examples/iam_transition_registry.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "password_policy"
+path = "examples/password_policy.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "saas_multi_tenant_registry"
+path = "examples/saas_multi_tenant_registry.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "tenant_relation_registry"
+path = "examples/tenant_relation_registry.rs"
+required-features = ["verification-runtime"]
+
+[[example]]
+name = "valid_models"
+path = "examples/valid_models.rs"
+required-features = ["verification-runtime"]
+
+[[test]]
+name = "e2e_cli"
+path = "tests/e2e_cli.rs"
+required-features = ["verification-runtime"]
+
+[[test]]
+name = "e2e_cargo_valid"
+path = "tests/e2e_cargo_valid.rs"
+required-features = ["verification-runtime"]
+
+[[test]]
+name = "e2e_enterprise_scale"
+path = "tests/e2e_enterprise_scale.rs"
+required-features = ["verification-runtime"]
+
+[[test]]
+name = "e2e_practical_suite"
+path = "tests/e2e_practical_suite.rs"
+required-features = ["verification-runtime"]
+
+[[test]]
+name = "e2e_real_solver"
+path = "tests/e2e_real_solver.rs"
+required-features = ["verification-runtime"]
 
 [dependencies]
 valid_derive = { path = "packages/valid_derive" }

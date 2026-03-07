@@ -62,7 +62,7 @@ If you want details, read [docs/install.md](./docs/install.md).
 Run the full test suite:
 
 ```sh
-cargo test -q
+cargo test -q --features verification-runtime
 ```
 
 Initialize a project once:
@@ -139,9 +139,9 @@ cargo valid verify failing-counter --json
 Try the legacy `.valid` path:
 
 ```sh
-cargo run --bin valid -- inspect tests/fixtures/models/safe_counter.valid
-cargo run --bin valid -- verify tests/fixtures/models/failing_counter.valid
-cargo run --bin valid -- explain tests/fixtures/models/failing_counter.valid
+cargo run --features verification-runtime --bin valid -- inspect tests/fixtures/models/safe_counter.valid
+cargo run --features verification-runtime --bin valid -- verify tests/fixtures/models/failing_counter.valid
+cargo run --features verification-runtime --bin valid -- explain tests/fixtures/models/failing_counter.valid
 ```
 
 ## MCP Server
@@ -240,7 +240,9 @@ If you are deciding between the two, use the Rust-first path.
 
 The embedded SAT backend is optional at compile time. The release workflow
 builds binaries with `varisat-backend` enabled, while source installs can
-choose the feature set explicitly.
+choose the feature set explicitly. `verification-runtime` is required for CLI
+binaries and registry-driven embedding in release builds; plain library release
+builds leave that runtime out by default.
 
 ## Command Guide
 
@@ -483,6 +485,10 @@ Save that as `examples/valid_models.rs` or another registry file, then run:
 cargo valid --registry examples/valid_models.rs models
 ```
 
+If you embed `valid` as a library and use `registry::run_registry_cli(...)` or
+other verification/runtime APIs from a release build, enable the
+`verification-runtime` feature on that dependency.
+
 ## Declarative Transition Mode
 
 If you want action/guard/effect metadata to stay visible, use declarative
@@ -561,8 +567,8 @@ Examples:
 cargo valid --registry examples/valid_models.rs generate-tests counter --strategy=witness
 cargo valid --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard
 cargo valid --registry examples/saas_multi_tenant_registry.rs generate-tests tenant-isolation-regression --strategy=counterexample
-cargo run --bin valid -- generate-tests tests/fixtures/models/safe_counter.valid --strategy=boundary
-cargo run --bin valid -- generate-tests tests/fixtures/models/multi_property.valid --property=P_STRICT --strategy=counterexample
+cargo run --features verification-runtime --bin valid -- generate-tests tests/fixtures/models/safe_counter.valid --strategy=boundary
+cargo run --features verification-runtime --bin valid -- generate-tests tests/fixtures/models/multi_property.valid --property=P_STRICT --strategy=counterexample
 cargo valid --registry examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC
 ```
 
@@ -623,7 +629,7 @@ The default and most reliable backend today is the explicit engine.
 For the current bounded SMT subset, you can also run:
 
 ```sh
-cargo run --bin valid -- check tests/fixtures/models/failing_counter.valid \
+cargo run --features verification-runtime --bin valid -- check tests/fixtures/models/failing_counter.valid \
   --backend=smt-cvc5 \
   --solver-exec cvc5 \
   --solver-arg --lang \
@@ -634,7 +640,7 @@ cargo run --bin valid -- check tests/fixtures/models/failing_counter.valid \
 There is also a mock command-backend demo:
 
 ```sh
-cargo run --bin valid -- check tests/fixtures/models/failing_counter.valid \
+cargo run --features verification-runtime --bin valid -- check tests/fixtures/models/failing_counter.valid \
   --backend=command \
   --solver-exec sh \
   --solver-arg tests/fixtures/solvers/mock_command_solver.sh \
