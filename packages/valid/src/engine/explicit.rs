@@ -125,6 +125,9 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
 
         let node = nodes[node_index].clone();
         if property_triggered(model, &node.state, property)? {
+if matches!(property.kind, PropertyKind::Invariant)
+            && !property_holds(model, &node.state, property)?
+        {
             return Ok(fail_result(model, plan, property, &nodes, node_index));
         }
 
@@ -167,6 +170,10 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         }
 
         if plan.detect_deadlocks && enabled == 0 && property.kind == PropertyKind::Invariant {
+if matches!(property.kind, PropertyKind::DeadlockFreedom)
+            && plan.detect_deadlocks
+            && enabled == 0
+        {
             return Ok(deadlock_result(model, plan, property, &nodes, node_index));
         }
     }
@@ -191,6 +198,17 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             terminal_state_id: None,
             evidence_id: None,
             summary: pass_summary(property, assurance),
+summary: match property.kind {
+                PropertyKind::Invariant => {
+                    if assurance == AssuranceLevel::Bounded {
+                    }
+                }
+                PropertyKind::DeadlockFreedom => {
+                    if assurance == AssuranceLevel::Bounded {
+                        "no deadlock state found within the configured depth bound".to_string()
+                        "no deadlock state found in the reachable state space".to_string()
+                    }
+                }
         },
         explored_states: visited.len(),
         explored_transitions,
@@ -249,6 +267,7 @@ fn property_value(
             ),
         )
         .with_help("keep lowered properties boolean regardless of property kind")),
+        PropertyKind::DeadlockFreedom => Ok(true),
     }
 }
 
@@ -362,6 +381,8 @@ fn unknown_result(
                 .as_ref()
                 .map(|property| property.kind)
                 .unwrap_or(PropertyKind::Invariant),
+            property_kind: selected_property(model, plan)
+                .map(|p| p.kind.clone())
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
             reason_code: None,
@@ -765,5 +786,100 @@ mod tests {
             panic!("expected error")
         };
         assert_eq!(error.assurance_level, AssuranceLevel::Incomplete);
+    }
+
+    #[test]
+    fn deadlock_freedom_fails_with_counterexample() {
+        let mut model = counter_model();
+        model.actions = vec![ActionIr {
+            action_id: "OnlyOnce".to_string(),
+            label: "OnlyOnce".to_string(),
+            reads: vec!["x".to_string()],
+            writes: vec!["x".to_string()],
+            path_tags: vec!["guard_path".to_string()],
+            guard: ExprIr::Binary {
+                op: BinaryOp::LessThanOrEqual,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(0))),
+            },
+            updates: vec![UpdateIr {
+                field: "x".to_string(),
+                value: ExprIr::Literal(Value::UInt(1)),
+            }],
+        }];
+        model.properties = vec![PropertyIr {
+            property_id: "P_LIVE".to_string(),
+            kind: PropertyKind::DeadlockFreedom,
+            expr: ExprIr::Literal(Value::Bool(true)),
+        }];
+        let outcome = check_explicit(
+            &model,
+            &RunPlan {
+                property_selection: PropertySelection::ExactlyOne("P_LIVE".to_string()),
+                ..RunPlan::default()
+            },
+        );
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Fail);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("DEADLOCK_REACHED")
+        );
+        let trace = result.trace.expect("deadlock trace");
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].action_id.as_deref(), Some("OnlyOnce"));
+        assert_eq!(trace.steps[0].note.as_deref(), Some("deadlock detected"));
+    }
+
+    #[test]
+    fn deadlock_freedom_passes_when_some_action_is_always_enabled() {
+        let mut model = counter_model();
+        model.properties = vec![PropertyIr {
+            property_id: "P_LIVE".to_string(),
+            kind: PropertyKind::DeadlockFreedom,
+            expr: ExprIr::Literal(Value::Bool(true)),
+        }];
+        let outcome = check_explicit(
+            &model,
+            &RunPlan {
+                property_selection: PropertySelection::ExactlyOne("P_LIVE".to_string()),
+                ..RunPlan::default()
+            },
+        );
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Pass);
+    }
+
+    #[test]
+    fn invariant_property_does_not_fail_just_because_a_state_is_deadlocked() {
+        let model = ModelIr {
+            model_id: "Terminal".to_string(),
+            state_fields: vec![StateField {
+                id: "x".to_string(),
+                name: "x".to_string(),
+                ty: FieldType::BoundedU8 { min: 0, max: 1 },
+                span: SourceSpan { line: 1, column: 1 },
+            }],
+            init: vec![InitAssignment {
+                field: "x".to_string(),
+                value: Value::UInt(0),
+                span: SourceSpan { line: 1, column: 1 },
+            }],
+            actions: vec![],
+            properties: vec![PropertyIr {
+                property_id: "SAFE".to_string(),
+                kind: PropertyKind::Invariant,
+                expr: ExprIr::Literal(Value::Bool(true)),
+            }],
+        };
+        let outcome = check_explicit(&model, &default_plan());
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Pass);
     }
 }

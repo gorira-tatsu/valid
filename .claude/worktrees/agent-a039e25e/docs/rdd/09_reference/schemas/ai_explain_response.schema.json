@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.ai.explain.response",
+  "type": "object",
+  "required": ["schema_version", "request_id", "status", "evidence_id", "property_id", "failure_step_index", "involved_fields", "candidate_causes", "repair_hints", "confidence"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "request_id": { "type": "string" },
+    "status": { "type": "string" },
+    "evidence_id": { "type": "string" },
+    "property_id": { "type": "string" },
+    "failure_step_index": { "type": "integer", "minimum": 0 },
+    "involved_fields": { "type": "array", "items": { "type": "string" } },
+    "candidate_causes": { "type": "array", "items": { "type": "object" } },
+    "repair_hints": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

@@ -114,12 +114,25 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
         };
         match lower_expr(&property.expr) {
             Some(expr) => properties.push(PropertyIr {
+match lower_property_kind(&property.kind) {
+            Some(PropertyKind::Invariant) => match lower_expr(&property.expr) {
+                    property_id: property.name.clone(),
+                    kind: PropertyKind::Invariant,
+                    expr,
+                }),
+                None => errors.push(lowering_error(
+                    format!("unsupported property expression `{}`", property.expr),
+                )),
+            },
+            Some(PropertyKind::DeadlockFreedom) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
                 kind,
                 expr,
+kind: PropertyKind::DeadlockFreedom,
+                expr: ExprIr::Literal(Value::Bool(true)),
             }),
             None => errors.push(lowering_error(
-                format!("unsupported property expression `{}`", property.expr),
+                format!("unsupported property kind `{}`", property.kind),
                 property.line,
             )),
         }
@@ -181,6 +194,14 @@ fn lower_value(input: &str) -> Option<Value> {
         return Some(Value::Bool(false));
     }
     input.parse::<u64>().ok().map(Value::UInt)
+}
+
+fn lower_property_kind(input: &str) -> Option<PropertyKind> {
+    match input {
+        "invariant" => Some(PropertyKind::Invariant),
+        "deadlock_freedom" => Some(PropertyKind::DeadlockFreedom),
+        _ => None,
+    }
 }
 
 fn lower_expr(input: &str) -> Option<ExprIr> {
@@ -598,4 +619,13 @@ property P_OPEN:
             crate::ir::PropertyKind::Reachability
         );
     }
+    fn lowers_deadlock_freedom_property_kind() {
+model CounterLock
+  x: u8[0..1]
+  x = 0
+property P_LIVE: deadlock_freedom
+        assert_eq!(model.properties[0].property_id, "P_LIVE");
+            crate::ir::PropertyKind::DeadlockFreedom
+            model.properties[0].expr,
+            crate::ir::ExprIr::Literal(crate::ir::Value::Bool(true))
 }

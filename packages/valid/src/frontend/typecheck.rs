@@ -61,9 +61,25 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
     for property in &resolved.parsed.properties {
         if crate::ir::PropertyKind::parse(&property.kind).is_none() {
             errors.push(type_error(
+match property.kind.as_str() {
+            "invariant" => {
+                if property.expr.is_empty() {
+                        "invariant property requires a boolean expression".to_string(),
+                        property.line,
+                    ));
+                }
+            }
+            "deadlock_freedom" => {
+                if !property.expr.is_empty() {
+                        "deadlock_freedom property does not accept an expression".to_string(),
+                        property.line,
+                    ));
+                }
+            }
+            _ => errors.push(type_error(
                 format!("unsupported property kind `{}`", property.kind),
                 property.line,
-            ));
+            )),
         }
     }
 
@@ -169,4 +185,10 @@ property P_OPEN:
         let resolved = resolve_model(parsed).expect("resolve");
         typecheck_model(resolved).expect("reachability properties should typecheck");
     }
+    fn accepts_deadlock_freedom_property() {
+model CounterLock
+  locked: bool
+  locked = false
+property P_LIVE: deadlock_freedom
+        typecheck_model(resolved).expect("deadlock_freedom should typecheck");
 }

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Capabilities Response",
+  "type": "object",
+  "required": ["schema_version", "request_id", "backend", "capabilities"],
+  "properties": {
+    "schema_version": { "type": "string", "minLength": 1 },
+    "request_id": { "type": "string", "minLength": 1 },
+    "backend": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "backend_name",
+        "supports_explicit",
+        "supports_bmc",
+        "supports_certificate",
+        "supports_trace",
+        "supports_witness",
+        "selfcheck_compatible"
+      ],
+      "properties": {
+        "backend_name": { "type": "string", "minLength": 1 },
+        "supports_explicit": { "type": "boolean" },
+        "supports_bmc": { "type": "boolean" },
+        "supports_certificate": { "type": "boolean" },
+        "supports_trace": { "type": "boolean" },
+        "supports_witness": { "type": "boolean" },
+        "selfcheck_compatible": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

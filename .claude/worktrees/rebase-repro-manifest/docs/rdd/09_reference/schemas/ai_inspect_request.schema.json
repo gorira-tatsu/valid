@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.ai.inspect.request",
+  "type": "object",
+  "required": ["request_id", "source_name", "source"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "source_name": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

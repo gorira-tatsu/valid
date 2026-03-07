@@ -14,6 +14,7 @@ use crate::{
     frontend,
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path},
     modeling::CapabilityDetail,
+ir::{ModelIr, PropertyKind},
     orchestrator::run_all_properties_with_backend,
     solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
@@ -329,6 +330,15 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         );
     }
     let model = frontend::compile_model(&request.source)?;
+    let supports_solver = model
+        .properties
+        .iter()
+        .all(|property| matches!(property.kind, PropertyKind::Invariant));
+    let capability_reasons = if supports_solver {
+        Vec::new()
+    } else {
+        vec!["deadlock_freedom_requires_explicit_backend".to_string()]
+    };
     Ok(InspectResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request.request_id.clone(),
@@ -337,6 +347,8 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         machine_ir_ready: true,
         machine_ir_error: None,
         capabilities: InspectCapabilities::fully_ready(),
+            solver_ready: supports_solver,
+            reasons: capability_reasons,
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
         actions: model.actions.iter().map(|a| a.action_id.clone()).collect(),
         properties: model
@@ -432,6 +444,8 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 property_id: property.property_id.clone(),
                 kind: property.kind.to_string(),
                 expr: Some(render_expr_ir(&property.expr)),
+kind: property_kind_label(&property.kind).to_string(),
+                expr: property_expr_for_inspect(property),
             })
             .collect(),
     })
@@ -439,6 +453,20 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
 
 pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
     frontend::compile_model(source)
+}
+
+pub(crate) fn property_kind_label(kind: &PropertyKind) -> &'static str {
+    match kind {
+        PropertyKind::Invariant => "invariant",
+        PropertyKind::DeadlockFreedom => "deadlock_freedom",
+    }
+}
+
+fn property_expr_for_inspect(property: &crate::ir::PropertyIr) -> Option<String> {
+    match property.kind {
+        PropertyKind::Invariant => Some(render_expr_ir(&property.expr)),
+        PropertyKind::DeadlockFreedom => None,
+    }
 }
 
 pub fn capabilities_response(
@@ -2906,6 +2934,51 @@ mod tests {
     }
 
     #[test]
+fn inspect_hides_expr_for_deadlock_freedom_property() {
+        let source =
+            "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\nproperty P_LIVE: deadlock_freedom\n";
+            request_id: "req-deadlock".to_string(),
+        assert_eq!(response.property_details[0].kind, "deadlock_freedom");
+        assert_eq!(response.property_details[0].expr, None);
+    fn check_can_fail_deadlock_freedom_property() {
+        let outcome = check_source(&CheckRequest {
+            request_id: "req-deadlock-fail".to_string(),
+            source_name: "deadlock.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n".to_string(),
+            property_id: Some("P_LIVE".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        assert_eq!(result.status, crate::engine::RunStatus::Fail);
+        assert_eq!(
+            result.property_result.property_kind,
+            crate::ir::PropertyKind::DeadlockFreedom
+        );
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("DEADLOCK_REACHED")
+        );
+        assert!(result.trace.is_some());
+    fn check_can_pass_deadlock_freedom_property() {
+        let outcome = check_source(&CheckRequest {
+            request_id: "req-deadlock-pass".to_string(),
+            source_name: "deadlock.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Stay:\n  pre: true\n  post:\n    x = x\nproperty P_LIVE: deadlock_freedom\n".to_string(),
+            property_id: Some("P_LIVE".to_string()),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        assert_eq!(result.status, crate::engine::RunStatus::Pass);
+        assert_eq!(
+            result.property_result.property_kind,
+            crate::ir::PropertyKind::DeadlockFreedom
+        );
     fn lint_surfaces_step_to_declarative_migration_hints() {
         let request = InspectRequest {
             request_id: "req-lint".to_string(),

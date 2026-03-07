@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.ai.minimize.response",
+  "type": "object",
+  "required": ["schema_version", "request_id", "status", "original_steps", "minimized_steps", "vector_id"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "request_id": { "type": "string" },
+    "status": { "type": "string" },
+    "original_steps": { "type": "integer", "minimum": 0 },
+    "minimized_steps": { "type": "integer", "minimum": 0 },
+    "vector_id": { "type": "string" }
+  }
+}

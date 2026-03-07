@@ -825,6 +825,15 @@ impl<S> ModelProperty<S> {
             holds,
         }
     }
+
+    pub fn deadlock_freedom(property_id: &'static str, holds: fn(&S) -> bool) -> Self {
+        Self {
+            property_id,
+            property_kind: crate::ir::PropertyKind::DeadlockFreedom,
+            expr: None,
+            holds,
+        }
+    }
 }
 
 pub trait ModelSpec {
@@ -1024,6 +1033,8 @@ fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment
                 unsupported_features.into_iter().collect(),
             ),
         }
+if matches!(property.kind, crate::ir::PropertyKind::DeadlockFreedom) {
+            reasons.insert("deadlock_freedom_requires_explicit_backend".to_string());
     }
 }
 
@@ -1658,7 +1669,7 @@ macro_rules! valid_model {
             )+
         }
         properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+            $($property_tokens:tt)+
         }
     ) => {
         $crate::valid_model! {
@@ -1672,7 +1683,7 @@ macro_rules! valid_model {
                 )+
             }
             properties {
-                $(invariant $property |$holds_state| $holds_expr;)+
+                $($property_tokens)+
             }
         }
     };
@@ -1681,9 +1692,11 @@ macro_rules! valid_model {
         init [$($init_state:expr),* $(,)?];
         transitions {
             $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:tt)+];)+
+            $($property_tokens:tt)+
+                $($property_tokens)+
         }
         properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+            $($property_tokens:tt)+
         }
     ) => {
         struct $model;
@@ -1714,15 +1727,9 @@ macro_rules! valid_model {
             }
 
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
-                vec![
-                    $(
-                        $crate::modeling::ModelProperty::invariant_expr(
-                            stringify!($property),
-                            Some(stringify!($holds_expr)),
-                            |$holds_state: &Self::State| $holds_expr,
-                        )
-                    ),+
-                ]
+                let mut properties = Vec::new();
+                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
+                properties
             }
 
             fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
@@ -1778,6 +1785,7 @@ macro_rules! valid_model {
             writes: descriptor.writes,
             path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
             updates: &[
+            $($property_tokens:tt)+
                 $(
                     $crate::modeling::TransitionUpdateDescriptor {
                         field: stringify!($field),
@@ -1785,6 +1793,9 @@ macro_rules! valid_model {
                     }
                 ),*
             ],
+                let mut properties = Vec::new();
+                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
+                properties
         }
     }};
     (
@@ -1856,12 +1867,28 @@ macro_rules! valid_model {
     (@path_tags) => {
         &[]
     };
+    (@push_properties $properties:ident [$model:ident] [$state_ty:ty]; invariant $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::invariant_expr(
+            stringify!($property),
+            Some(stringify!($holds_expr)),
+            |$holds_state: &$state_ty| $holds_expr,
+        ));
+        $crate::valid_model!(@push_properties $properties [$model] [$state_ty]; $($rest)*);
+    };
+    (@push_properties $properties:ident [$model:ident] [$state_ty:ty]; deadlock_freedom $property:ident; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::deadlock_freedom(
+            stringify!($property),
+            |state: &$state_ty| !<$model as $crate::modeling::ModelSpec>::enabled_actions(state).is_empty(),
+        ));
+        $crate::valid_model!(@push_properties $properties [$model] [$state_ty]; $($rest)*);
+    };
+    (@push_properties $properties:ident [$model:ident] [$state_ty:ty];) => {};
     (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         step |$state:ident, $action:ident| $step_body:block
         properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+            $($property_tokens:tt)+
         }
     ) => {
         struct $model;
@@ -1881,15 +1908,9 @@ macro_rules! valid_model {
             fn step($state: &Self::State, $action: &Self::Action) -> Vec<Self::State> $step_body
 
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
-                vec![
-                    $(
-                        $crate::modeling::ModelProperty::invariant_expr(
-                            stringify!($property),
-                            Some(stringify!($holds_expr)),
-                            |$holds_state: &Self::State| $holds_expr,
-                        )
-                    ),+
-                ]
+                let mut properties = Vec::new();
+                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
+                properties
             }
         }
     };
@@ -1906,6 +1927,22 @@ macro_rules! valid_model {
             step |$state, $action| $step_body
             properties {
                 invariant $property |$holds_state| $holds_expr;
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        property $property:ident;
+        init [$($init_state:expr),* $(,)?];
+        step |$state:ident, $action:ident| $step_body:block
+        deadlock_freedom;
+    ) => {
+        $crate::valid_model! {
+            model $model<$state_ty, $action_ty>;
+            init [$($init_state),*];
+            step |$state, $action| $step_body
+            properties {
+                deadlock_freedom $property;
             }
         }
     };
@@ -2853,15 +2890,18 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
     let properties = M::properties()
         .into_iter()
         .map(|property| {
-            let expr = property
-                .expr
-                .and_then(|expr| lower_machine_expr_with_enums(expr, &enum_literals))
-                .ok_or_else(|| {
-                    format!(
-                        "machine property `{}` is not representable in the current IR subset",
-                        property.property_id
-                    )
-                })?;
+            let expr = match property.property_kind {
+                crate::ir::PropertyKind::Invariant => property
+                    .expr
+                    .and_then(|expr| lower_machine_expr_with_enums(expr, &enum_literals))
+                    .ok_or_else(|| {
+                        format!(
+                            "machine property `{}` is not representable in the current IR subset",
+                            property.property_id
+                        )
+                    })?,
+                crate::ir::PropertyKind::DeadlockFreedom => ExprIr::Literal(Value::Bool(true)),
+            };
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
                 kind: property.property_kind,
@@ -3634,6 +3674,8 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
     property_id: &str,
 ) -> CheckOutcome {
     let result = check_machine_property::<M>(property_id);
+    let property = find_property::<M>(result.property_id);
+    let property_kind = property.property_kind.clone();
     let run_id = format!(
         "run-{}",
         stable_hash_hex(&(request_id.to_string() + M::model_id() + result.property_id))
@@ -3657,15 +3699,32 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
         ModelingRunStatus::Pass => (
             RunStatus::Pass,
             Some("COMPLETE_SPACE_EXHAUSTED".to_string()),
-            "no violating state found in the reachable state space".to_string(),
+            match &property_kind {
+                crate::ir::PropertyKind::Invariant => {
+                    "no violating state found in the reachable state space".to_string()
+                }
+                crate::ir::PropertyKind::DeadlockFreedom => {
+                    "no deadlock state found in the reachable state space".to_string()
+                }
+            },
             None,
         ),
         ModelingRunStatus::Fail => {
             let trace = build_evidence_trace::<M>(request_id, &result);
             (
                 RunStatus::Fail,
-                Some("PROPERTY_VIOLATED".to_string()),
-                "violating state discovered in reachable state space".to_string(),
+                Some(match &property_kind {
+                    crate::ir::PropertyKind::Invariant => "PROPERTY_VIOLATED".to_string(),
+                    crate::ir::PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED".to_string(),
+                }),
+                match &property_kind {
+                    crate::ir::PropertyKind::Invariant => {
+                        "violating state discovered in reachable state space".to_string()
+                    }
+                    crate::ir::PropertyKind::DeadlockFreedom => {
+                        "deadlock detected in reachable state space".to_string()
+                    }
+                },
                 Some(trace),
             )
         }
@@ -3678,7 +3737,7 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
         assurance_level: AssuranceLevel::Complete,
         property_result: PropertyResult {
             property_id: result.property_id.to_string(),
-            property_kind: find_property::<M>(result.property_id).property_kind,
+            property_kind,
             status,
             assurance_level: AssuranceLevel::Complete,
             reason_code,
@@ -4826,6 +4885,40 @@ mod tests {
         }
     }
 
+    valid_state! {
+        struct DeadlockState {
+            x: u8 [range = "0..=1"],
+        }
+    }
+
+    valid_actions! {
+        enum DeadlockAction {
+            Advance => "ADVANCE" [reads = ["x"], writes = ["x"]],
+        }
+    }
+
+    crate::valid_model! {
+        model DeadlockFreedomFailModel<DeadlockState, DeadlockAction>;
+        init [DeadlockState { x: 0 }];
+        transitions {
+            transition Advance when |state| state.x == 0 => [DeadlockState { x: 1 }];
+        }
+        properties {
+            deadlock_freedom P_LIVE;
+        }
+    }
+
+    crate::valid_model! {
+        model DeadlockFreedomPassModel<DeadlockState, DeadlockAction>;
+        init [DeadlockState { x: 0 }];
+        transitions {
+            transition Advance when |_state| true => [DeadlockState { x: 0 }];
+        }
+        properties {
+            deadlock_freedom P_LIVE;
+        }
+    }
+
     #[test]
     fn declarative_model_can_lower_finite_sets_and_logical_helpers() {
         let fields = state_field_descriptors::<RoleSetState>();
@@ -4884,6 +4977,53 @@ mod tests {
             CheckOutcome::Completed(result) => {
                 assert_eq!(result.status, RunStatus::Pass);
                 assert_eq!(result.explored_states, 4);
+            }
+            CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error.diagnostics),
+        }
+    }
+
+    #[test]
+    fn rust_native_deadlock_freedom_can_fail() {
+        let result = check_machine::<DeadlockFreedomFailModel>();
+        assert_eq!(result.status, ModelingRunStatus::Fail);
+        assert_eq!(result.trace.len(), 1);
+    }
+
+    #[test]
+    fn rust_native_deadlock_freedom_can_pass() {
+        let result = check_machine::<DeadlockFreedomPassModel>();
+        assert_eq!(result.status, ModelingRunStatus::Pass);
+    }
+
+    #[test]
+    fn rust_native_deadlock_freedom_lowers_to_ir() {
+        let lowered =
+            lower_machine_model::<DeadlockFreedomFailModel>().expect("deadlock model lowers");
+        assert_eq!(lowered.properties.len(), 1);
+        assert_eq!(
+            lowered.properties[0].kind,
+            crate::ir::PropertyKind::DeadlockFreedom
+        );
+        assert_eq!(
+            lowered.properties[0].expr,
+            ExprIr::Literal(Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn rust_native_deadlock_freedom_outcome_uses_deadlock_reason() {
+        let outcome = check_machine_outcome::<DeadlockFreedomFailModel>("req-deadlock");
+        match outcome {
+            CheckOutcome::Completed(result) => {
+                assert_eq!(
+                    result.property_result.property_kind,
+                    crate::ir::PropertyKind::DeadlockFreedom
+                );
+                assert_eq!(
+                    result.property_result.reason_code.as_deref(),
+                    Some("DEADLOCK_REACHED")
+                );
+                assert_eq!(result.status, RunStatus::Fail);
             }
             CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error.diagnostics),
         }
