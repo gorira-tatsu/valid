@@ -4,6 +4,8 @@ use std::{
     process::{self, Command},
 };
 
+use clap::Parser;
+
 use crate::{
     benchmark::{
         benchmark_check_outcomes, compare_benchmark_to_baseline, parse_benchmark_summary_json,
@@ -41,6 +43,19 @@ use crate::{
     support::{artifact::benchmark_baseline_path, hash::stable_hash_hex, io::write_text_file},
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
 };
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "registry",
+    disable_help_flag = true,
+    disable_version_flag = true,
+    trailing_var_arg = true
+)]
+struct RegistryCli {
+    command: Option<String>,
+    #[arg(allow_hyphen_values = true)]
+    rest: Vec<String>,
+}
 
 use crate::api::{
     explicit_analysis_warning, lint_from_inspect, migration_from_inspect, render_explain_json,
@@ -116,8 +131,19 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
     let models = models;
     let args = env::args().skip(1).collect::<Vec<_>>();
     let json = detect_json_flag(&args) || args.iter().any(|arg| arg == "--format=json");
-    let command = normalize_command(args.first().map(String::as_str).unwrap_or_default());
-    let remaining = args.into_iter().skip(1).collect::<Vec<_>>();
+    let cli = RegistryCli::try_parse_from(std::iter::once("registry".to_string()).chain(args))
+        .unwrap_or_else(|error| {
+            message_exit("registry", json, &error.to_string(), Some(REGISTRY_USAGE))
+        });
+    let mut command = cli.command.unwrap_or_default();
+    let mut remaining = cli.rest;
+    if command == "valid" {
+        command = remaining.first().cloned().unwrap_or_default();
+        if !remaining.is_empty() {
+            remaining.remove(0);
+        }
+    }
+    let command = normalize_command(&command);
 
     match command.as_str() {
         "list" => cmd_list(&models, remaining),

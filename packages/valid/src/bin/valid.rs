@@ -4,6 +4,7 @@ use std::{
     process::{self, Command},
 };
 
+use clap::{ArgAction, Args, Parser, Subcommand};
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, lint_source,
@@ -44,35 +45,240 @@ use valid::{
     testgen::{render_replay_json, replay_path_for_model},
 };
 
+#[derive(Parser, Debug)]
+#[command(name = "valid", disable_help_flag = true, disable_version_flag = true)]
+struct ValidCli {
+    #[command(subcommand)]
+    command: Option<ValidCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ValidCommand {
+    #[command(alias = "verify")]
+    Check(CommonModelArgs),
+    Inspect(ModelPathArgs),
+    #[command(alias = "diagram")]
+    Graph(GraphArgs),
+    Doc(DocArgs),
+    #[command(alias = "readiness")]
+    Lint(ModelPathArgs),
+    Capabilities(CapabilitiesArgs),
+    Explain(CommonModelArgs),
+    Minimize(CommonModelArgs),
+    Contract(ContractArgs),
+    Trace(TraceArgs),
+    Orchestrate(CommonModelArgs),
+    #[command(alias = "generate-tests")]
+    Testgen(TestgenArgs),
+    Replay(ReplayArgs),
+    Coverage(CommonModelArgs),
+    Conformance(ConformanceArgs),
+    Clean(CleanArgs),
+    Selfcheck(JsonProgressArgs),
+    Commands(JsonOnlyArgs),
+    Schema(SchemaArgs),
+    Batch(JsonProgressArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+struct JsonProgressArgs {
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+    #[arg(long = "progress", default_value = None)]
+    progress: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct JsonOnlyArgs {
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ModelPathArgs {
+    path: String,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct CommonModelArgs {
+    path: String,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    seed: Option<u64>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct GraphArgs {
+    path: String,
+    #[arg(long)]
+    format: Option<String>,
+    #[arg(long)]
+    view: Option<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct DocArgs {
+    path: String,
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    write: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    check: bool,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct CapabilitiesArgs {
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ContractArgs {
+    subcommand: String,
+    path: String,
+    lock_file: Option<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct TraceArgs {
+    path: String,
+    #[arg(long)]
+    format: Option<String>,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    seed: Option<u64>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct TestgenArgs {
+    path: String,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    strategy: Option<String>,
+    #[arg(long)]
+    seed: Option<u64>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ReplayArgs {
+    path: String,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long = "focus-action")]
+    focus_action: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    actions: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ConformanceArgs {
+    path: String,
+    #[arg(long)]
+    runner: String,
+    #[arg(long = "runner-arg", allow_hyphen_values = true)]
+    runner_args: Vec<String>,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    actions: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct CleanArgs {
+    scope: Option<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct SchemaArgs {
+    command: String,
+}
+
 fn main() {
-    let args = env::args().skip(1).collect::<Vec<_>>();
-    let command = normalize_command(args.first().map(String::as_str).unwrap_or_default());
-    let remaining = args.into_iter().skip(1).collect::<Vec<_>>();
-    match command.as_str() {
-        "check" => cmd_check(remaining),
-        "inspect" => cmd_inspect(remaining),
-        "graph" => cmd_graph(remaining),
-        "doc" => cmd_doc(remaining),
-        "lint" => cmd_lint(remaining),
-        "capabilities" => cmd_capabilities(remaining),
-        "explain" => cmd_explain(remaining),
-        "minimize" => cmd_minimize(remaining),
-        "contract" => cmd_contract(remaining),
-        "trace" => cmd_trace(remaining),
-        "orchestrate" => cmd_orchestrate(remaining),
-        "testgen" => cmd_testgen(remaining),
-        "replay" => cmd_replay(remaining),
-        "coverage" => cmd_coverage(remaining),
-        "conformance" => cmd_conformance(remaining),
-        "clean" => cmd_clean(remaining),
-        "selfcheck" => cmd_selfcheck(remaining),
-        "commands" => cmd_commands(remaining),
-        "schema" => cmd_schema(remaining),
-        "batch" => cmd_batch(remaining),
-        _ => {
+    let raw_args = env::args().collect::<Vec<_>>();
+    let json = detect_json_flag(&raw_args);
+    let cli = match ValidCli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            message_exit("valid", json, &error.to_string(), None);
+        }
+    };
+    match cli.command {
+        Some(ValidCommand::Check(args)) => cmd_check_from_parsed(common_to_parsed(args)),
+        Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
+        Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
+        Some(ValidCommand::Doc(args)) => cmd_doc_from_parsed(doc_to_parsed(args)),
+        Some(ValidCommand::Lint(args)) => cmd_lint_from_parsed(model_to_parsed(args)),
+        Some(ValidCommand::Capabilities(args)) => {
+            cmd_capabilities_from_parsed(capabilities_to_parsed(args))
+        }
+        Some(ValidCommand::Explain(args)) => cmd_explain_from_parsed(common_to_parsed(args)),
+        Some(ValidCommand::Minimize(args)) => cmd_minimize_from_parsed(common_to_parsed(args)),
+        Some(ValidCommand::Contract(args)) => cmd_contract_from_parsed(args),
+        Some(ValidCommand::Trace(args)) => cmd_trace_from_parsed(trace_to_parsed(args)),
+        Some(ValidCommand::Orchestrate(args)) => {
+            cmd_orchestrate_from_parsed(common_to_parsed(args))
+        }
+        Some(ValidCommand::Testgen(args)) => cmd_testgen_from_parsed(testgen_to_parsed(args)),
+        Some(ValidCommand::Replay(args)) => cmd_replay_from_parsed(replay_to_parsed(args)),
+        Some(ValidCommand::Coverage(args)) => cmd_coverage_from_parsed(common_to_parsed(args)),
+        Some(ValidCommand::Conformance(args)) => {
+            cmd_conformance_from_parsed(conformance_to_parsed(args))
+        }
+        Some(ValidCommand::Clean(args)) => cmd_clean_from_parsed(args),
+        Some(ValidCommand::Selfcheck(args)) => cmd_selfcheck_from_parsed(args),
+        Some(ValidCommand::Commands(args)) => cmd_commands_from_parsed(args),
+        Some(ValidCommand::Schema(args)) => cmd_schema_from_parsed(args),
+        Some(ValidCommand::Batch(args)) => cmd_batch_from_parsed(args),
+        None => {
             usage_exit(
                 "valid",
-                detect_json_flag(&remaining),
+                json,
                 "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|clean|selfcheck|commands|schema|batch> ...",
             );
         }
@@ -88,6 +294,269 @@ fn normalize_command(command: &str) -> String {
         other => other,
     }
     .to_string()
+}
+
+fn common_to_parsed(args: CommonModelArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        seed: args.seed,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        property_id: args.property,
+        ..ParsedArgs::default()
+    }
+}
+
+fn model_to_parsed(args: ModelPathArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        ..ParsedArgs::default()
+    }
+}
+
+fn graph_to_parsed(args: GraphArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        format: args.format,
+        view: args.view,
+        ..ParsedArgs::default()
+    }
+}
+
+fn doc_to_parsed(args: DocArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        write_path: args.write,
+        check: args.check,
+        ..ParsedArgs::default()
+    }
+}
+
+fn capabilities_to_parsed(args: CapabilitiesArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        ..ParsedArgs::default()
+    }
+}
+
+fn trace_to_parsed(args: TraceArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        seed: args.seed,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        format: args.format,
+        property_id: args.property,
+        ..ParsedArgs::default()
+    }
+}
+
+fn testgen_to_parsed(args: TestgenArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        seed: args.seed,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        property_id: args.property,
+        extra: args.strategy,
+        ..ParsedArgs::default()
+    }
+}
+
+fn replay_to_parsed(args: ReplayArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        property_id: args.property,
+        actions: args.actions,
+        focus_action_id: args.focus_action,
+        ..ParsedArgs::default()
+    }
+}
+
+fn conformance_to_parsed(args: ConformanceArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        property_id: args.property,
+        actions: args.actions,
+        runner: Some(args.runner),
+        runner_args: args.runner_args,
+        ..ParsedArgs::default()
+    }
+}
+
+fn progress_flag(progress: Option<&str>) -> bool {
+    matches!(progress, Some("json"))
+}
+
+fn cmd_check_from_parsed(parsed: ParsedArgs) {
+    cmd_check(args_from_parsed(&parsed));
+}
+fn cmd_explain_from_parsed(parsed: ParsedArgs) {
+    cmd_explain(args_from_parsed(&parsed));
+}
+fn cmd_minimize_from_parsed(parsed: ParsedArgs) {
+    cmd_minimize(args_from_parsed(&parsed));
+}
+fn cmd_inspect_from_parsed(parsed: ParsedArgs) {
+    cmd_inspect(args_from_parsed(&parsed));
+}
+fn cmd_graph_from_parsed(parsed: ParsedArgs) {
+    cmd_graph(args_from_parsed(&parsed));
+}
+fn cmd_doc_from_parsed(parsed: ParsedArgs) {
+    cmd_doc(args_from_parsed(&parsed));
+}
+fn cmd_lint_from_parsed(parsed: ParsedArgs) {
+    cmd_lint(args_from_parsed(&parsed));
+}
+fn cmd_capabilities_from_parsed(parsed: ParsedArgs) {
+    cmd_capabilities(args_from_parsed(&parsed));
+}
+fn cmd_trace_from_parsed(parsed: ParsedArgs) {
+    cmd_trace(args_from_parsed(&parsed));
+}
+fn cmd_testgen_from_parsed(parsed: ParsedArgs) {
+    cmd_testgen(args_from_parsed(&parsed));
+}
+fn cmd_replay_from_parsed(parsed: ParsedArgs) {
+    cmd_replay(args_from_parsed(&parsed));
+}
+fn cmd_conformance_from_parsed(parsed: ParsedArgs) {
+    cmd_conformance(args_from_parsed(&parsed));
+}
+fn cmd_orchestrate_from_parsed(parsed: ParsedArgs) {
+    cmd_orchestrate(args_from_parsed(&parsed));
+}
+fn cmd_coverage_from_parsed(parsed: ParsedArgs) {
+    cmd_coverage(args_from_parsed(&parsed));
+}
+fn cmd_selfcheck_from_parsed(args: JsonProgressArgs) {
+    cmd_selfcheck(flags_to_args(args));
+}
+fn cmd_commands_from_parsed(args: JsonOnlyArgs) {
+    cmd_commands(if args.json {
+        vec!["--json".to_string()]
+    } else {
+        Vec::new()
+    });
+}
+fn cmd_schema_from_parsed(args: SchemaArgs) {
+    cmd_schema(vec![args.command]);
+}
+fn cmd_batch_from_parsed(args: JsonProgressArgs) {
+    cmd_batch(flags_to_args(args));
+}
+fn cmd_clean_from_parsed(args: CleanArgs) {
+    let mut values = flags_to_args(args.json_progress);
+    if let Some(scope) = args.scope {
+        values.insert(0, scope);
+    }
+    cmd_clean(values);
+}
+fn cmd_contract_from_parsed(args: ContractArgs) {
+    let mut values = vec![args.subcommand, args.path];
+    if let Some(lock_file) = args.lock_file {
+        values.push(lock_file);
+    }
+    values.extend(flags_to_args(args.json_progress));
+    cmd_contract(values);
+}
+
+fn flags_to_args(args: JsonProgressArgs) -> Vec<String> {
+    let mut values = Vec::new();
+    if args.json {
+        values.push("--json".to_string());
+    }
+    if progress_flag(args.progress.as_deref()) {
+        values.push("--progress=json".to_string());
+    }
+    values
+}
+
+fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
+    let mut args = Vec::new();
+    if !parsed.path.is_empty() {
+        args.push(parsed.path.clone());
+    }
+    if let Some(property_id) = &parsed.property_id {
+        args.push(format!("--property={property_id}"));
+    }
+    if let Some(seed) = parsed.seed {
+        args.push(format!("--seed={seed}"));
+    }
+    if let Some(backend) = &parsed.backend {
+        args.push(format!("--backend={backend}"));
+    }
+    if let Some(solver_exec) = &parsed.solver_executable {
+        args.push("--solver-exec".to_string());
+        args.push(solver_exec.clone());
+    }
+    for solver_arg in &parsed.solver_args {
+        args.push("--solver-arg".to_string());
+        args.push(solver_arg.clone());
+    }
+    if let Some(format) = &parsed.format {
+        args.push(format!("--format={format}"));
+    }
+    if let Some(view) = &parsed.view {
+        args.push(format!("--view={view}"));
+    }
+    if let Some(focus_action_id) = &parsed.focus_action_id {
+        args.push(format!("--focus-action={focus_action_id}"));
+    }
+    if !parsed.actions.is_empty() {
+        args.push(format!("--actions={}", parsed.actions.join(",")));
+    }
+    if let Some(runner) = &parsed.runner {
+        args.push(format!("--runner={runner}"));
+    }
+    for runner_arg in &parsed.runner_args {
+        args.push("--runner-arg".to_string());
+        args.push(runner_arg.clone());
+    }
+    if let Some(extra) = &parsed.extra {
+        args.push(format!("--strategy={extra}"));
+    }
+    if let Some(write_path) = &parsed.write_path {
+        if write_path.is_empty() {
+            args.push("--write".to_string());
+        } else {
+            args.push(format!("--write={write_path}"));
+        }
+    }
+    if parsed.check {
+        args.push("--check".to_string());
+    }
+    if parsed.json {
+        args.push("--json".to_string());
+    }
+    if parsed.progress_json {
+        args.push("--progress=json".to_string());
+    }
+    args
 }
 
 fn cmd_check(args: Vec<String>) {

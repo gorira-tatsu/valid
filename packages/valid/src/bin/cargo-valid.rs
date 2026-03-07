@@ -5,6 +5,7 @@ use std::{
     process::{self, Command},
 };
 
+use clap::Parser;
 use serde_json::{json, Value};
 use valid::{
     api::{
@@ -47,9 +48,32 @@ use valid::{
     },
 };
 
+#[derive(Parser, Debug)]
+#[command(
+    name = "cargo valid",
+    disable_help_flag = true,
+    disable_version_flag = true,
+    trailing_var_arg = true
+)]
+struct CargoValidCli {
+    #[arg(long = "manifest-path")]
+    manifest_path: Option<String>,
+    #[arg(long)]
+    registry: Option<String>,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long)]
+    example: Option<String>,
+    #[arg(long)]
+    bin: Option<String>,
+    command: Option<String>,
+    #[arg(allow_hyphen_values = true)]
+    rest: Vec<String>,
+}
+
 fn main() {
     let raw_args = env::args().skip(1).collect::<Vec<_>>();
-    let parsed = parse_cli(raw_args.clone());
+    let parsed = parse_cli(raw_args);
     match parsed.command.as_str() {
         "commands" => cmd_commands(parsed.json),
         "schema" => cmd_schema(&parsed),
@@ -1230,15 +1254,36 @@ struct CliArgs {
 }
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
+    let json = detect_json_flag(&args);
+    let cli = CargoValidCli::try_parse_from(
+        std::iter::once("cargo-valid".to_string()).chain(args.clone()),
+    )
+    .unwrap_or_else(|error| {
+        message_exit(
+            "cargo-valid",
+            json,
+            &error.to_string(),
+            Some(&primary_usage()),
+        )
+    });
     let mut parsed = CliArgs::default();
-    parsed.json = detect_json_flag(&args);
-    parsed.progress_json = detect_progress_json_flag(&args);
-    let normalized_args = if matches!(args.first().map(String::as_str), Some("valid")) {
-        args.into_iter().skip(1).collect::<Vec<_>>()
-    } else {
-        args
-    };
-    let mut iter = normalized_args.into_iter();
+    parsed.json = json;
+    parsed.manifest_path = cli.manifest_path;
+    parsed.file = cli.registry.or(cli.file);
+    parsed.example = cli.example;
+    parsed.bin = cli.bin;
+    let mut command = cli.command.unwrap_or_else(|| usage_exit(&primary_usage()));
+    let mut rest = cli.rest;
+    if command == "valid" {
+        command = rest
+            .first()
+            .cloned()
+            .unwrap_or_else(|| usage_exit(&primary_usage()));
+        rest.remove(0);
+    }
+    parsed.progress_json = detect_progress_json_flag(&rest);
+    parsed.command = normalize_command(&command);
+    let mut iter = rest.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--manifest-path" => {
@@ -1319,13 +1364,9 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             _ if arg.starts_with("--focus-action=") => {
                 parsed.focus_action_id = Some(arg.trim_start_matches("--focus-action=").to_string())
             }
-            _ if parsed.command.is_empty() => parsed.command = normalize_command(&arg),
             _ if parsed.model.is_none() => parsed.model = Some(arg),
             _ => parsed.extra_positionals.push(arg),
         }
-    }
-    if parsed.command.is_empty() {
-        usage_exit(&primary_usage());
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");
