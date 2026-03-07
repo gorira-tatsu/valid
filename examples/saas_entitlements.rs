@@ -1,4 +1,7 @@
-use valid::use_cases::entitlements::{
+#[path = "use_cases/entitlements.rs"]
+mod entitlements;
+
+use entitlements::{
     collect_entitlement_coverage, evaluate_entitlement,
     verify_free_plan_never_gets_enterprise_features, verify_member_never_gets_admin_api, ActorRole,
     EntitlementRequest, Feature, Plan,

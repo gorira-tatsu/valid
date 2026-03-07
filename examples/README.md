@@ -135,8 +135,8 @@ cargo valid --registry examples/practical_use_cases_registry.rs suite
 ## Rust model examples
 
 The underlying business semantics for these examples live in
-`src/use_cases/`, so examples, library code, and integration tests share the
-same model logic.
+`examples/use_cases/`, so the practical scenarios stay outside the engine
+package while examples and integration tests still share the same model logic.
 
 - `iam_like_authz.rs`
   - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented

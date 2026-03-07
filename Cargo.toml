@@ -8,11 +8,15 @@ members = ["valid_derive"]
 
 [lib]
 name = "valid"
-path = "src/lib.rs"
+path = "valid/src/lib.rs"
 
 [[bin]]
 name = "valid"
-path = "src/bin/valid.rs"
+path = "valid/src/bin/valid.rs"
+
+[[bin]]
+name = "cargo-valid"
+path = "valid/src/bin/cargo-valid.rs"
 
 [dependencies]
 valid_derive = { path = "valid_derive" }

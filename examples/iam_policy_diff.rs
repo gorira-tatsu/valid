@@ -1,5 +1,8 @@
 use valid::modeling::Finite;
-use valid::use_cases::authz::{
+#[path = "use_cases/authz.rs"]
+mod authz;
+
+use authz::{
     find_newly_allowed_requests, Matcher, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement,
 };
 

@@ -1,4 +1,7 @@
-use valid::use_cases::fare::{
+#[path = "use_cases/fare.rs"]
+mod fare;
+
+use fare::{
     calculate_fare, collect_fare_coverage, explain_fare, verify_child_never_costs_more_than_adult,
     verify_day_pass_is_zero, verify_longer_distance_is_not_cheaper, FareRequest, RiderCategory,
     StationZone, TicketKind, TransferWindow,

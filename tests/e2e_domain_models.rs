@@ -1,15 +1,22 @@
 use valid::modeling::Finite;
-use valid::use_cases::authz::{
+#[path = "../examples/use_cases/authz.rs"]
+mod authz;
+#[path = "../examples/use_cases/entitlements.rs"]
+mod entitlements;
+#[path = "../examples/use_cases/fare.rs"]
+mod fare;
+
+use authz::{
     collect_authorization_coverage, evaluate_request, explain_request, find_newly_allowed_requests,
     AuthorizationDecision, AuthorizationRequest, Matcher, PolicyDomain, PolicyEffect, PolicySet,
     PolicyStatement, RequestContext,
 };
-use valid::use_cases::entitlements::{
+use entitlements::{
     collect_entitlement_coverage, evaluate_entitlement,
     verify_free_plan_never_gets_enterprise_features, verify_member_never_gets_admin_api, ActorRole,
     EntitlementRequest, Feature, Plan,
 };
-use valid::use_cases::fare::{
+use fare::{
     calculate_fare, collect_fare_coverage, explain_fare, verify_child_never_costs_more_than_adult,
     verify_day_pass_is_zero, verify_longer_distance_is_not_cheaper, FareRequest, RiderCategory,
     StationZone, TicketKind, TransferWindow,

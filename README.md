@@ -452,6 +452,21 @@ cargo valid clean all --json
 valid clean all --json
 ```
 
+## Repository Layout
+
+- `valid/src/`
+  engine, DSL, lowering, solver adapters, and CLI implementation
+- `examples/`
+  registry files, practical scenarios, and domain-heavy example models
+- `examples/use_cases/`
+  shared business semantics for practical examples and domain E2E tests
+- `tests/`
+  engine-facing integration tests and CLI/E2E verification
+
+`valid` is treated as the language/toolchain package. Domain-heavy examples
+stay outside the engine source tree and are exercised through registries,
+example binaries, and integration tests.
+
 ## Recommended Workflow
 
 For new models:

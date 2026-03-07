@@ -1,5 +1,8 @@
 use valid::modeling::Finite;
-use valid::use_cases::authz::{
+#[path = "use_cases/authz.rs"]
+mod authz;
+
+use authz::{
     collect_authorization_coverage, evaluate_request, explain_request, AuthorizationRequest,
     Matcher, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement, RequestContext,
 };

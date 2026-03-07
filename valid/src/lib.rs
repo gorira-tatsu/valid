@@ -18,6 +18,5 @@ pub mod selfcheck;
 pub mod solver;
 pub mod support;
 pub mod testgen;
-pub mod use_cases;
 
 pub use valid_derive::{ValidAction, ValidState};
