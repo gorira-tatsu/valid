@@ -1,5 +1,10 @@
 //! Machine-readable API layer for AI and CLI integration.
 
+use tabled::{
+    builder::Builder,
+    settings::{style::Style, Alignment, Modify, Padding},
+};
+
 use crate::kernel::guard::evaluate_guard;
 use crate::{
     bundled_models::{
@@ -1613,16 +1618,20 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
 
 pub fn render_inspect_text(response: &InspectResponse) -> String {
     let mut out = String::new();
-    out.push_str(&format!("model_id: {}\n", response.model_id));
+    out.push_str(&format!("model: {}\n", response.model_id));
+    out.push_str("readiness:\n");
     out.push_str(&format!(
-        "machine_ir_ready: {}\n",
+        "- machine_ir_ready: {}\n",
         response.machine_ir_ready
     ));
     if let Some(error) = &response.machine_ir_error {
-        out.push_str(&format!("machine_ir_error: {}\n", error));
+        out.push_str(&format!(
+            "  machine_ir_error:\n{}\n",
+            indent_block(error, 4)
+        ));
     }
     out.push_str(&format!(
-        "capabilities: parse={} explicit={} ir={} solver={} coverage={} explain={} testgen={}\n",
+        "- capabilities: parse={} explicit={} ir={} solver={} coverage={} explain={} testgen={}\n",
         response.capabilities.parse_ready,
         response.capabilities.explicit_ready,
         response.capabilities.ir_ready,
@@ -1633,74 +1642,130 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
     ));
     if !response.capabilities.reasons.is_empty() {
         out.push_str(&format!(
-            "capability_reasons: {}\n",
+            "- capability_reasons: {}\n",
             response.capabilities.reasons.join(", ")
         ));
     }
     out.push_str(&render_capability_details_text(&response.capabilities));
+    out.push_str("summary:\n");
     out.push_str(&format!(
-        "state_fields: {}\n",
-        response.state_fields.join(", ")
+        "- state_fields ({}): {}\n",
+        response.state_fields.len(),
+        render_csv_or_none(&response.state_fields)
     ));
-    out.push_str(&format!("actions: {}\n", response.actions.join(", ")));
-    out.push_str(&format!("properties: {}\n", response.properties.join(", ")));
+    out.push_str(&format!(
+        "- actions ({}): {}\n",
+        response.actions.len(),
+        render_csv_or_none(&response.actions)
+    ));
+    out.push_str(&format!(
+        "- properties ({}): {}\n",
+        response.properties.len(),
+        render_csv_or_none(&response.properties)
+    ));
     if !response.state_field_details.is_empty() {
-        out.push_str("state_field_details:\n");
-        for field in &response.state_field_details {
-            let variants = if field.variants.is_empty() {
-                String::new()
-            } else {
-                format!(" variants=[{}]", field.variants.join(", "))
-            };
-            let set_marker = if field.is_set { " set" } else { "" };
-            out.push_str(&format!(
-                "- {}: {}{}{}{}\n",
-                field.name,
-                field.rust_type,
-                set_marker,
-                field
-                    .range
-                    .as_ref()
-                    .map(|range| format!(" range={range}"))
-                    .unwrap_or_default(),
-                variants
-            ));
-        }
+        out.push_str("state_fields:\n");
+        let rows = response
+            .state_field_details
+            .iter()
+            .map(|field| {
+                vec![
+                    field.name.clone(),
+                    field.rust_type.clone(),
+                    field.range.clone().unwrap_or_else(|| "-".to_string()),
+                    if field.is_set {
+                        "set".to_string()
+                    } else {
+                        "-".to_string()
+                    },
+                    if field.variants.is_empty() {
+                        "-".to_string()
+                    } else {
+                        field.variants.join(", ")
+                    },
+                ]
+            })
+            .collect::<Vec<_>>();
+        out.push_str(&indent_block(
+            &render_text_table(&["name", "type", "range", "shape", "variants"], &rows),
+            2,
+        ));
+        out.push('\n');
     }
     if !response.action_details.is_empty() {
-        out.push_str("action_details:\n");
-        for action in &response.action_details {
-            out.push_str(&format!(
-                "- {} reads=[{}] writes=[{}]\n",
-                action.action_id,
-                action.reads.join(", "),
-                action.writes.join(", ")
-            ));
-        }
+        out.push_str("actions:\n");
+        let rows = response
+            .action_details
+            .iter()
+            .map(|action| {
+                vec![
+                    action.action_id.clone(),
+                    render_csv_or_none(&action.reads),
+                    render_csv_or_none(&action.writes),
+                ]
+            })
+            .collect::<Vec<_>>();
+        out.push_str(&indent_block(
+            &render_text_table(&["action", "reads", "writes"], &rows),
+            2,
+        ));
+        out.push('\n');
     }
     if !response.transition_details.is_empty() {
-        out.push_str("transition_details:\n");
+        out.push_str("transitions:\n");
         for transition in &response.transition_details {
-            out.push_str(&format!(
-                "- {} guard={} effect={} path_tags=[{}]\n",
-                transition.action_id,
-                transition.guard.as_deref().unwrap_or("n/a"),
-                transition.effect.as_deref().unwrap_or("n/a"),
-                transition.path_tags.join(", ")
-            ));
+            out.push_str(&format!("- {}\n", transition.action_id));
+            if let Some(guard) = &transition.guard {
+                out.push_str(&format!(
+                    "  guard:\n{}\n",
+                    indent_block(&pretty_expr(guard), 4)
+                ));
+            }
+            if !transition.updates.is_empty() {
+                out.push_str("  updates:\n");
+            } else if let Some(effect) = &transition.effect {
+                out.push_str(&format!(
+                    "  effect:\n{}\n",
+                    indent_block(&pretty_expr(effect), 4)
+                ));
+            }
             for update in &transition.updates {
-                out.push_str(&format!("  update {} := {}\n", update.field, update.expr));
+                out.push_str(&format!(
+                    "    - {} :=\n{}\n",
+                    update.field,
+                    indent_block(&pretty_expr(&update.expr), 8)
+                ));
+            }
+            if !transition.reads.is_empty() {
+                out.push_str(&format!(
+                    "  reads: {}\n",
+                    render_csv_or_none(&transition.reads)
+                ));
+            }
+            if !transition.writes.is_empty() {
+                out.push_str(&format!(
+                    "  writes: {}\n",
+                    render_csv_or_none(&transition.writes)
+                ));
+            }
+            if !transition.path_tags.is_empty() {
+                out.push_str(&format!(
+                    "  path_tags: {}\n",
+                    transition.path_tags.join(", ")
+                ));
             }
         }
     }
     if !response.property_details.is_empty() {
-        out.push_str("property_details:\n");
+        out.push_str("properties:\n");
         for property in &response.property_details {
-            out.push_str(&format!("- {}: {}", property.property_id, property.kind));
+            out.push_str(&format!("- {} ({})\n", property.property_id, property.kind));
             if let Some(expr) = &property.expr {
-                out.push_str(&format!(" expr={expr}"));
+                out.push_str(&format!(
+                    "  expr:\n{}\n",
+                    indent_block(&pretty_expr(expr), 4)
+                ));
             }
-            out.push('\n');
         }
     }
     out
@@ -2663,8 +2728,85 @@ fn render_capability_details_text(capabilities: &InspectCapabilities) -> String 
     if lines.is_empty() {
         String::new()
     } else {
-        format!("capability_details:\n{}\n", lines.join("\n"))
+        let body = lines
+            .into_iter()
+            .map(|line| format!("- {}", line.trim_start_matches("- ")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("capability_details:\n{}\n", indent_block(&body, 2))
     }
+}
+
+fn render_csv_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn render_text_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    let mut builder = Builder::default();
+    builder.push_record(headers.iter().copied());
+    for row in rows {
+        builder.push_record(row.iter().map(|value| value.as_str()));
+    }
+    let mut table = builder.build();
+    table
+        .with(Style::rounded())
+        .with(Modify::new(tabled::settings::object::Rows::first()).with(Alignment::center()))
+        .with(Modify::new(tabled::settings::object::Rows::new(1..)).with(Padding::new(1, 1, 0, 0)));
+    table.to_string()
+}
+
+fn indent_block(value: &str, spaces: usize) -> String {
+    let prefix = " ".repeat(spaces);
+    value
+        .lines()
+        .map(|line| format!("{prefix}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn pretty_expr(value: &str) -> String {
+    let mut out = String::new();
+    let mut indent = 0usize;
+    let mut pending_space = false;
+    for ch in value.chars() {
+        match ch {
+            '{' => {
+                out.push(ch);
+                indent += 1;
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                pending_space = false;
+            }
+            '}' => {
+                indent = indent.saturating_sub(1);
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                out.push(ch);
+                pending_space = false;
+            }
+            ',' => {
+                out.push(',');
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                pending_space = false;
+            }
+            ' ' | '\n' | '\t' => {
+                pending_space = true;
+            }
+            _ => {
+                if pending_space && !out.ends_with([' ', '\n']) {
+                    out.push(' ');
+                }
+                out.push(ch);
+                pending_space = false;
+            }
+        }
+    }
+    out.trim().to_string()
 }
 
 fn render_string_array(values: &[String]) -> String {
@@ -2885,18 +3027,21 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
 mod tests {
     use std::fs;
 
+    use insta::assert_snapshot;
+
     use crate::{engine::CheckOutcome, modeling::CapabilityDetail};
 
     use super::{
         capabilities_response, check_source, explain_source, explicit_analysis_warning,
         inspect_source, lint_from_inspect, lint_source, migration_from_inspect, minimize_source,
-        orchestrate_source, render_inspect_json, testgen_source, validate_capabilities_request,
-        validate_capabilities_response, validate_check_request, validate_explain_request,
-        validate_explain_response, validate_inspect_request, validate_inspect_response,
-        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
-        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
-        InspectCapabilities, InspectRequest, InspectResponse, InspectTransition,
-        InspectTransitionUpdate, MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        orchestrate_source, render_inspect_json, render_inspect_text, testgen_source,
+        validate_capabilities_request, validate_capabilities_response, validate_check_request,
+        validate_explain_request, validate_explain_response, validate_inspect_request,
+        validate_inspect_response, validate_minimize_request, validate_minimize_response,
+        validate_orchestrate_response, validate_testgen_request, validate_testgen_response,
+        CapabilitiesRequest, CheckRequest, InspectCapabilities, InspectRequest, InspectResponse,
+        InspectTransition, InspectTransitionUpdate, MinimizeRequest, OrchestrateRequest,
+        TestgenRequest,
     };
 
     fn cleanup_generated_files(paths: &[String]) {
@@ -3103,6 +3248,150 @@ mod tests {
             "\"ir\":{\"reason\":\"opaque step models cannot be lowered into machine IR\""
         ));
         assert!(json.contains("\"unsupported_features\":[\"step(state, action)\"]"));
+    }
+
+    #[test]
+    fn inspect_text_snapshot_is_structured_and_readable() {
+        let response = InspectResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req".to_string(),
+            status: "ok".to_string(),
+            model_id: "PasswordPolicySafeModel".to_string(),
+            machine_ir_ready: true,
+            machine_ir_error: None,
+            capabilities: InspectCapabilities {
+                solver_ready: false,
+                solver: CapabilityDetail {
+                    reason: "solver backends only support the scalar IR subset".to_string(),
+                    migration_hint: Some(
+                        "replace String-heavy state with finite enums or bounded integers"
+                            .to_string(),
+                    ),
+                    unsupported_features: vec![
+                        "regex_match(...)".to_string(),
+                        "state field `password`: String".to_string(),
+                    ],
+                },
+                reasons: vec!["string_fields_require_explicit_backend".to_string()],
+                ..InspectCapabilities::fully_ready()
+            },
+            state_fields: vec![
+                "password".to_string(),
+                "password_set".to_string(),
+                "compliant".to_string(),
+            ],
+            actions: vec!["SET_STRONG_PASSWORD".to_string()],
+            properties: vec![
+                "P_PASSWORD_POLICY_MATCHES_FLAG".to_string(),
+                "P_PASSWORD_LENGTH_BOUND".to_string(),
+            ],
+            state_field_details: vec![
+                super::InspectStateField {
+                    name: "password".to_string(),
+                    rust_type: "String".to_string(),
+                    range: Some("0..=64".to_string()),
+                    variants: vec![],
+                    is_set: false,
+                },
+                super::InspectStateField {
+                    name: "password_set".to_string(),
+                    rust_type: "bool".to_string(),
+                    range: None,
+                    variants: vec![],
+                    is_set: false,
+                },
+            ],
+            action_details: vec![super::InspectAction {
+                action_id: "SET_STRONG_PASSWORD".to_string(),
+                reads: vec!["password_set".to_string()],
+                writes: vec![
+                    "password".to_string(),
+                    "password_set".to_string(),
+                    "compliant".to_string(),
+                ],
+            }],
+            transition_details: vec![InspectTransition {
+                action_id: "SET_STRONG_PASSWORD".to_string(),
+                guard: Some("state.password_set == false".to_string()),
+                effect: Some(
+                    "PasswordState { password: \"Str0ngPass!\".to_string(), password_set: true, compliant: true }"
+                        .to_string(),
+                ),
+                reads: vec!["password_set".to_string()],
+                writes: vec![
+                    "password".to_string(),
+                    "password_set".to_string(),
+                    "compliant".to_string(),
+                ],
+                path_tags: vec![
+                    "allow_path".to_string(),
+                    "password_policy_path".to_string(),
+                ],
+                updates: vec![
+                    InspectTransitionUpdate {
+                        field: "password".to_string(),
+                        expr: "\"Str0ngPass!\".to_string()".to_string(),
+                    },
+                    InspectTransitionUpdate {
+                        field: "password_set".to_string(),
+                        expr: "true".to_string(),
+                    },
+                ],
+            }],
+            property_details: vec![super::InspectProperty {
+                property_id: "P_PASSWORD_POLICY_MATCHES_FLAG".to_string(),
+                kind: "invariant".to_string(),
+                expr: Some(
+                    "iff(state.compliant, state.password_set && len(&state.password) >= 10 && regex_match(&state.password, r\"[A-Z]\"))"
+                        .to_string(),
+                ),
+            }],
+        };
+
+        assert_snapshot!(render_inspect_text(&response), @r###"
+        model: PasswordPolicySafeModel
+        readiness:
+        - machine_ir_ready: true
+        - capabilities: parse=true explicit=true ir=true solver=false coverage=true explain=true testgen=true
+        - capability_reasons: string_fields_require_explicit_backend
+        capability_details:
+          - solver reason=solver backends only support the scalar IR subset migration_hint=replace String-heavy state with finite enums or bounded integers unsupported_features=[regex_match(...), state field `password`: String]
+        summary:
+        - state_fields (3): password, password_set, compliant
+        - actions (1): SET_STRONG_PASSWORD
+        - properties (2): P_PASSWORD_POLICY_MATCHES_FLAG, P_PASSWORD_LENGTH_BOUND
+        state_fields:
+          ╭──────────────┬────────┬────────┬───────┬──────────╮
+          │     name     │  type  │ range  │ shape │ variants │
+          ├──────────────┼────────┼────────┼───────┼──────────┤
+          │ password     │ String │ 0..=64 │ -     │ -        │
+          │ password_set │ bool   │ -      │ -     │ -        │
+          ╰──────────────┴────────┴────────┴───────┴──────────╯
+        actions:
+          ╭─────────────────────┬──────────────┬───────────────────────────────────╮
+          │       action        │    reads     │              writes               │
+          ├─────────────────────┼──────────────┼───────────────────────────────────┤
+          │ SET_STRONG_PASSWORD │ password_set │ password, password_set, compliant │
+          ╰─────────────────────┴──────────────┴───────────────────────────────────╯
+        transitions:
+        - SET_STRONG_PASSWORD
+          guard:
+            state.password_set == false
+          updates:
+            - password :=
+                "Str0ngPass!".to_string()
+            - password_set :=
+                true
+          reads: password_set
+          writes: password, password_set, compliant
+          path_tags: allow_path, password_policy_path
+        properties:
+        - P_PASSWORD_POLICY_MATCHES_FLAG (invariant)
+          expr:
+            iff(state.compliant,
+            state.password_set && len(&state.password) >= 10 && regex_match(&state.password,
+            r"[A-Z]"))
+        "###);
     }
 
     #[test]
