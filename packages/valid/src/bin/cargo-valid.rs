@@ -26,7 +26,10 @@ use valid::{
         load_project_config, render_project_config_template, render_registry_source_template,
         ProjectConfig,
     },
-    reporter::{render_model_dot, render_model_mermaid, render_model_svg},
+    reporter::{
+        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
+        GraphView,
+    },
     support::{
         artifact::{benchmark_baseline_path, benchmark_report_path},
         hash::stable_hash_hex,
@@ -63,6 +66,7 @@ fn main() {
         threshold_percent: parsed.threshold_percent,
         strategy: parsed.strategy,
         format: parsed.format,
+        view: parsed.view,
         property_id: parsed.property_id,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -97,7 +101,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -146,6 +150,7 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             threshold_percent: parsed.threshold_percent,
             strategy: None,
             format: parsed.format.clone(),
+            view: parsed.view.clone(),
             property_id: parsed.property_id.clone(),
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
@@ -214,6 +219,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
             threshold_percent: None,
             strategy: None,
             format: parsed.format.clone(),
+            view: parsed.view.clone(),
             property_id: None,
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
@@ -297,6 +303,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(format) = &parsed.format {
         command.arg(format!("--format={format}"));
     }
+    if let Some(view) = &parsed.view {
+        command.arg(format!("--view={view}"));
+    }
     if let Some(property_id) = &parsed.property_id {
         command.arg(format!("--property={property_id}"));
     }
@@ -340,6 +349,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         threshold_percent: None,
         strategy: None,
         format: None,
+        view: None,
         property_id: None,
         backend: None,
         solver_executable: None,
@@ -458,7 +468,9 @@ fn cmd_inspect(parsed: ParsedArgs) {
 
 fn cmd_graph(parsed: ParsedArgs) {
     let model = parsed.model.unwrap_or_else(|| {
-        usage_exit("usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json]")
+        usage_exit(
+            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
+        )
     });
     let request = InspectRequest {
         request_id: "cargo-valid-graph".to_string(),
@@ -471,13 +483,14 @@ fn cmd_graph(parsed: ParsedArgs) {
         .as_deref()
         .or(env_default_format.as_deref())
         .unwrap_or("mermaid");
+    let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
         Ok(response) => match default_format {
             "json" => println!("{}", render_inspect_json(&response)),
             "text" => print!("{}", render_inspect_text(&response)),
-            "dot" => println!("{}", render_model_dot(&response)),
-            "svg" => println!("{}", render_model_svg(&response)),
-            _ => println!("{}", render_model_mermaid(&response)),
+            "dot" => println!("{}", render_model_dot_with_view(&response, view)),
+            "svg" => println!("{}", render_model_svg_with_view(&response, view)),
+            _ => println!("{}", render_model_mermaid_with_view(&response, view)),
         },
         Err(diagnostics) => {
             if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
@@ -959,6 +972,7 @@ struct ParsedArgs {
     threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
+    view: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -983,6 +997,7 @@ struct CliArgs {
     threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
+    view: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -1047,6 +1062,9 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             _ if arg.starts_with("--format=") => {
                 parsed.format = Some(arg.trim_start_matches("--format=").to_string())
+            }
+            _ if arg.starts_with("--view=") => {
+                parsed.view = Some(arg.trim_start_matches("--view=").to_string())
             }
             _ if arg.starts_with("--property=") => {
                 parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())

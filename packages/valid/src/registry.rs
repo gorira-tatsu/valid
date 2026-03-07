@@ -15,7 +15,10 @@ use crate::{
         collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
         property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
-    reporter::{render_model_dot, render_model_mermaid, render_model_svg},
+    reporter::{
+        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
+        GraphView,
+    },
     solver::AdapterConfig,
     support::{artifact::benchmark_baseline_path, hash::stable_hash_hex, io::write_text_file},
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
@@ -136,12 +139,13 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
     let parsed = parse_args(args);
     let model = find_model(models, parsed.model.as_deref());
     let response = (model.inspect)("registry-graph");
+    let view = GraphView::parse(parsed.view.as_deref());
     match parsed.format.as_deref().unwrap_or("mermaid") {
         "json" => println!("{}", render_inspect_json(&response)),
         "text" => print!("{}", render_inspect_text(&response)),
-        "dot" => println!("{}", render_model_dot(&response)),
-        "svg" => println!("{}", render_model_svg(&response)),
-        _ => println!("{}", render_model_mermaid(&response)),
+        "dot" => println!("{}", render_model_dot_with_view(&response, view)),
+        "svg" => println!("{}", render_model_svg_with_view(&response, view)),
+        _ => println!("{}", render_model_mermaid_with_view(&response, view)),
     }
 }
 
@@ -801,6 +805,7 @@ struct ParsedArgs {
     threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
+    view: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -834,6 +839,8 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
             parsed.repeat = value.parse().unwrap_or_else(|_| usage_exit());
         } else if let Some(value) = arg.strip_prefix("--format=") {
             parsed.format = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--view=") {
+            parsed.view = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--strategy=") {
             parsed.strategy = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--property=") {
@@ -990,6 +997,6 @@ fn registry_migration_output_path(model: &str, requested: &str) -> String {
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
     process::exit(3);
 }

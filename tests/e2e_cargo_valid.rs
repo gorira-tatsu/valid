@@ -339,8 +339,21 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("explicit-only / opaque-step"));
     assert!(stdout.contains("opaque_step_closure"));
-    assert!(stdout.contains("transition internals hidden"));
-    assert!(!stdout.contains("transition_INC_0"));
+    assert!(stdout.contains("-. reads .->"));
+    assert!(stdout.contains("-->|writes|"));
+
+    let logic_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("graph")
+        .arg("counter")
+        .arg("--view=logic")
+        .output()
+        .expect("cargo-valid logic graph should run");
+    assert!(logic_output.status.success());
+    let logic_stdout = String::from_utf8_lossy(&logic_output.stdout);
+    assert!(logic_stdout.contains("transition internals hidden"));
+    assert!(!logic_stdout.contains("transition_INC_0"));
 }
 
 #[test]

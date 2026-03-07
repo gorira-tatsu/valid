@@ -24,8 +24,8 @@ use valid::{
     },
     frontend::compile_model,
     reporter::{
-        render_model_dot, render_model_mermaid, render_model_svg, render_trace_mermaid,
-        render_trace_sequence_mermaid,
+        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
+        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::render_replay_json,
@@ -233,7 +233,7 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
         |_arg, _parsed| false,
     );
     let source = if is_bundled_model_ref(&parsed.path) {
@@ -252,13 +252,14 @@ fn cmd_graph(args: Vec<String>) {
         .as_deref()
         .or(env_default_format.as_deref())
         .unwrap_or("mermaid");
+    let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
         Ok(response) => match render_format {
             "json" => println!("{}", render_inspect_json(&response)),
             "text" => print!("{}", render_inspect_text(&response)),
-            "dot" => println!("{}", render_model_dot(&response)),
-            "svg" => println!("{}", render_model_svg(&response)),
-            _ => println!("{}", render_model_mermaid(&response)),
+            "dot" => println!("{}", render_model_dot_with_view(&response, view)),
+            "svg" => println!("{}", render_model_svg_with_view(&response, view)),
+            _ => println!("{}", render_model_mermaid_with_view(&response, view)),
         },
         Err(diagnostics) => {
             if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
@@ -760,6 +761,7 @@ struct ParsedArgs {
     solver_executable: Option<String>,
     solver_args: Vec<String>,
     format: Option<String>,
+    view: Option<String>,
     property_id: Option<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
@@ -788,6 +790,8 @@ where
             parsed.json = true;
         } else if let Some(value) = arg.strip_prefix("--format=") {
             parsed.format = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--view=") {
+            parsed.view = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--property=") {
