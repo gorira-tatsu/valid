@@ -22,8 +22,8 @@ pub mod support;
 pub mod testgen;
 
 pub use modeling::{
-    contains, iff, implies, insert, is_empty, map_contains_entry, map_contains_key, map_put,
-    map_remove, rel_contains, rel_insert, rel_intersects, rel_remove, remove, xor, FiniteEnumSet,
-    FiniteMap, FiniteRelation,
+    contains, iff, implies, insert, is_empty, len, map_contains_entry, map_contains_key, map_put,
+    map_remove, regex_match, rel_contains, rel_insert, rel_intersects, rel_remove, remove,
+    str_contains, xor, FiniteEnumSet, FiniteMap, FiniteRelation,
 };
 pub use valid_derive::{ValidAction, ValidEnum, ValidState};

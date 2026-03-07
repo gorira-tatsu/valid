@@ -8,6 +8,10 @@
 - [Rust DSL Guide](./dsl/README.md)
   User-facing documentation for writing and operating models with the `valid`
   Rust DSL.
+- [DSL Language Spec](./dsl/language-spec.md)
+  Current implemented surface and semantic subset for the Rust DSL.
+- [DSL Language Evolution](./dsl/language-evolution.md)
+  Design notes for proposed and in-flight language features.
 - [RDD](./rdd/README.md)
   Requirements, architecture, planning, and delivery documents for the project
   itself.

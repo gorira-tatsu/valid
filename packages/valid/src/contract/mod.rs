@@ -212,6 +212,10 @@ pub fn parse_lock_file(body: &str) -> Result<ContractLockFile, String> {
 fn field_type_label(field_type: &FieldType) -> String {
     match field_type {
         FieldType::Bool => "bool".to_string(),
+        FieldType::String { min_len, max_len } => match (min_len, max_len) {
+            (Some(min), Some(max)) => format!("string[{min}..={max}]"),
+            _ => "string".to_string(),
+        },
         FieldType::BoundedU8 { min, max } => format!("u8[{min}..{max}]"),
         FieldType::BoundedU16 { min, max } => format!("u16[{min}..{max}]"),
         FieldType::BoundedU32 { min, max } => format!("u32[{min}..{max}]"),

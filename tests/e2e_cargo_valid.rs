@@ -47,6 +47,12 @@ fn tenant_relation_registry_file() -> PathBuf {
         .join("tenant_relation_registry.rs")
 }
 
+fn password_policy_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("password_policy.rs")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
@@ -271,6 +277,77 @@ fn cargo_valid_verifies_relation_map_regression() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"FAIL\""));
     assert!(stdout.contains("\"property_id\":\"P_NO_CROSS_TENANT_ACCESS\""));
+}
+
+#[test]
+fn cargo_valid_inspects_password_policy_as_explicit_ready() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(password_policy_registry_file())
+        .arg("inspect")
+        .arg("password-policy-safe")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect password policy should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"machine_ir_ready\":true"));
+    assert!(stdout.contains("\"solver_ready\":false"));
+    assert!(stdout.contains("\"string_fields_require_explicit_backend\""));
+    assert!(stdout.contains("\"regex_match_requires_explicit_backend\""));
+    assert!(stdout.contains("\"rust_type\":\"String\""));
+    assert!(stdout.contains("\"P_PASSWORD_POLICY_MATCHES_FLAG\""));
+}
+
+#[test]
+fn cargo_valid_readiness_reports_password_solver_limitations() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(password_policy_registry_file())
+        .arg("readiness")
+        .arg("password-policy-safe")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid readiness password policy should run");
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"code\":\"string_fields_require_explicit_backend\""));
+    assert!(stdout.contains("\"code\":\"regex_match_requires_explicit_backend\""));
+}
+
+#[test]
+fn cargo_valid_verifies_password_policy_models() {
+    let _guard = cargo_guard();
+    let safe_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(password_policy_registry_file())
+        .arg("verify")
+        .arg("password-policy-safe")
+        .arg("--property=P_PASSWORD_POLICY_MATCHES_FLAG")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid verify safe password model should run");
+    assert_eq!(safe_output.status.code(), Some(0));
+    let safe_stdout = String::from_utf8_lossy(&safe_output.stdout);
+    assert!(safe_stdout.contains("\"status\":\"PASS\""));
+    assert!(safe_stdout.contains("\"property_id\":\"P_PASSWORD_POLICY_MATCHES_FLAG\""));
+
+    let regression_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(password_policy_registry_file())
+        .arg("verify")
+        .arg("password-policy-regression")
+        .arg("--property=P_PASSWORD_POLICY_MATCHES_FLAG")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid verify regression password model should run");
+    assert_eq!(regression_output.status.code(), Some(2));
+    let regression_stdout = String::from_utf8_lossy(&regression_output.stdout);
+    assert!(regression_stdout.contains("\"status\":\"FAIL\""));
+    assert!(regression_stdout.contains("\"property_id\":\"P_PASSWORD_POLICY_MATCHES_FLAG\""));
+    assert!(regression_stdout.contains("SET_WEAK_PASSWORD"));
 }
 
 #[test]

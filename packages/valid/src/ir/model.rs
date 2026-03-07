@@ -36,6 +36,10 @@ pub type PropertyId = String;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldType {
     Bool,
+    String {
+        min_len: Option<u32>,
+        max_len: Option<u32>,
+    },
     BoundedU8 {
         min: u8,
         max: u8,

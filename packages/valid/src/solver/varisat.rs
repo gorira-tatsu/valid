@@ -337,10 +337,13 @@ fn validate_varisat_model(model: &ModelIr, target_property_ids: &[String]) -> Re
 fn rust_type_label(ty: &FieldType) -> &'static str {
     match ty {
         FieldType::Bool => "bool",
+        FieldType::String { .. } => "String",
         FieldType::BoundedU8 { .. } => "u8",
         FieldType::BoundedU16 { .. } => "u16",
         FieldType::BoundedU32 { .. } => "u32",
         FieldType::Enum { .. } => "enum",
         FieldType::EnumSet { .. } => "FiniteEnumSet",
+        FieldType::EnumRelation { .. } => "FiniteRelation",
+        FieldType::EnumMap { .. } => "FiniteMap",
     }
 }

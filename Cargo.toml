@@ -36,4 +36,5 @@ path = "benchmarks/registries/iam_enterprise_registry.rs"
 
 [dependencies]
 valid_derive = { path = "packages/valid_derive" }
+regex = "1"
 varisat = { version = "0.2", optional = true }

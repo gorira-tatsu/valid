@@ -19,6 +19,7 @@ pub enum ExprIr {
 pub enum UnaryOp {
     Not,
     SetIsEmpty,
+    StringLen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,8 @@ pub enum BinaryOp {
     Add,
     Sub,
     Mod,
+    StringContains,
+    RegexMatch,
     SetContains,
     SetInsert,
     SetRemove,

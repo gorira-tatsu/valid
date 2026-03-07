@@ -14,7 +14,9 @@ stateful workflow rules. The main path is:
 the primary one.
 
 User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
-especially [docs/dsl/README.md](./docs/dsl/README.md).
+especially [docs/dsl/README.md](./docs/dsl/README.md),
+[docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
+[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
@@ -116,6 +118,9 @@ cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
 
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
+
+cargo valid --registry examples/password_policy.rs inspect password-policy-safe
+cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG
 ```
 
 Service-oriented grouped transition registries also work:

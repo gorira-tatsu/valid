@@ -659,6 +659,7 @@ fn value_json(value: &Value) -> String {
     match value {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
+        Value::String(value) => format!("\"{}\"", escape_json(value)),
         Value::EnumVariant { label, .. } => format!("\"{}\"", escape_json(label)),
         Value::PairVariant {
             left_label,

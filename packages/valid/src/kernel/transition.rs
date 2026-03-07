@@ -119,6 +119,36 @@ fn validate_value_for_type(
 ) -> Result<(), Diagnostic> {
     match (ty, value) {
         (FieldType::Bool, Value::Bool(_)) => Ok(()),
+        (FieldType::String { min_len, max_len }, Value::String(value)) => {
+            let len = value.chars().count() as u64;
+            if let Some(min_len) = min_len {
+                if len < *min_len as u64 {
+                    return Err(Diagnostic::new(
+                        ErrorCode::InvalidState,
+                        DiagnosticSegment::KernelTransition,
+                        format!("value for `{field_name}` is shorter than the declared minimum length"),
+                    )
+                    .with_help("keep string updates inside the declared length range")
+                    .with_best_practice(
+                        "declare password and token lengths explicitly with #[valid(range = \"min..=max\")]",
+                    ));
+                }
+            }
+            if let Some(max_len) = max_len {
+                if len > *max_len as u64 {
+                    return Err(Diagnostic::new(
+                        ErrorCode::InvalidState,
+                        DiagnosticSegment::KernelTransition,
+                        format!("value for `{field_name}` exceeds the declared maximum length"),
+                    )
+                    .with_help("keep string updates inside the declared length range")
+                    .with_best_practice(
+                        "declare password and token lengths explicitly with #[valid(range = \"min..=max\")]",
+                    ));
+                }
+            }
+            Ok(())
+        }
         (FieldType::BoundedU8 { min, max }, Value::UInt(value))
             if *value >= *min as u64 && *value <= *max as u64 =>
         {

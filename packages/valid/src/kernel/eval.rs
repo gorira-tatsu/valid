@@ -2,6 +2,7 @@ use crate::{
     ir::{BinaryOp, ExprIr, FieldType, ModelIr, UnaryOp, Value},
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
+use std::sync::{Mutex, OnceLock};
 
 use super::MachineState;
 
@@ -21,6 +22,9 @@ pub fn eval_expr(
             match (op, value) {
                 (UnaryOp::Not, Value::Bool(inner)) => Ok(Value::Bool(!inner)),
                 (UnaryOp::SetIsEmpty, Value::UInt(bits)) => Ok(Value::Bool(bits == 0)),
+                (UnaryOp::StringLen, Value::String(value)) => {
+                    Ok(Value::UInt(value.chars().count() as u64))
+                }
                 _ => Err(eval_error("invalid unary operand type".to_string())),
             }
         }
@@ -40,6 +44,12 @@ pub fn eval_expr(
                     } else {
                         Ok(Value::UInt(left % right))
                     }
+                }
+                (BinaryOp::StringContains, Value::String(left), Value::String(right)) => {
+                    Ok(Value::Bool(left.contains(&right)))
+                }
+                (BinaryOp::RegexMatch, Value::String(left), Value::String(right)) => {
+                    Ok(Value::Bool(regex_match_cached(&left, &right)?))
                 }
                 (BinaryOp::SetContains, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
                     Ok(Value::Bool(bits & enum_variant_mask(index) != 0))
@@ -262,10 +272,28 @@ fn eval_error(message: String) -> Diagnostic {
         )
 }
 
+fn regex_match_cached(value: &str, pattern: &str) -> Result<bool, Diagnostic> {
+    static CACHE: OnceLock<Mutex<std::collections::BTreeMap<String, regex::Regex>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::BTreeMap::new()));
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let compiled = if let Some(compiled) = cache.get(pattern) {
+        compiled.clone()
+    } else {
+        let compiled = regex::Regex::new(pattern)
+            .map_err(|error| eval_error(format!("invalid regex pattern `{pattern}`: {error}")))?;
+        cache.insert(pattern.to_string(), compiled.clone());
+        compiled
+    };
+    Ok(compiled.is_match(value))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        ir::{BinaryOp, ExprIr, FieldType, ModelIr, SourceSpan, StateField, Value},
+        ir::{BinaryOp, ExprIr, FieldType, ModelIr, SourceSpan, StateField, UnaryOp, Value},
         kernel::MachineState,
     };
 
@@ -288,6 +316,24 @@ mod tests {
                     span: SourceSpan { line: 2, column: 1 },
                 },
             ],
+            init: vec![],
+            actions: vec![],
+            properties: vec![],
+        }
+    }
+
+    fn string_model() -> ModelIr {
+        ModelIr {
+            model_id: "StringEval".to_string(),
+            state_fields: vec![StateField {
+                id: "password".to_string(),
+                name: "password".to_string(),
+                ty: FieldType::String {
+                    min_len: Some(0),
+                    max_len: Some(64),
+                },
+                span: SourceSpan { line: 1, column: 1 },
+            }],
             init: vec![],
             actions: vec![],
             properties: vec![],
@@ -368,5 +414,44 @@ mod tests {
             right: Box::new(ExprIr::Literal(Value::UInt(1))),
         };
         assert_eq!(eval_expr(&model, &state, &expr).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn evaluates_string_length_contains_and_regex_exprs() {
+        let model = string_model();
+        let state = MachineState::new(vec![Value::String("Str0ngPass!".to_string())]);
+
+        let len_expr = ExprIr::Binary {
+            op: BinaryOp::GreaterThanOrEqual,
+            left: Box::new(ExprIr::Unary {
+                op: UnaryOp::StringLen,
+                expr: Box::new(ExprIr::FieldRef("password".to_string())),
+            }),
+            right: Box::new(ExprIr::Literal(Value::UInt(10))),
+        };
+        assert_eq!(
+            eval_expr(&model, &state, &len_expr).unwrap(),
+            Value::Bool(true)
+        );
+
+        let contains_expr = ExprIr::Binary {
+            op: BinaryOp::StringContains,
+            left: Box::new(ExprIr::FieldRef("password".to_string())),
+            right: Box::new(ExprIr::Literal(Value::String("Pass".to_string()))),
+        };
+        assert_eq!(
+            eval_expr(&model, &state, &contains_expr).unwrap(),
+            Value::Bool(true)
+        );
+
+        let regex_expr = ExprIr::Binary {
+            op: BinaryOp::RegexMatch,
+            left: Box::new(ExprIr::FieldRef("password".to_string())),
+            right: Box::new(ExprIr::Literal(Value::String("[A-Z]".to_string()))),
+        };
+        assert_eq!(
+            eval_expr(&model, &state, &regex_expr).unwrap(),
+            Value::Bool(true)
+        );
     }
 }

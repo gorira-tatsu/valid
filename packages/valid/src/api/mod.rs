@@ -329,6 +329,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 name: field.name.clone(),
                 rust_type: match field.ty {
                     crate::ir::FieldType::Bool => "bool".to_string(),
+                    crate::ir::FieldType::String { .. } => "String".to_string(),
                     crate::ir::FieldType::BoundedU8 { .. } => "u8".to_string(),
                     crate::ir::FieldType::BoundedU16 { .. } => "u16".to_string(),
                     crate::ir::FieldType::BoundedU32 { .. } => "u32".to_string(),
@@ -339,6 +340,10 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 },
                 range: match field.ty {
                     crate::ir::FieldType::Bool => None,
+                    crate::ir::FieldType::String { min_len, max_len } => match (min_len, max_len) {
+                        (Some(min), Some(max)) => Some(format!("{min}..={max}")),
+                        _ => None,
+                    },
                     crate::ir::FieldType::BoundedU8 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::BoundedU16 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::BoundedU32 { min, max } => Some(format!("{min}..={max}")),
@@ -1654,6 +1659,7 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
         crate::ir::ExprIr::Literal(value) => match value {
             crate::ir::Value::Bool(value) => value.to_string(),
             crate::ir::Value::UInt(value) => value.to_string(),
+            crate::ir::Value::String(value) => format!("{value:?}"),
             crate::ir::Value::EnumVariant { label, .. } => label.clone(),
             crate::ir::Value::PairVariant {
                 left_label,
@@ -1665,8 +1671,23 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
         crate::ir::ExprIr::Unary { op, expr } => match op {
             crate::ir::UnaryOp::Not => format!("!({})", render_expr_ir(expr)),
             crate::ir::UnaryOp::SetIsEmpty => format!("is_empty({})", render_expr_ir(expr)),
+            crate::ir::UnaryOp::StringLen => format!("len({})", render_expr_ir(expr)),
         },
         crate::ir::ExprIr::Binary { op, left, right } => match op {
+            crate::ir::BinaryOp::StringContains => {
+                format!(
+                    "str_contains({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::RegexMatch => {
+                format!(
+                    "regex_match({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
             crate::ir::BinaryOp::SetContains => {
                 format!(
                     "contains({}, {})",
@@ -1767,7 +1788,9 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
                     | crate::ir::BinaryOp::MapContainsKey
                     | crate::ir::BinaryOp::MapContainsEntry
                     | crate::ir::BinaryOp::MapPut
-                    | crate::ir::BinaryOp::MapRemoveKey => unreachable!(),
+                    | crate::ir::BinaryOp::MapRemoveKey
+                    | crate::ir::BinaryOp::StringContains
+                    | crate::ir::BinaryOp::RegexMatch => unreachable!(),
                 };
                 format!(
                     "({} {} {})",
@@ -1858,6 +1881,31 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 message: "one or more properties cannot be lowered into the current machine IR".to_string(),
                 suggestion: Some(
                     "keep properties within the supported boolean/arithmetic subset for solver runs".to_string(),
+                ),
+                snippet: None,
+            }),
+            "string_fields_require_explicit_backend" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "string_fields_require_explicit_backend".to_string(),
+                message: "string fields are currently explicit-only and do not lower to SAT/SMT backends".to_string(),
+                suggestion: Some(
+                    "keep password/text policies on backend=explicit, or abstract them into finite enums for solver runs".to_string(),
+                ),
+                snippet: None,
+            }),
+            "string_ops_require_explicit_backend" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "string_ops_require_explicit_backend".to_string(),
+                message: "string operations such as len(...) and str_contains(...) currently require the explicit backend".to_string(),
+                suggestion: Some("use backend=explicit for text-heavy models".to_string()),
+                snippet: None,
+            }),
+            "regex_match_requires_explicit_backend" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "regex_match_requires_explicit_backend".to_string(),
+                message: "regex_match(...) currently requires the explicit backend".to_string(),
+                suggestion: Some(
+                    "treat regex-based password policies as explicit-first until solver encoding is added".to_string(),
                 ),
                 snippet: None,
             }),

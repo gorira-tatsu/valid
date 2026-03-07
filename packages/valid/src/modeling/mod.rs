@@ -9,6 +9,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
+    sync::{Mutex, OnceLock},
 };
 
 use crate::{
@@ -259,6 +260,12 @@ impl IntoModelValue for u64 {
     }
 }
 
+impl IntoModelValue for String {
+    fn into_model_value(self) -> Value {
+        Value::String(self)
+    }
+}
+
 pub trait FiniteValueSpec: Clone + Debug + Eq + Hash {
     fn variant_labels() -> &'static [&'static str];
     fn variant_index(&self) -> u64;
@@ -399,6 +406,27 @@ pub fn xor(left: bool, right: bool) -> bool {
     left ^ right
 }
 
+pub fn len<S>(value: &S) -> u64
+where
+    S: AsRef<str> + ?Sized,
+{
+    value.as_ref().chars().count() as u64
+}
+
+pub fn str_contains<S>(value: &S, needle: &str) -> bool
+where
+    S: AsRef<str> + ?Sized,
+{
+    value.as_ref().contains(needle)
+}
+
+pub fn regex_match<S>(value: &S, pattern: &str) -> bool
+where
+    S: AsRef<str> + ?Sized,
+{
+    regex_match_cached(value.as_ref(), pattern)
+}
+
 pub fn contains<T>(set: FiniteEnumSet<T>, value: T) -> bool
 where
     T: FiniteValueSpec,
@@ -418,6 +446,20 @@ where
     T: FiniteValueSpec,
 {
     set.remove(value)
+}
+
+fn regex_match_cached(value: &str, pattern: &str) -> bool {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, regex::Regex>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let compiled = cache.entry(pattern.to_string()).or_insert_with(|| {
+        regex::Regex::new(pattern).unwrap_or_else(|error| {
+            panic!("invalid regex pattern `{pattern}` in model evaluation: {error}")
+        })
+    });
+    compiled.is_match(value)
 }
 
 pub fn is_empty<T>(set: FiniteEnumSet<T>) -> bool
@@ -886,17 +928,20 @@ pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
 pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityReport {
     let machine_ir = lower_machine_model::<M>();
     match machine_ir {
-        Ok(_) => MachineCapabilityReport {
-            parse_ready: true,
-            explicit_ready: true,
-            ir_ready: true,
-            solver_ready: true,
-            coverage_ready: true,
-            explain_ready: true,
-            testgen_ready: true,
-            machine_ir_error: None,
-            reasons: Vec::new(),
-        },
+        Ok(model) => {
+            let solver_subset_reasons = machine_solver_subset_reasons(&model);
+            MachineCapabilityReport {
+                parse_ready: true,
+                explicit_ready: true,
+                ir_ready: true,
+                solver_ready: solver_subset_reasons.is_empty(),
+                coverage_ready: true,
+                explain_ready: true,
+                testgen_ready: true,
+                machine_ir_error: None,
+                reasons: solver_subset_reasons,
+            }
+        }
         Err(error) => MachineCapabilityReport {
             parse_ready: true,
             explicit_ready: true,
@@ -908,6 +953,50 @@ pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityRepor
             machine_ir_error: Some(error.clone()),
             reasons: machine_capability_reasons::<M>(&error),
         },
+    }
+}
+
+fn machine_solver_subset_reasons(model: &ModelIr) -> Vec<String> {
+    let mut reasons = BTreeSet::new();
+    for field in &model.state_fields {
+        if matches!(field.ty, FieldType::String { .. }) {
+            reasons.insert("string_fields_require_explicit_backend".to_string());
+        }
+    }
+    for action in &model.actions {
+        collect_solver_subset_reasons_from_expr(&action.guard, &mut reasons);
+        for update in &action.updates {
+            collect_solver_subset_reasons_from_expr(&update.value, &mut reasons);
+        }
+    }
+    for property in &model.properties {
+        collect_solver_subset_reasons_from_expr(&property.expr, &mut reasons);
+    }
+    reasons.into_iter().collect()
+}
+
+fn collect_solver_subset_reasons_from_expr(expr: &ExprIr, reasons: &mut BTreeSet<String>) {
+    match expr {
+        ExprIr::Literal(Value::String(_)) => {
+            reasons.insert("string_literals_require_explicit_backend".to_string());
+        }
+        ExprIr::Unary { op, expr } => {
+            if matches!(op, UnaryOp::StringLen) {
+                reasons.insert("string_ops_require_explicit_backend".to_string());
+            }
+            collect_solver_subset_reasons_from_expr(expr, reasons);
+        }
+        ExprIr::Binary { op, left, right } => {
+            if matches!(op, BinaryOp::StringContains | BinaryOp::RegexMatch) {
+                reasons.insert("string_ops_require_explicit_backend".to_string());
+            }
+            if matches!(op, BinaryOp::RegexMatch) {
+                reasons.insert("regex_match_requires_explicit_backend".to_string());
+            }
+            collect_solver_subset_reasons_from_expr(left, reasons);
+            collect_solver_subset_reasons_from_expr(right, reasons);
+        }
+        ExprIr::Literal(_) | ExprIr::FieldRef(_) => {}
     }
 }
 
@@ -2576,6 +2665,22 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
     }
     match field.rust_type {
         "bool" => Ok(FieldType::Bool),
+        "String" => {
+            let (min_len, max_len) = match parse_inclusive_range(field.range) {
+                Some((min, max)) => {
+                    if max > u32::MAX as u64 {
+                        return Err(format!(
+                            "range `{}` exceeds supported string length bounds for field `{}`",
+                            field.range.unwrap_or("0..=4294967295"),
+                            field.name
+                        ));
+                    }
+                    (Some(min as u32), Some(max as u32))
+                }
+                None => (None, None),
+            };
+            Ok(FieldType::String { min_len, max_len })
+        }
         "u8" => {
             let (min, max) = parse_inclusive_range(field.range).unwrap_or((0, u8::MAX as u64));
             if max > u8::MAX as u64 {
@@ -2786,15 +2891,26 @@ fn lower_machine_expr_with_enums(
 ) -> Option<ExprIr> {
     let trimmed = strip_wrapping_machine_parens(input.trim());
     let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = normalized.trim();
+    let normalized = normalized.strip_prefix('&').unwrap_or(normalized).trim();
     let normalized = normalized
         .strip_prefix("state.")
-        .unwrap_or(normalized.as_str())
+        .unwrap_or(normalized)
         .trim();
     if normalized == "true" {
         return Some(ExprIr::Literal(Value::Bool(true)));
     }
     if normalized == "false" {
         return Some(ExprIr::Literal(Value::Bool(false)));
+    }
+    if let Some(inner) = normalized.strip_suffix(".to_string()") {
+        return lower_machine_expr_with_enums(inner.trim(), enum_literals);
+    }
+    if let Some([inner]) = function_args_machine(normalized, "String::from") {
+        return lower_machine_expr_with_enums(inner, enum_literals);
+    }
+    if let Some(value) = parse_rust_string_literal(normalized) {
+        return Some(ExprIr::Literal(Value::String(value)));
     }
     if let Some((label, index)) = enum_literals.get(normalized) {
         return Some(ExprIr::Literal(Value::EnumVariant {
@@ -2859,6 +2975,26 @@ fn lower_machine_expr_with_enums(
                 op: UnaryOp::Not,
                 expr: Box::new(both),
             }),
+        });
+    }
+    if let Some([value]) = function_args_machine(normalized, "len") {
+        return Some(ExprIr::Unary {
+            op: UnaryOp::StringLen,
+            expr: Box::new(lower_machine_expr_with_enums(value, enum_literals)?),
+        });
+    }
+    if let Some([value, needle]) = function_args_machine(normalized, "str_contains") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::StringContains,
+            left: Box::new(lower_machine_expr_with_enums(value, enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(needle, enum_literals)?),
+        });
+    }
+    if let Some([value, pattern]) = function_args_machine(normalized, "regex_match") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::RegexMatch,
+            left: Box::new(lower_machine_expr_with_enums(value, enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(pattern, enum_literals)?),
         });
     }
     if let Some([set, item]) = function_args_machine(normalized, "contains") {
@@ -3042,6 +3178,51 @@ fn lower_machine_expr_with_enums(
         return Some(ExprIr::FieldRef(normalized.to_string()));
     }
     None
+}
+
+fn parse_rust_string_literal(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return Some(unescape_basic_string(inner));
+    }
+    if let Some(rest) = trimmed.strip_prefix('r') {
+        let hashes = rest.chars().take_while(|ch| *ch == '#').count();
+        let prefix_len = 1 + hashes;
+        let quote_prefix = format!("r{}\"", "#".repeat(hashes));
+        let quote_suffix = format!("\"{}", "#".repeat(hashes));
+        if trimmed.starts_with(&quote_prefix) && trimmed.ends_with(&quote_suffix) {
+            let inner = &trimmed[prefix_len + 1..trimmed.len() - quote_suffix.len()];
+            return Some(inner.to_string());
+        }
+    }
+    None
+}
+
+fn unescape_basic_string(input: &str) -> String {
+    let mut out = String::new();
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn pair_literal_expr(
@@ -3557,10 +3738,10 @@ mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
         check_machine_outcomes, collect_machine_coverage, contains, explain_machine, iff, implies,
-        insert, is_empty, lower_machine_expr, lower_machine_expr_with_enums, lower_machine_model,
-        machine_capability_report, machine_transition_ir, property_ids, remove,
-        state_field_descriptors, transition_descriptors, xor, FiniteEnumSet, ModelingRunStatus,
-        ModelingState, StateSpec,
+        insert, is_empty, len, lower_machine_expr, lower_machine_expr_with_enums,
+        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
+        regex_match, remove, state_field_descriptors, transition_descriptors, xor, FiniteEnumSet,
+        ModelingRunStatus, ModelingState, StateSpec,
     };
     use crate::{
         engine::{CheckOutcome, PropertySelection, RunManifest, RunPlan, RunStatus},
@@ -4317,5 +4498,124 @@ mod tests {
             }
             CheckOutcome::Errored(error) => panic!("unexpected error: {:?}", error.diagnostics),
         }
+    }
+
+    valid_state! {
+        struct PasswordState {
+            password: String [range = "0..=64"],
+            password_set: bool,
+            compliant: bool,
+        }
+    }
+
+    valid_actions! {
+        enum PasswordAction {
+            SetStrongPassword => "SET_STRONG_PASSWORD" [reads = ["password_set"], writes = ["password", "password_set", "compliant"]],
+            SetWeakPassword => "SET_WEAK_PASSWORD" [reads = ["password_set"], writes = ["password", "password_set", "compliant"]],
+        }
+    }
+
+    crate::valid_model! {
+        model PasswordPolicySafeModel<PasswordState, PasswordAction>;
+        init [PasswordState {
+            password: "".to_string(),
+            password_set: false,
+            compliant: false,
+        }];
+        transitions {
+            on SetStrongPassword {
+                [tags = ["password_policy_path", "allow_path"]]
+                when |state| state.password_set == false
+                => [PasswordState {
+                    password: "Str0ngPass!".to_string(),
+                    password_set: true,
+                    compliant: true,
+                }];
+            }
+        }
+        properties {
+            invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|
+                iff(
+                    state.compliant,
+                    state.password_set
+                        && len(&state.password) >= 10
+                        && regex_match(&state.password, r"[A-Z]")
+                        && regex_match(&state.password, r"[a-z]")
+                        && regex_match(&state.password, r"[0-9]")
+                        && regex_match(&state.password, r"[^A-Za-z0-9]")
+                );
+        }
+    }
+
+    crate::valid_model! {
+        model PasswordPolicyRegressionModel<PasswordState, PasswordAction>;
+        init [PasswordState {
+            password: "".to_string(),
+            password_set: false,
+            compliant: false,
+        }];
+        transitions {
+            on SetWeakPassword {
+                [tags = ["password_policy_path", "regression_path"]]
+                when |state| state.password_set == false
+                => [PasswordState {
+                    password: "password".to_string(),
+                    password_set: true,
+                    compliant: true,
+                }];
+            }
+        }
+        properties {
+            invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|
+                iff(
+                    state.compliant,
+                    state.password_set
+                        && len(&state.password) >= 10
+                        && regex_match(&state.password, r"[A-Z]")
+                        && regex_match(&state.password, r"[a-z]")
+                        && regex_match(&state.password, r"[0-9]")
+                        && regex_match(&state.password, r"[^A-Za-z0-9]")
+                );
+        }
+    }
+
+    #[test]
+    fn lower_machine_expr_supports_string_helpers() {
+        let expr = lower_machine_expr(
+            r#"len(&state.password) >= 10 && regex_match(&state.password, r"[A-Z]") && str_contains(&state.password, "!")"#,
+        )
+        .expect("string helper expression should lower");
+        let debug = format!("{expr:?}");
+        assert!(debug.contains("StringLen"));
+        assert!(debug.contains("RegexMatch"));
+        assert!(debug.contains("StringContains"));
+    }
+
+    #[test]
+    fn declarative_string_models_are_explicit_ready_but_not_solver_ready() {
+        let report = machine_capability_report::<PasswordPolicySafeModel>();
+        assert!(report.explicit_ready);
+        assert!(report.ir_ready);
+        assert!(!report.solver_ready);
+        assert!(report
+            .reasons
+            .contains(&"string_fields_require_explicit_backend".to_string()));
+        assert!(report
+            .reasons
+            .contains(&"regex_match_requires_explicit_backend".to_string()));
+
+        let model = lower_machine_model::<PasswordPolicySafeModel>()
+            .expect("password policy model should lower to machine IR");
+        assert!(matches!(model.state_fields[0].ty, FieldType::String { .. }));
+    }
+
+    #[test]
+    fn password_policy_models_can_pass_and_fail() {
+        let safe = check_machine::<PasswordPolicySafeModel>();
+        assert_eq!(safe.status, ModelingRunStatus::Pass);
+
+        let regression = check_machine::<PasswordPolicyRegressionModel>();
+        assert_eq!(regression.status, ModelingRunStatus::Fail);
+        assert_eq!(regression.trace.len(), 1);
     }
 }

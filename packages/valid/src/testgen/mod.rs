@@ -536,7 +536,9 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("            assert!(!expected, \"counterexample vector should expect property violation\");\n");
     out.push_str("        }\n");
     out.push_str("        if strategy == \"witness\" {\n");
-    out.push_str("            assert!(expected, \"witness vector should expect property to hold\");\n");
+    out.push_str(
+        "            assert!(expected, \"witness vector should expect property to hold\");\n",
+    );
     out.push_str("        }\n");
     out.push_str("    }\n");
     out.push_str("    for tag in &expected_path_tags {\n");
@@ -913,6 +915,7 @@ fn build_model_boundary_vectors(
             crate::ir::FieldType::BoundedU16 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::BoundedU32 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::Bool => continue,
+            crate::ir::FieldType::String { .. } => continue,
             crate::ir::FieldType::Enum { .. }
             | crate::ir::FieldType::EnumSet { .. }
             | crate::ir::FieldType::EnumRelation { .. }

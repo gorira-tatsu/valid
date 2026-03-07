@@ -6,6 +6,11 @@ It focuses on how to write models, how to decide between `step` and
 
 This is not the design spec. For requirements and architecture, see the RDD.
 
+Related documents:
+
+- [Current Language Spec](./language-spec.md)
+- [Language Evolution Notes](./language-evolution.md)
+
 ## What the DSL is
 
 `valid` is a Rust-first finite-state verification tool. The primary modeling
@@ -67,6 +72,7 @@ State is a plain Rust struct. The supported field classes today are:
 - finite enums derived with `ValidEnum`
 - `Option<FiniteEnum>`
 - `FiniteEnumSet<FiniteEnum>`
+- `String` with explicit-first helpers such as `len`, `str_contains`, and `regex_match`
 
 Example:
 
@@ -130,6 +136,16 @@ For relationship-heavy models, the DSL also supports:
 These are intended for finite domains such as tenant membership, entitlement
 bindings, resource ownership, plan assignment, and similar SaaS/IAM-style
 relationships.
+
+For password and token policies, the current DSL also supports explicit-first
+text checks:
+
+- `len(&state.password)`
+- `str_contains(&state.password, "-")`
+- `regex_match(&state.password, r"[A-Z]")`
+
+These currently run on the explicit backend. `readiness` will mark such models
+as `explicit-ready` rather than `solver-ready`.
 
 ## Actions
 

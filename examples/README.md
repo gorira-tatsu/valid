@@ -18,6 +18,8 @@ Current examples:
   Small declarative arithmetic model using grouped `on Action { ... }`.
 - `tenant_relation_registry.rs`
   Small declarative relation/map model for tenant membership and tenant plan checks.
+- `password_policy.rs`
+  Small declarative string/password-policy model using `len` and `regex_match`.
 - `iam_transition_registry.rs`
   Small declarative policy model with explicit path tags.
 - `saas_multi_tenant_registry.rs`
@@ -41,6 +43,8 @@ cargo valid --registry examples/valid_models.rs models
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
+cargo valid --registry examples/password_policy.rs inspect password-policy-safe
+cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```

@@ -110,6 +110,15 @@ pub fn build_invariant_bmc_query(
             "SMT adapter cannot build a transition query for a model without actions".to_string(),
         );
     }
+    if model
+        .state_fields
+        .iter()
+        .any(|field| matches!(field.ty, FieldType::String { .. }))
+    {
+        return Err(
+            "SMT adapter does not yet support string fields; use explicit backend".to_string(),
+        );
+    }
 
     let mut smtlib = String::new();
     smtlib.push_str("(set-logic QF_LIA)\n");
@@ -302,6 +311,7 @@ fn parse_cvc5_get_value_line(line: &str) -> Result<(String, String), String> {
 fn smt_sort(ty: &FieldType) -> &'static str {
     match ty {
         FieldType::Bool => "Bool",
+        FieldType::String { .. } => "String",
         FieldType::BoundedU8 { .. }
         | FieldType::BoundedU16 { .. }
         | FieldType::BoundedU32 { .. }
@@ -315,6 +325,7 @@ fn smt_sort(ty: &FieldType) -> &'static str {
 fn integer_bounds(ty: &FieldType) -> Option<(u64, u64)> {
     match ty {
         FieldType::Bool => None,
+        FieldType::String { .. } => None,
         FieldType::BoundedU8 { min, max } => Some((*min as u64, *max as u64)),
         FieldType::BoundedU16 { min, max } => Some((*min as u64, *max as u64)),
         FieldType::BoundedU32 { min, max } => Some((*min as u64, *max as u64)),
@@ -360,6 +371,7 @@ fn literal(value: &Value) -> String {
     match value {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
+        Value::String(value) => format!("{value:?}"),
         Value::EnumVariant { index, .. } => index.to_string(),
         Value::PairVariant { .. } => {
             panic!("pair literals must be rendered through relation/map operators")
@@ -385,8 +397,20 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
         ExprIr::Unary { op, expr } => match op {
             UnaryOp::Not => Ok(format!("(not {})", render_expr(model, expr, step)?)),
             UnaryOp::SetIsEmpty => Ok(format!("(= {} 0)", render_expr(model, expr, step)?)),
+            UnaryOp::StringLen => Err(
+                "SMT adapter does not yet support string length expressions; use explicit backend"
+                    .to_string(),
+            ),
         },
         ExprIr::Binary { op, left, right } => match op {
+            BinaryOp::StringContains => Err(
+                "SMT adapter does not yet support string contains expressions; use explicit backend"
+                    .to_string(),
+            ),
+            BinaryOp::RegexMatch => Err(
+                "SMT adapter does not yet support regex_match expressions; use explicit backend"
+                    .to_string(),
+            ),
             BinaryOp::RelationContains => {
                 let left_rendered = render_expr(model, left, step)?;
                 let (left_index, right_index) = extract_pair_indexes(right.as_ref(), expr)?;

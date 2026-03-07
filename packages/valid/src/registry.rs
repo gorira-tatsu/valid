@@ -1010,7 +1010,11 @@ fn registry_migration_output_path(model: &str, requested: &str) -> String {
 
 fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
     let json = args.iter().any(|a| a == "--json");
-    let positional: Vec<&str> = args.iter().filter(|a| !a.starts_with("--")).map(|a| a.as_str()).collect();
+    let positional: Vec<&str> = args
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .map(|a| a.as_str())
+        .collect();
     let sub = positional.first().copied().unwrap_or("snapshot");
     let lock_path = positional.get(1).map(|s| s.to_string());
 
@@ -1122,7 +1126,9 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
             process::exit(if has_drift { 2 } else { 0 });
         }
         _ => {
-            eprintln!("usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json]");
+            eprintln!(
+                "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json]"
+            );
             process::exit(3);
         }
     }

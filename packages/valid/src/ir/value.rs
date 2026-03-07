@@ -2,6 +2,7 @@
 pub enum Value {
     Bool(bool),
     UInt(u64),
+    String(String),
     EnumVariant {
         label: String,
         index: u64,

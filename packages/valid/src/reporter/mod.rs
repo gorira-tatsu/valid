@@ -17,6 +17,16 @@ impl GraphView {
     }
 }
 
+fn capability_mode_label(response: &InspectResponse) -> String {
+    if response.machine_ir_ready && response.capabilities.solver_ready {
+        "analysis mode: declarative / solver-ready".to_string()
+    } else if response.machine_ir_ready {
+        "analysis mode: declarative / explicit-ready".to_string()
+    } else {
+        "analysis mode: explicit-only / opaque-step".to_string()
+    }
+}
+
 pub fn render_trace_mermaid(trace: &EvidenceTrace) -> String {
     let mut out = String::from("stateDiagram-v2\n");
     if trace.steps.is_empty() {
@@ -82,11 +92,7 @@ fn render_model_mermaid_logic(response: &InspectResponse) -> String {
         mermaid_label(&[format!("model: {}", response.model_id)])
     ));
     let capability_node = sanitize_id(&format!("capability_{}", response.model_id));
-    let capability_mode = if response.machine_ir_ready {
-        "analysis mode: declarative / solver-ready".to_string()
-    } else {
-        "analysis mode: explicit-only / opaque-step".to_string()
-    };
+    let capability_mode = capability_mode_label(response);
     let mut capability_lines = vec![capability_mode];
     if !response.capabilities.reasons.is_empty() {
         capability_lines.push(format!(
@@ -190,11 +196,7 @@ fn render_model_dot_logic(response: &InspectResponse) -> String {
         dot_label(&[format!("model: {}", response.model_id)])
     ));
     let capability_node = sanitize_id(&format!("capability_{}", response.model_id));
-    let capability_mode = if response.machine_ir_ready {
-        "analysis mode: declarative / solver-ready".to_string()
-    } else {
-        "analysis mode: explicit-only / opaque-step".to_string()
-    };
+    let capability_mode = capability_mode_label(response);
     let mut capability_lines = vec![capability_mode];
     if !response.capabilities.reasons.is_empty() {
         capability_lines.push(format!(
@@ -292,11 +294,7 @@ pub fn render_model_svg_with_view(response: &InspectResponse, view: GraphView) -
 
 fn render_model_svg_logic(response: &InspectResponse) -> String {
     let mut sections = Vec::new();
-    let capability_mode = if response.machine_ir_ready {
-        "analysis mode: declarative / solver-ready".to_string()
-    } else {
-        "analysis mode: explicit-only / opaque-step".to_string()
-    };
+    let capability_mode = capability_mode_label(response);
     let mut capability_lines = vec![capability_mode];
     if !response.capabilities.reasons.is_empty() {
         capability_lines.push(format!(
@@ -477,7 +475,9 @@ fn render_model_dot_overview(response: &InspectResponse) -> String {
         out.push_str(&format!("  {model_node} -> {node};\n"));
         for read in &action.reads {
             let field = sanitize_id(&format!("field_{read}"));
-            out.push_str(&format!("  {node} -> {field} [style=dashed, label=\"reads\"];\n"));
+            out.push_str(&format!(
+                "  {node} -> {field} [style=dashed, label=\"reads\"];\n"
+            ));
         }
         for write in &action.writes {
             let field = sanitize_id(&format!("field_{write}"));
@@ -603,11 +603,7 @@ fn mermaid_label(lines: &[String]) -> String {
 }
 
 fn capability_lines(response: &InspectResponse) -> Vec<String> {
-    let capability_mode = if response.machine_ir_ready {
-        "analysis mode: declarative / solver-ready".to_string()
-    } else {
-        "analysis mode: explicit-only / opaque-step".to_string()
-    };
+    let capability_mode = capability_mode_label(response);
     let mut capability_lines = vec![capability_mode];
     if !response.capabilities.reasons.is_empty() {
         capability_lines.push(format!(
@@ -619,7 +615,11 @@ fn capability_lines(response: &InspectResponse) -> Vec<String> {
 }
 
 fn field_label_lines(field: &crate::api::InspectStateField) -> Vec<String> {
-    let mut lines = vec![format!("{}: {}", field.name, compact_rust_type(&field.rust_type))];
+    let mut lines = vec![format!(
+        "{}: {}",
+        field.name,
+        compact_rust_type(&field.rust_type)
+    )];
     if let Some(range) = &field.range {
         lines.push(format!("range: {range}"));
     }
@@ -665,7 +665,10 @@ fn transition_label_lines(transition: &crate::api::InspectTransition) -> Vec<Str
 }
 
 fn compact_rust_type(input: &str) -> String {
-    let normalized = input.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    let normalized = input
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
     if let Some(inner) = normalized
         .strip_prefix("FiniteRelation<")
         .and_then(|value| value.strip_suffix('>'))
@@ -707,7 +710,11 @@ fn meaningful_updates(updates: &[crate::api::InspectTransitionUpdate]) -> Vec<St
     updates
         .iter()
         .filter(|update| {
-            let expr = update.expr.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+            let expr = update
+                .expr
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>();
             expr != format!("state.{}", update.field) && expr != update.field
         })
         .map(|update| format!("{} := {}", update.field, compact_inline(&update.expr)))
@@ -740,7 +747,10 @@ fn action_overview_lines(
 }
 
 fn property_overview_lines(property: &crate::api::InspectProperty) -> Vec<String> {
-    let mut lines = vec![property.property_id.clone(), format!("kind: {}", property.kind)];
+    let mut lines = vec![
+        property.property_id.clone(),
+        format!("kind: {}", property.kind),
+    ];
     if let Some(expr) = &property.expr {
         lines.push(format!("rule: {}", compact_inline(expr)));
     }
