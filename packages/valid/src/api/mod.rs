@@ -13,6 +13,7 @@ use crate::{
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path},
+    modeling::CapabilityDetail,
     orchestrator::run_all_properties_with_backend,
     solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
@@ -48,13 +49,42 @@ pub struct InspectResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectCapabilities {
     pub parse_ready: bool,
+    pub parse: CapabilityDetail,
     pub explicit_ready: bool,
+    pub explicit: CapabilityDetail,
     pub ir_ready: bool,
+    pub ir: CapabilityDetail,
     pub solver_ready: bool,
+    pub solver: CapabilityDetail,
     pub coverage_ready: bool,
+    pub coverage: CapabilityDetail,
     pub explain_ready: bool,
+    pub explain: CapabilityDetail,
     pub testgen_ready: bool,
+    pub testgen: CapabilityDetail,
     pub reasons: Vec<String>,
+}
+
+impl InspectCapabilities {
+    pub fn fully_ready() -> Self {
+        Self {
+            parse_ready: true,
+            parse: CapabilityDetail::ready(),
+            explicit_ready: true,
+            explicit: CapabilityDetail::ready(),
+            ir_ready: true,
+            ir: CapabilityDetail::ready(),
+            solver_ready: true,
+            solver: CapabilityDetail::ready(),
+            coverage_ready: true,
+            coverage: CapabilityDetail::ready(),
+            explain_ready: true,
+            explain: CapabilityDetail::ready(),
+            testgen_ready: true,
+            testgen: CapabilityDetail::ready(),
+            reasons: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,16 +336,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         model_id: model.model_id.clone(),
         machine_ir_ready: true,
         machine_ir_error: None,
-        capabilities: InspectCapabilities {
-            parse_ready: true,
-            explicit_ready: true,
-            ir_ready: true,
-            solver_ready: true,
-            coverage_ready: true,
-            explain_ready: true,
-            testgen_ready: true,
-            reasons: Vec::new(),
-        },
+        capabilities: InspectCapabilities::fully_ready(),
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
         actions: model.actions.iter().map(|a| a.action_id.clone()).collect(),
         properties: model
@@ -1303,6 +1324,41 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
     if response.machine_ir_ready != response.capabilities.ir_ready {
         return Err("machine_ir_ready must match capabilities.ir_ready".to_string());
     }
+    validate_capability_detail(
+        "parse",
+        response.capabilities.parse_ready,
+        &response.capabilities.parse,
+    )?;
+    validate_capability_detail(
+        "explicit",
+        response.capabilities.explicit_ready,
+        &response.capabilities.explicit,
+    )?;
+    validate_capability_detail(
+        "ir",
+        response.capabilities.ir_ready,
+        &response.capabilities.ir,
+    )?;
+    validate_capability_detail(
+        "solver",
+        response.capabilities.solver_ready,
+        &response.capabilities.solver,
+    )?;
+    validate_capability_detail(
+        "coverage",
+        response.capabilities.coverage_ready,
+        &response.capabilities.coverage,
+    )?;
+    validate_capability_detail(
+        "explain",
+        response.capabilities.explain_ready,
+        &response.capabilities.explain,
+    )?;
+    validate_capability_detail(
+        "testgen",
+        response.capabilities.testgen_ready,
+        &response.capabilities.testgen,
+    )?;
     require_len_match(
         response.state_fields.len(),
         response.state_field_details.len(),
@@ -1324,6 +1380,19 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
     Ok(())
 }
 
+fn validate_capability_detail(
+    name: &str,
+    ready: bool,
+    detail: &CapabilityDetail,
+) -> Result<(), String> {
+    if !ready && detail.reason.is_empty() {
+        return Err(format!(
+            "capabilities.{name}.reason must be non-empty when {name}_ready is false"
+        ));
+    }
+    Ok(())
+}
+
 pub fn render_inspect_json(response: &InspectResponse) -> String {
     let mut out = String::from("{");
     out.push_str(&format!(
@@ -1339,17 +1408,8 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             .map(|error| format!("\"{}\"", escape_json(error)))
             .unwrap_or_else(|| "null".to_string())
     ));
-    out.push_str(&format!(
-        ",\"capabilities\":{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{}}}",
-        response.capabilities.parse_ready,
-        response.capabilities.explicit_ready,
-        response.capabilities.ir_ready,
-        response.capabilities.solver_ready,
-        response.capabilities.coverage_ready,
-        response.capabilities.explain_ready,
-        response.capabilities.testgen_ready,
-        render_string_array(&response.capabilities.reasons),
-    ));
+    out.push_str(",\"capabilities\":");
+    out.push_str(&render_capabilities_json(&response.capabilities));
     out.push_str(",\"state_fields\":[");
     for (index, field) in response.state_fields.iter().enumerate() {
         if index > 0 {
@@ -1486,6 +1546,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             response.capabilities.reasons.join(", ")
         ));
     }
+    out.push_str(&render_capability_details_text(&response.capabilities));
     out.push_str(&format!(
         "state_fields: {}\n",
         response.state_fields.join(", ")
@@ -2076,19 +2137,12 @@ pub fn render_lint_json(response: &LintResponse) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"capabilities\":{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{}}},\"findings\":[{}]}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"capabilities\":{},\"findings\":[{}]}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
         escape_json(&response.model_id),
-        response.capabilities.parse_ready,
-        response.capabilities.explicit_ready,
-        response.capabilities.ir_ready,
-        response.capabilities.solver_ready,
-        response.capabilities.coverage_ready,
-        response.capabilities.explain_ready,
-        response.capabilities.testgen_ready,
-        render_string_array(&response.capabilities.reasons),
+        render_capabilities_json(&response.capabilities),
         findings
     )
 }
@@ -2113,6 +2167,7 @@ pub fn render_lint_text(response: &LintResponse) -> String {
             response.capabilities.reasons.join(", ")
         ));
     }
+    out.push_str(&render_capability_details_text(&response.capabilities));
     if response.findings.is_empty() {
         out.push_str("findings: none\n");
     } else {
@@ -2190,6 +2245,7 @@ fn migration_check_from_inspect(
         .collect::<Vec<_>>();
     let mut next_steps = Vec::new();
     let mut reasons = inspect.capabilities.reasons.clone();
+    append_capability_guidance(inspect, &mut next_steps);
     let (status, mode, verified_equivalence) = if inspect.machine_ir_ready {
         next_steps.push(
             "model already has declarative transitions; use verify/benchmark directly".to_string(),
@@ -2230,6 +2286,51 @@ fn migration_check_from_inspect(
         missing_actions,
         reasons,
         next_steps,
+    }
+}
+
+fn append_capability_guidance(inspect: &InspectResponse, next_steps: &mut Vec<String>) {
+    if !inspect.capabilities.ir_ready {
+        push_unique(
+            next_steps,
+            format!("machine IR blocker: {}", inspect.capabilities.ir.reason),
+        );
+        if !inspect.capabilities.ir.unsupported_features.is_empty() {
+            push_unique(
+                next_steps,
+                format!(
+                    "machine IR unsupported features: {}",
+                    inspect.capabilities.ir.unsupported_features.join(", ")
+                ),
+            );
+        }
+        if let Some(hint) = &inspect.capabilities.ir.migration_hint {
+            push_unique(next_steps, hint.clone());
+        }
+    }
+    if inspect.capabilities.ir_ready && !inspect.capabilities.solver_ready {
+        push_unique(
+            next_steps,
+            format!("solver blocker: {}", inspect.capabilities.solver.reason),
+        );
+        if !inspect.capabilities.solver.unsupported_features.is_empty() {
+            push_unique(
+                next_steps,
+                format!(
+                    "solver unsupported features: {}",
+                    inspect.capabilities.solver.unsupported_features.join(", ")
+                ),
+            );
+        }
+        if let Some(hint) = &inspect.capabilities.solver.migration_hint {
+            push_unique(next_steps, hint.clone());
+        }
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 
@@ -2380,6 +2481,90 @@ fn render_transition_migration_snippet(
     )
 }
 
+fn render_capabilities_json(capabilities: &InspectCapabilities) -> String {
+    format!(
+        "{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{},\"parse\":{},\"explicit\":{},\"ir\":{},\"solver\":{},\"coverage\":{},\"explain\":{},\"testgen\":{}}}",
+        capabilities.parse_ready,
+        capabilities.explicit_ready,
+        capabilities.ir_ready,
+        capabilities.solver_ready,
+        capabilities.coverage_ready,
+        capabilities.explain_ready,
+        capabilities.testgen_ready,
+        render_string_array(&capabilities.reasons),
+        render_capability_detail_json(&capabilities.parse),
+        render_capability_detail_json(&capabilities.explicit),
+        render_capability_detail_json(&capabilities.ir),
+        render_capability_detail_json(&capabilities.solver),
+        render_capability_detail_json(&capabilities.coverage),
+        render_capability_detail_json(&capabilities.explain),
+        render_capability_detail_json(&capabilities.testgen),
+    )
+}
+
+fn render_capability_detail_json(detail: &CapabilityDetail) -> String {
+    format!(
+        "{{\"reason\":\"{}\",\"migration_hint\":{},\"unsupported_features\":{}}}",
+        escape_json(&detail.reason),
+        render_optional_string(detail.migration_hint.as_deref()),
+        render_string_array(&detail.unsupported_features),
+    )
+}
+
+fn render_capability_details_text(capabilities: &InspectCapabilities) -> String {
+    let details = [
+        ("parse", capabilities.parse_ready, &capabilities.parse),
+        (
+            "explicit",
+            capabilities.explicit_ready,
+            &capabilities.explicit,
+        ),
+        ("ir", capabilities.ir_ready, &capabilities.ir),
+        ("solver", capabilities.solver_ready, &capabilities.solver),
+        (
+            "coverage",
+            capabilities.coverage_ready,
+            &capabilities.coverage,
+        ),
+        ("explain", capabilities.explain_ready, &capabilities.explain),
+        ("testgen", capabilities.testgen_ready, &capabilities.testgen),
+    ];
+    let mut lines = Vec::new();
+    for (name, ready, detail) in details {
+        if ready
+            && detail.reason.is_empty()
+            && detail.migration_hint.is_none()
+            && detail.unsupported_features.is_empty()
+        {
+            continue;
+        }
+        let mut line = format!(
+            "- {} reason={}",
+            name,
+            if detail.reason.is_empty() {
+                "ready".to_string()
+            } else {
+                detail.reason.clone()
+            }
+        );
+        if let Some(hint) = &detail.migration_hint {
+            line.push_str(&format!(" migration_hint={hint}"));
+        }
+        if !detail.unsupported_features.is_empty() {
+            line.push_str(&format!(
+                " unsupported_features=[{}]",
+                detail.unsupported_features.join(", ")
+            ));
+        }
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("capability_details:\n{}\n", lines.join("\n"))
+    }
+}
+
 fn render_string_array(values: &[String]) -> String {
     format!(
         "[{}]",
@@ -2389,6 +2574,12 @@ fn render_string_array(values: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+fn render_optional_string(value: Option<&str>) -> String {
+    value
+        .map(|value| format!("\"{}\"", escape_json(value)))
+        .unwrap_or_else(|| "null".to_string())
 }
 
 fn escape_json(input: &str) -> String {
@@ -2592,16 +2783,18 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
 mod tests {
     use std::fs;
 
+    use crate::{engine::CheckOutcome, modeling::CapabilityDetail};
+
     use super::{
         capabilities_response, check_source, explain_source, explicit_analysis_warning,
-        inspect_source, lint_from_inspect, lint_source, minimize_source, orchestrate_source,
-        testgen_source, validate_capabilities_request, validate_capabilities_response,
-        validate_check_request, validate_explain_request, validate_explain_response,
-        validate_inspect_request, validate_inspect_response, validate_minimize_request,
-        validate_minimize_response, validate_orchestrate_response, validate_testgen_request,
-        validate_testgen_response, CapabilitiesRequest, CheckRequest, InspectCapabilities,
-        InspectRequest, InspectResponse, InspectTransition, InspectTransitionUpdate,
-        MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        inspect_source, lint_from_inspect, lint_source, migration_from_inspect, minimize_source,
+        orchestrate_source, render_inspect_json, testgen_source, validate_capabilities_request,
+        validate_capabilities_response, validate_check_request, validate_explain_request,
+        validate_explain_response, validate_inspect_request, validate_inspect_response,
+        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
+        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
+        InspectCapabilities, InspectRequest, InspectResponse, InspectTransition,
+        InspectTransitionUpdate, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
 
     fn cleanup_generated_files(paths: &[String]) {
@@ -2609,7 +2802,6 @@ mod tests {
             let _ = fs::remove_file(path);
         }
     }
-    use crate::engine::CheckOutcome;
 
     #[test]
     fn inspect_returns_model_outline() {
@@ -2663,14 +2855,26 @@ mod tests {
                 "unsupported machine guard expression `state.i % 3 == 0`".to_string(),
             ),
             capabilities: InspectCapabilities {
-                parse_ready: true,
-                explicit_ready: true,
                 ir_ready: false,
                 solver_ready: false,
-                coverage_ready: true,
-                explain_ready: true,
-                testgen_ready: true,
+                ir: CapabilityDetail {
+                    reason:
+                        "one or more declarative guards use syntax outside the current machine IR subset"
+                            .to_string(),
+                    migration_hint: Some(
+                        "simplify guard expressions to the current IR subset, or extend lowering support for the reported guard form".to_string(),
+                    ),
+                    unsupported_features: vec!["guard: state.i % 3 == 0".to_string()],
+                },
+                solver: CapabilityDetail {
+                    reason: "solver backends require machine IR first; blocking IR reason: one or more declarative guards use syntax outside the current machine IR subset".to_string(),
+                    migration_hint: Some(
+                        "simplify guard expressions to the current IR subset, or extend lowering support for the reported guard form".to_string(),
+                    ),
+                    unsupported_features: vec!["guard: state.i % 3 == 0".to_string()],
+                },
                 reasons: vec!["unsupported_machine_guard_expr".to_string()],
+                ..InspectCapabilities::fully_ready()
             },
             state_fields: vec!["i".to_string()],
             actions: vec!["STEP".to_string()],
@@ -2699,6 +2903,47 @@ mod tests {
                 && finding.severity == "error"));
         let warning = explicit_analysis_warning(&inspect).expect("warning");
         assert!(warning.contains("cannot fully lower to machine IR"));
+    }
+
+    #[test]
+    fn inspect_json_includes_capability_details_and_reason_codes() {
+        let request = InspectRequest {
+            request_id: "req-json".to_string(),
+            source_name: "rust:counter".to_string(),
+            source: String::new(),
+        };
+        let response = inspect_source(&request).unwrap();
+        let json = render_inspect_json(&response);
+        assert!(
+            json.contains(
+                "\"reasons\":[\"missing_declarative_transitions\",\"opaque_step_closure\"]"
+            ) || json.contains(
+                "\"reasons\":[\"opaque_step_closure\",\"missing_declarative_transitions\"]"
+            )
+        );
+        assert!(json.contains(
+            "\"ir\":{\"reason\":\"opaque step models cannot be lowered into machine IR\""
+        ));
+        assert!(json.contains("\"unsupported_features\":[\"step(state, action)\"]"));
+    }
+
+    #[test]
+    fn migration_check_uses_capability_guidance() {
+        let request = InspectRequest {
+            request_id: "req-migrate".to_string(),
+            source_name: "rust:counter".to_string(),
+            source: String::new(),
+        };
+        let inspect = inspect_source(&request).unwrap();
+        let lint = lint_from_inspect(&inspect);
+        let migration = migration_from_inspect(&inspect, &lint, true);
+        let check = migration.check.expect("check");
+        assert!(check.next_steps.iter().any(|step| step
+            .contains("machine IR blocker: opaque step models cannot be lowered into machine IR")));
+        assert!(check
+            .next_steps
+            .iter()
+            .any(|step| step.contains("machine IR unsupported features: step(state, action)")));
     }
 
     #[test]
