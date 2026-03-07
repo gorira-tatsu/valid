@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Orchestrate Response",
+  "type": "object",
+  "required": ["schema_version", "request_id", "runs"],
+  "properties": {
+    "schema_version": { "type": "string", "minLength": 1 },
+    "request_id": { "type": "string", "minLength": 1 },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["property_id", "status", "assurance_level", "run_id"],
+        "properties": {
+          "property_id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "assurance_level": { "type": "string", "minLength": 1 },
+          "run_id": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

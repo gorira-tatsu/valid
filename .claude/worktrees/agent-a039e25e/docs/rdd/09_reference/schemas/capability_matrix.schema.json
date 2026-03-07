@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.capability_matrix",
+  "type": "object",
+  "required": ["backend", "capabilities"],
+  "properties": {
+    "backend": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "supports_explicit",
+        "supports_bmc",
+        "supports_certificate",
+        "supports_trace",
+        "supports_witness",
+        "selfcheck_compatible"
+      ],
+      "properties": {
+        "supports_explicit": { "type": "boolean" },
+        "supports_bmc": { "type": "boolean" },
+        "supports_certificate": { "type": "boolean" },
+        "supports_trace": { "type": "boolean" },
+        "supports_witness": { "type": "boolean" },
+        "selfcheck_compatible": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

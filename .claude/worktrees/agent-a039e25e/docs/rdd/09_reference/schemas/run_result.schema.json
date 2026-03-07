@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.run_result",
+  "type": "object",
+  "required": ["schema_version", "run_id", "backend", "status", "property_results", "stats", "diagnostics", "artifacts"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "run_id": { "type": "string" },
+    "backend": { "type": "string", "enum": ["explicit", "bmc"] },
+    "strategy": { "type": "string" },
+    "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "property_results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/property_result" }
+    },
+    "stats": { "$ref": "#/$defs/stats" },
+    "diagnostics": { "type": "array", "items": { "type": "object" } },
+    "artifacts": { "type": "object" }
+  },
+  "$defs": {
+    "property_result": {
+      "type": "object",
+      "required": ["property_id", "property_kind", "status", "summary"],
+      "properties": {
+        "property_id": { "type": "string" },
+        "property_kind": { "type": "string" },
+        "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+        "terminal_state_id": { "type": ["string", "null"] },
+        "evidence_id": { "type": ["string", "null"] },
+        "unknown_reason": { "type": ["string", "null"] },
+        "summary": { "type": "string" }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["states_seen", "states_enqueued", "transitions_tried", "transitions_taken", "max_depth_seen", "runtime_ms", "limit_hit"],
+      "properties": {
+        "states_seen": { "type": "integer", "minimum": 0 },
+        "states_enqueued": { "type": "integer", "minimum": 0 },
+        "transitions_tried": { "type": "integer", "minimum": 0 },
+        "transitions_taken": { "type": "integer", "minimum": 0 },
+        "max_depth_seen": { "type": "integer", "minimum": 0 },
+        "runtime_ms": { "type": "integer", "minimum": 0 },
+        "limit_hit": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

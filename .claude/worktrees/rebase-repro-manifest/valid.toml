@@ -1,0 +1,14 @@
+registry = "examples/valid_models.rs"
+default_backend = "explicit"
+default_property = ""
+default_solver_executable = ""
+default_solver_args = []
+suite_models = ["counter", "failing-counter"]
+benchmark_models = ["counter"]
+benchmark_repeats = 5
+generated_tests_dir = "generated-tests"
+artifacts_dir = "artifacts"
+benchmarks_dir = "artifacts/benchmarks"
+benchmark_baseline_dir = "benchmarks/baselines"
+benchmark_regression_threshold_percent = 25
+default_graph_format = "mermaid"

@@ -102,14 +102,36 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
 
         if let Some(rest) = trimmed.strip_prefix("property ") {
             flush_action(&mut actions, &mut current_action);
-            let name = rest.trim_end_matches(':').trim().to_string();
-            properties.push(ParsedProperty {
-                name,
-                kind: String::new(),
-                expr: String::new(),
-                line: line_no,
-            });
-            section = Section::PropertyHeader;
+            if let Some((name, inline_definition)) = split_once(rest, ':') {
+                let name = name.trim().to_string();
+                if inline_definition.trim().is_empty() {
+                    properties.push(ParsedProperty {
+                        name,
+                        kind: String::new(),
+                        expr: String::new(),
+                        line: line_no,
+                    });
+                    section = Section::PropertyHeader;
+                } else if let Err(error) =
+                    parse_property_definition(&name, inline_definition, line_no)
+                {
+                    errors.push(error);
+                    section = Section::None;
+                } else {
+                    let (kind, expr) =
+                        property_kind_and_expr(inline_definition).expect("property parsed");
+                    properties.push(ParsedProperty {
+                        name,
+                        kind,
+                        expr,
+                        line: line_no,
+                    });
+                    section = Section::None;
+                }
+            } else {
+                errors.push(parse_error("invalid property declaration", line_no));
+                section = Section::None;
+            }
             continue;
         }
 
@@ -152,9 +174,9 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             }
             Section::PropertyHeader => {
                 if let Some(property) = properties.last_mut() {
-                    if let Some((kind, expr)) = split_once(trimmed, ':') {
-                        property.kind = kind.trim().to_string();
-                        property.expr = expr.trim().to_string();
+                    if let Some((kind, expr)) = property_kind_and_expr(trimmed) {
+                        property.kind = kind;
+                        property.expr = expr;
                     } else {
                         errors.push(parse_error("invalid property definition", line_no));
                     }
@@ -206,6 +228,27 @@ fn split_once(input: &str, needle: char) -> Option<(&str, &str)> {
     Some((&input[..idx], &input[idx + 1..]))
 }
 
+fn property_kind_and_expr(input: &str) -> Option<(String, String)> {
+    if let Some((kind, expr)) = split_once(input, ':') {
+        Some((kind.trim().to_string(), expr.trim().to_string()))
+    } else {
+        let kind = input.trim();
+        if kind.is_empty() {
+            None
+        } else {
+            Some((kind.to_string(), String::new()))
+        }
+    }
+}
+
+fn parse_property_definition(
+    _name: &str,
+    input: &str,
+    line: usize,
+) -> Result<(String, String), Diagnostic> {
+    property_kind_and_expr(input).ok_or_else(|| parse_error("invalid property definition", line))
+}
+
 fn parse_error(message: &str, line: usize) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::ParseError,
@@ -244,5 +287,23 @@ property P_SAFE:
         assert_eq!(parsed.state_fields.len(), 2);
         assert_eq!(parsed.actions.len(), 1);
         assert_eq!(parsed.properties.len(), 1);
+    }
+
+    #[test]
+    fn parses_inline_deadlock_freedom_property() {
+        let source = r#"
+model CounterLock
+state:
+  x: u8[0..7]
+init:
+  x = 0
+property P_LIVE: deadlock_freedom
+"#;
+
+        let parsed = parse_model(source).expect("should parse");
+        assert_eq!(parsed.properties.len(), 1);
+        assert_eq!(parsed.properties[0].name, "P_LIVE");
+        assert_eq!(parsed.properties[0].kind, "deadlock_freedom");
+        assert!(parsed.properties[0].expr.is_empty());
     }
 }
