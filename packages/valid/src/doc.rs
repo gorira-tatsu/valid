@@ -68,7 +68,11 @@ pub fn check_doc(
             {
                 drift_sections.push("source_hash".to_string());
             }
-            if extract_mermaid(body).as_deref() != Some(generated.mermaid.as_str()) {
+            if extract_mermaid(body)
+                .map(|value| value.trim_end().to_string())
+                .as_deref()
+                != Some(generated.mermaid.trim_end())
+            {
                 drift_sections.push("mermaid".to_string());
             }
             if extract_metadata(body, "contract_hash").as_deref()

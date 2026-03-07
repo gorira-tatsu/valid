@@ -438,6 +438,7 @@ fn bundled_rust_models_run_via_main_cli_path() {
         .expect("check should run");
     assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"traceback\""));
 
     let coverage = Command::new(binary_path())
         .arg("coverage")
@@ -449,6 +450,55 @@ fn bundled_rust_models_run_via_main_cli_path() {
     let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
     assert!(coverage_stdout.contains("\"model_id\":\"CounterModel\""));
     assert!(coverage_stdout.contains("\"path_tags\""));
+}
+
+#[test]
+fn main_cli_doc_check_reports_drift_structurally() {
+    let model = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output_path = std::env::temp_dir().join(format!(
+        "valid-doc-check-{}.md",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first = Command::new(binary_path())
+        .arg("doc")
+        .arg(&model)
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--json")
+        .output()
+        .expect("doc generation should run");
+    assert!(first.status.success());
+    let check = Command::new(binary_path())
+        .arg("doc")
+        .arg(&model)
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("doc check should run");
+    assert_eq!(check.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(stdout.contains("\"status\":\"unchanged\""));
+
+    let mut body = std::fs::read_to_string(&output_path).expect("doc body");
+    body.push_str("\nmanual drift\n");
+    std::fs::write(&output_path, body).expect("doc drift written");
+
+    let drift = Command::new(binary_path())
+        .arg("doc")
+        .arg(&model)
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("doc drift check should run");
+    assert_eq!(drift.status.code(), Some(2));
+    let drift_stdout = String::from_utf8_lossy(&drift.stdout);
+    assert!(drift_stdout.contains("\"status\":\"changed\""));
+    assert!(drift_stdout.contains("\"drift_sections\""));
+    let _ = std::fs::remove_file(output_path);
 }
 
 #[test]

@@ -230,11 +230,19 @@ fn cmd_doc(models: &[RegisteredModel], args: Vec<String>) {
     );
     let inspect = (model.inspect)("registry-doc");
     let mermaid = render_model_mermaid_with_view(&inspect, GraphView::Overview);
-    let contract = (model.contract_snapshot)().unwrap_or_else(|message| {
-        message_exit("doc", parsed.json, &message, Some(DOC_USAGE));
-    });
-    let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract.contract_hash));
-    let generated = generate_doc(&inspect, mermaid, source_hash, contract.contract_hash);
+    let contract_hash = (model.contract_snapshot)()
+        .map(|snapshot| snapshot.contract_hash)
+        .unwrap_or_else(|_| {
+            stable_hash_hex(&format!(
+                "{}|{}|{}|{}",
+                inspect.model_id,
+                inspect.state_fields.join(","),
+                inspect.actions.join(","),
+                inspect.properties.join(",")
+            ))
+        });
+    let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract_hash));
+    let generated = generate_doc(&inspect, mermaid, source_hash, contract_hash);
     let output_path = parsed
         .write_path
         .clone()

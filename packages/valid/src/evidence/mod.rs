@@ -408,6 +408,7 @@ fn render_completed_text(result: &ExplicitRunResult) -> String {
         {
             out.push_str(&format!("failing_action_id: {action_id}\n"));
         }
+        out.push_str(&render_traceback_text(trace));
     }
     out
 }
@@ -585,8 +586,10 @@ fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
     out.push('}');
     if let Some(trace) = &result.trace {
         out.push_str(&format!(",\"trace\":{}", render_trace_json(trace)));
+        out.push_str(&format!(",\"traceback\":{}", render_traceback_json(trace)));
     } else {
         out.push_str(",\"trace\":null");
+        out.push_str(",\"traceback\":null");
     }
     out.push_str(&format!(
         ",\"ci\":{{\"exit_code\":{},\"status\":\"{}\",\"backend\":\"{}\"}}",
@@ -726,6 +729,109 @@ fn append_state_map(out: &mut String, name: &str, state: &BTreeMap<String, Value
         out.push_str(&format!("\"{}\":{}", escape_json(field), value_json(value)));
     }
     out.push('}');
+}
+
+fn render_traceback_text(trace: &EvidenceTrace) -> String {
+    let Some(step) = trace.steps.last() else {
+        return String::new();
+    };
+    let (reads, writes, path_tags, involved_fields) = traceback_fields(step);
+    let mut out = String::new();
+    out.push_str("traceback:\n");
+    out.push_str(&format!("  failure_step_index: {}\n", step.index));
+    out.push_str(&format!("  from_state_id: {}\n", step.from_state_id));
+    out.push_str(&format!("  to_state_id: {}\n", step.to_state_id));
+    out.push_str(&format!("  depth: {}\n", step.depth));
+    if let Some(action_id) = &step.action_id {
+        out.push_str(&format!("  action_id: {action_id}\n"));
+    }
+    if !reads.is_empty() {
+        out.push_str(&format!("  reads: {}\n", reads.join(", ")));
+    }
+    if !writes.is_empty() {
+        out.push_str(&format!("  writes: {}\n", writes.join(", ")));
+    }
+    if !involved_fields.is_empty() {
+        out.push_str(&format!(
+            "  involved_fields: {}\n",
+            involved_fields.join(", ")
+        ));
+    }
+    if !path_tags.is_empty() {
+        out.push_str(&format!("  path_tags: {}\n", path_tags.join(", ")));
+    }
+    out
+}
+
+fn render_traceback_json(trace: &EvidenceTrace) -> String {
+    let Some(step) = trace.steps.last() else {
+        return "null".to_string();
+    };
+    let (reads, writes, path_tags, involved_fields) = traceback_fields(step);
+    let action_id = step
+        .action_id
+        .as_ref()
+        .map(|value| format!("\"{}\"", escape_json(value)))
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"failure_step_index\":{},\"from_state_id\":\"{}\",\"to_state_id\":\"{}\",\"depth\":{},\"action_id\":{},\"reads\":[{}],\"writes\":[{}],\"involved_fields\":[{}],\"path_tags\":[{}]}}",
+        step.index,
+        escape_json(&step.from_state_id),
+        escape_json(&step.to_state_id),
+        step.depth,
+        action_id,
+        reads
+            .iter()
+            .map(|field| format!("\"{}\"", escape_json(field)))
+            .collect::<Vec<_>>()
+            .join(","),
+        writes
+            .iter()
+            .map(|field| format!("\"{}\"", escape_json(field)))
+            .collect::<Vec<_>>()
+            .join(","),
+        involved_fields
+            .iter()
+            .map(|field| format!("\"{}\"", escape_json(field)))
+            .collect::<Vec<_>>()
+            .join(","),
+        path_tags
+            .iter()
+            .map(|tag| format!("\"{}\"", escape_json(tag)))
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+fn traceback_fields(step: &TraceStep) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+    let Some(path) = &step.path else {
+        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    };
+    let mut reads = Vec::new();
+    let mut writes = Vec::new();
+    let mut path_tags = Vec::new();
+    for decision in &path.decisions {
+        for field in &decision.point.reads {
+            push_unique(&mut reads, field.clone());
+        }
+        for field in &decision.point.writes {
+            push_unique(&mut writes, field.clone());
+        }
+        for tag in &decision.point.path_tags {
+            push_unique(&mut path_tags, tag.clone());
+        }
+    }
+    let mut involved_fields = writes.clone();
+    for field in &reads {
+        push_unique(&mut involved_fields, field.clone());
+    }
+    (reads, writes, path_tags, involved_fields)
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
 }
 
 fn status_label(status: RunStatus) -> &'static str {

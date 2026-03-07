@@ -367,44 +367,62 @@ fn build_external_command(parsed: &CliArgs) -> Command {
             command.arg(format!("--threshold-percent={threshold_percent}"));
         }
     }
-    if let Some(strategy) = &parsed.strategy {
-        command.arg(format!("--strategy={strategy}"));
-    }
-    if let Some(format) = &parsed.format {
-        command.arg(format!("--format={format}"));
-    }
-    if let Some(view) = &parsed.view {
-        command.arg(format!("--view={view}"));
-    }
-    if let Some(property_id) = &parsed.property_id {
-        command.arg(format!("--property={property_id}"));
-    }
-    if let Some(seed) = parsed.seed {
-        command.arg(format!("--seed={seed}"));
-    }
-    if let Some(backend) = &parsed.backend {
-        command.arg(format!("--backend={backend}"));
-    }
-    if let Some(solver_executable) = &parsed.solver_executable {
-        command.arg("--solver-exec").arg(solver_executable);
-    }
-    for solver_arg in &parsed.solver_args {
-        command.arg("--solver-arg").arg(solver_arg);
-    }
-    if let Some(focus_action_id) = &parsed.focus_action_id {
-        command.arg(format!("--focus-action={focus_action_id}"));
-    }
-    if !parsed.actions.is_empty() {
-        command.arg(format!("--actions={}", parsed.actions.join(",")));
-    }
-    if let Some(write_path) = &parsed.write_path {
-        if write_path.is_empty() {
-            command.arg("--write");
-        } else {
-            command.arg(format!("--write={write_path}"));
+    if command_supports_strategy(&parsed.command) {
+        if let Some(strategy) = &parsed.strategy {
+            command.arg(format!("--strategy={strategy}"));
         }
     }
-    if parsed.check {
+    if command_supports_format(&parsed.command) {
+        if let Some(format) = &parsed.format {
+            command.arg(format!("--format={format}"));
+        }
+    }
+    if command_supports_view(&parsed.command) {
+        if let Some(view) = &parsed.view {
+            command.arg(format!("--view={view}"));
+        }
+    }
+    if command_supports_property(&parsed.command) {
+        if let Some(property_id) = &parsed.property_id {
+            command.arg(format!("--property={property_id}"));
+        }
+    }
+    if command_supports_seed(&parsed.command) {
+        if let Some(seed) = parsed.seed {
+            command.arg(format!("--seed={seed}"));
+        }
+    }
+    if command_supports_backend(&parsed.command) {
+        if let Some(backend) = &parsed.backend {
+            command.arg(format!("--backend={backend}"));
+        }
+    }
+    if command_supports_solver(&parsed.command) {
+        if let Some(solver_executable) = &parsed.solver_executable {
+            command.arg("--solver-exec").arg(solver_executable);
+        }
+        for solver_arg in &parsed.solver_args {
+            command.arg("--solver-arg").arg(solver_arg);
+        }
+    }
+    if command_supports_focus_action(&parsed.command) {
+        if let Some(focus_action_id) = &parsed.focus_action_id {
+            command.arg(format!("--focus-action={focus_action_id}"));
+        }
+    }
+    if command_supports_actions(&parsed.command) && !parsed.actions.is_empty() {
+        command.arg(format!("--actions={}", parsed.actions.join(",")));
+    }
+    if command_supports_write_path(&parsed.command) {
+        if let Some(write_path) = &parsed.write_path {
+            if write_path.is_empty() {
+                command.arg("--write");
+            } else {
+                command.arg(format!("--write={write_path}"));
+            }
+        }
+    }
+    if command_supports_check_flag(&parsed.command) && parsed.check {
         command.arg("--check");
     }
     if parsed.json {
@@ -414,6 +432,59 @@ fn build_external_command(parsed: &CliArgs) -> Command {
         command.arg("--progress=json");
     }
     command
+}
+
+fn command_supports_backend(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "verify" | "benchmark" | "orchestrate" | "testgen" | "trace" | "coverage"
+    )
+}
+
+fn command_supports_solver(command: &str) -> bool {
+    command_supports_backend(command)
+}
+
+fn command_supports_property(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "verify" | "benchmark" | "testgen" | "trace" | "coverage" | "replay" | "all"
+    )
+}
+
+fn command_supports_seed(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "verify" | "testgen" | "trace" | "coverage" | "orchestrate" | "all"
+    )
+}
+
+fn command_supports_strategy(command: &str) -> bool {
+    matches!(command, "testgen" | "generate-tests")
+}
+
+fn command_supports_format(command: &str) -> bool {
+    matches!(command, "graph")
+}
+
+fn command_supports_view(command: &str) -> bool {
+    matches!(command, "graph")
+}
+
+fn command_supports_focus_action(command: &str) -> bool {
+    matches!(command, "replay")
+}
+
+fn command_supports_actions(command: &str) -> bool {
+    matches!(command, "replay")
+}
+
+fn command_supports_write_path(command: &str) -> bool {
+    matches!(command, "migrate" | "doc")
+}
+
+fn command_supports_check_flag(command: &str) -> bool {
+    matches!(command, "migrate" | "doc")
 }
 
 fn external_target_requires_runtime_feature(parsed: &CliArgs, target: &ExternalTarget) -> bool {
