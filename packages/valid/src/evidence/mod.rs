@@ -660,6 +660,15 @@ fn value_json(value: &Value) -> String {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
         Value::EnumVariant { label, .. } => format!("\"{}\"", escape_json(label)),
+        Value::PairVariant {
+            left_label,
+            right_label,
+            ..
+        } => format!(
+            "[\"{}\",\"{}\"]",
+            escape_json(left_label),
+            escape_json(right_label)
+        ),
     }
 }
 fn escape_json(input: &str) -> String {

@@ -114,6 +114,23 @@ same finite IR:
 - `remove(set, item)`
 - `is_empty(set)`
 
+For relationship-heavy models, the DSL also supports:
+
+- `FiniteRelation<A, B>`
+- `FiniteMap<K, V>`
+- `rel_contains(rel, left, right)`
+- `rel_insert(rel, left, right)`
+- `rel_remove(rel, left, right)`
+- `rel_intersects(left_rel, right_rel)`
+- `map_contains_key(map, key)`
+- `map_contains_entry(map, key, value)`
+- `map_put(map, key, value)`
+- `map_remove(map, key)`
+
+These are intended for finite domains such as tenant membership, entitlement
+bindings, resource ownership, plan assignment, and similar SaaS/IAM-style
+relationships.
+
 ## Actions
 
 Actions are finite Rust enums. Each variant needs an `action_id`, and should
@@ -351,12 +368,23 @@ transition example. It exercises:
 - multi-tenant isolation properties
 - a safe model and an intentional regression model
 
+`examples/tenant_relation_registry.rs` is the smallest relation/map example. It
+exercises:
+
+- `FiniteRelation<Member, Tenant>`
+- `FiniteMap<Tenant, Plan>`
+- combined guards using relation and map membership
+- strict counterexample generation for cross-tenant regressions
+
 Run it with:
 
 ```sh
 cargo valid --registry examples/fizzbuzz.rs inspect fizzbuzz
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
 cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
+
+cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
+cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```
 
 ## Registry

@@ -147,6 +147,20 @@ fn validate_value_for_type(
         {
             Ok(())
         }
+        (
+            FieldType::EnumRelation {
+                left_variants,
+                right_variants,
+            },
+            Value::UInt(value),
+        ) if within_relation_bounds(left_variants, right_variants, *value) => Ok(()),
+        (
+            FieldType::EnumMap {
+                key_variants,
+                value_variants,
+            },
+            Value::UInt(value),
+        ) if within_relation_bounds(key_variants, value_variants, *value) => Ok(()),
         (FieldType::BoundedU8 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -182,6 +196,22 @@ fn validate_value_for_type(
         )
         .with_help("keep finite-set updates within the declared enum universe")
         .with_best_practice("model set membership with FiniteEnumSet<T> and finite enum variants")),
+        (FieldType::EnumRelation { .. }, Value::UInt(_)) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` exceeds the declared finite-relation bounds"),
+        )
+        .with_help("keep finite-relation updates within the declared pair universe")
+        .with_best_practice(
+            "model relation membership with FiniteRelation<A, B> and finite enums",
+        )),
+        (FieldType::EnumMap { .. }, Value::UInt(_)) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` exceeds the declared finite-map bounds"),
+        )
+        .with_help("keep finite-map updates within the declared key/value universe")
+        .with_best_practice("model key/value assignments with FiniteMap<K, V> and finite enums")),
         _ => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -202,6 +232,17 @@ fn within_enum_set_bounds(variants: &[String], value: u64) -> bool {
         return true;
     }
     value <= ((1u64 << variants.len()) - 1)
+}
+
+fn within_relation_bounds(left_variants: &[String], right_variants: &[String], value: u64) -> bool {
+    let slots = left_variants.len().saturating_mul(right_variants.len());
+    if slots > 64 {
+        return false;
+    }
+    if slots == 64 {
+        return true;
+    }
+    value <= ((1u64 << slots) - 1)
 }
 
 #[cfg(test)]

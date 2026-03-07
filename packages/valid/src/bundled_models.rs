@@ -296,24 +296,29 @@ pub fn replay_bundled_model(
     action_ids: &[String],
     focus_action_id: Option<&str>,
 ) -> Result<String, String> {
-    let (terminal_state, property_id, focus_action_enabled) = match parse_model_ref(model_ref) {
-        Some(BundledModel::Counter) => {
-            replay_machine_actions::<CounterModel>(property_id, action_ids, focus_action_id)?
-        }
-        Some(BundledModel::FailingCounter) => {
-            replay_machine_actions::<FailingCounterModel>(property_id, action_ids, focus_action_id)?
-        }
-        Some(BundledModel::IamAccess) => {
-            replay_machine_actions::<IamAccessModel>(property_id, action_ids, focus_action_id)?
-        }
-        None => return Err(format!("unknown bundled rust model `{model_ref}`")),
-    };
+    let (terminal_state, property_id, focus_action_enabled, property_holds, path_tags) =
+        match parse_model_ref(model_ref) {
+            Some(BundledModel::Counter) => {
+                replay_machine_actions::<CounterModel>(property_id, action_ids, focus_action_id)?
+            }
+            Some(BundledModel::FailingCounter) => replay_machine_actions::<FailingCounterModel>(
+                property_id,
+                action_ids,
+                focus_action_id,
+            )?,
+            Some(BundledModel::IamAccess) => {
+                replay_machine_actions::<IamAccessModel>(property_id, action_ids, focus_action_id)?
+            }
+            None => return Err(format!("unknown bundled rust model `{model_ref}`")),
+        };
     Ok(render_replay_json(
         property_id,
         action_ids,
         &terminal_state,
         focus_action_id,
         focus_action_enabled,
+        Some(property_holds),
+        &path_tags,
     ))
 }
 
@@ -458,12 +463,53 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
-            variants: field
-                .variants
-                .unwrap_or_default()
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            variants: if let Some(variants) = field.variants {
+                variants.into_iter().map(str::to_string).collect()
+            } else if field.is_relation {
+                vec![
+                    format!(
+                        "left:{}",
+                        field
+                            .relation_left_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                    format!(
+                        "right:{}",
+                        field
+                            .relation_right_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                ]
+            } else if field.is_map {
+                vec![
+                    format!(
+                        "keys:{}",
+                        field
+                            .map_key_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                    format!(
+                        "values:{}",
+                        field
+                            .map_value_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                ]
+            } else {
+                Vec::new()
+            },
             is_set: field.is_set,
         })
         .collect::<Vec<_>>();

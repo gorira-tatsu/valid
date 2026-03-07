@@ -597,12 +597,38 @@ fn cmd_replay(args: Vec<String>) {
                 .flatten()
                 .is_some()
         });
+        let property = model
+            .properties
+            .iter()
+            .find(|candidate| candidate.property_id == property_id)
+            .unwrap_or_else(|| {
+                eprintln!("unknown property `{property_id}`");
+                process::exit(3);
+            });
+        let property_holds = matches!(
+            valid::kernel::eval::eval_expr(&model, &terminal, &property.expr),
+            Ok(valid::ir::Value::Bool(true))
+        );
+        let mut path_tags = std::collections::BTreeSet::new();
+        for action_id in &parsed.actions {
+            for action in model
+                .actions
+                .iter()
+                .filter(|action| action.action_id == *action_id)
+            {
+                for tag in &action.path_tags {
+                    path_tags.insert(tag.clone());
+                }
+            }
+        }
         Ok(render_replay_json(
             property_id,
             &parsed.actions,
             &terminal.as_named_map(&model),
             parsed.focus_action_id.as_deref(),
             focus_enabled,
+            Some(property_holds),
+            &path_tags.into_iter().collect::<Vec<_>>(),
         ))
     }
     .unwrap_or_else(|message| {

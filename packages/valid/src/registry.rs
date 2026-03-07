@@ -473,12 +473,53 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
-            variants: field
-                .variants
-                .unwrap_or_default()
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            variants: if let Some(variants) = field.variants {
+                variants.into_iter().map(str::to_string).collect()
+            } else if field.is_relation {
+                vec![
+                    format!(
+                        "left:{}",
+                        field
+                            .relation_left_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                    format!(
+                        "right:{}",
+                        field
+                            .relation_right_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                ]
+            } else if field.is_map {
+                vec![
+                    format!(
+                        "keys:{}",
+                        field
+                            .map_key_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                    format!(
+                        "values:{}",
+                        field
+                            .map_value_variants
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ),
+                ]
+            } else {
+                Vec::new()
+            },
             is_set: field.is_set,
         })
         .collect::<Vec<_>>();
@@ -694,7 +735,7 @@ fn replay_machine<M: VerifiedMachine>(
     action_ids: &[String],
     focus_action_id: Option<&str>,
 ) -> Result<String, String> {
-    let (terminal_state, property_id, focus_action_enabled) =
+    let (terminal_state, property_id, focus_action_enabled, property_holds, path_tags) =
         replay_machine_actions::<M>(property_id, action_ids, focus_action_id)?;
     Ok(render_replay_json(
         property_id,
@@ -702,6 +743,8 @@ fn replay_machine<M: VerifiedMachine>(
         &terminal_state,
         focus_action_id,
         focus_action_enabled,
+        Some(property_holds),
+        &path_tags,
     ))
 }
 

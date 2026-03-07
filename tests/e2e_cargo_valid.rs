@@ -41,6 +41,12 @@ fn saas_registry_file() -> PathBuf {
         .join("saas_multi_tenant_registry.rs")
 }
 
+fn tenant_relation_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("tenant_relation_registry.rs")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
@@ -222,6 +228,49 @@ fn cargo_valid_inspects_grouped_saas_registry() {
     assert!(stdout.contains("\"solver_ready\":true"));
     assert!(stdout.contains("\"tenant_isolation_path\""));
     assert!(stdout.contains("\"P_NO_CROSS_TENANT_ACCESS\""));
+}
+
+#[test]
+fn cargo_valid_inspects_relation_and_map_registry() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(tenant_relation_registry_file())
+        .arg("inspect")
+        .arg("tenant-relation-safe")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect tenant relation registry should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"machine_ir_ready\":true"));
+    assert!(stdout.contains("\"solver_ready\":true"));
+    assert!(stdout.contains("\"rust_type\":\"FiniteRelation<Member, Tenant>\""));
+    assert!(stdout.contains("\"rust_type\":\"FiniteMap<Tenant, Plan>\""));
+    assert!(stdout.contains("\"left:Alice|Bob\""));
+    assert!(stdout.contains("\"right:Alpha|Beta\""));
+    assert!(stdout.contains("\"keys:Alpha|Beta\""));
+    assert!(stdout.contains("\"values:Free|Enterprise\""));
+    assert!(stdout.contains("membership_path"));
+    assert!(stdout.contains("tenant_isolation_path"));
+}
+
+#[test]
+fn cargo_valid_verifies_relation_map_regression() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(tenant_relation_registry_file())
+        .arg("verify")
+        .arg("tenant-relation-regression")
+        .arg("--property=P_NO_CROSS_TENANT_ACCESS")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid verify tenant relation regression should run");
+    assert!(output.status.code() == Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"property_id\":\"P_NO_CROSS_TENANT_ACCESS\""));
 }
 
 #[test]

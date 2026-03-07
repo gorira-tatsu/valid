@@ -39,6 +39,18 @@ pub struct FiniteEnumSet<T> {
     _marker: PhantomData<T>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FiniteRelation<A, B> {
+    bits: u64,
+    _marker: PhantomData<(A, B)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FiniteMap<K, V> {
+    bits: u64,
+    _marker: PhantomData<(K, V)>,
+}
+
 impl<T> FiniteEnumSet<T>
 where
     T: FiniteValueSpec,
@@ -97,6 +109,126 @@ where
     }
 }
 
+impl<A, B> FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    pub fn empty() -> Self {
+        Self {
+            bits: 0,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn bits(self) -> u64 {
+        self.bits
+    }
+
+    pub fn contains(self, left: A, right: B) -> bool {
+        relation_mask::<A, B>(left.variant_index(), right.variant_index())
+            .map(|mask| self.bits & mask != 0)
+            .unwrap_or(false)
+    }
+
+    pub fn insert(self, left: A, right: B) -> Self {
+        let bits = relation_mask::<A, B>(left.variant_index(), right.variant_index())
+            .map(|mask| self.bits | mask)
+            .unwrap_or(self.bits);
+        Self {
+            bits,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn remove(self, left: A, right: B) -> Self {
+        let bits = relation_mask::<A, B>(left.variant_index(), right.variant_index())
+            .map(|mask| self.bits & !mask)
+            .unwrap_or(self.bits);
+        Self {
+            bits,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn intersects(self, other: Self) -> bool {
+        self.bits & other.bits != 0
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+}
+
+impl<A, B> Default for FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<K, V> FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    pub fn empty() -> Self {
+        Self {
+            bits: 0,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn bits(self) -> u64 {
+        self.bits
+    }
+
+    pub fn contains_key(self, key: K) -> bool {
+        map_value_bits::<K, V>(self.bits, key.variant_index()) != 0
+    }
+
+    pub fn contains_entry(self, key: K, value: V) -> bool {
+        relation_mask::<K, V>(key.variant_index(), value.variant_index())
+            .map(|mask| self.bits & mask != 0)
+            .unwrap_or(false)
+    }
+
+    pub fn put(self, key: K, value: V) -> Self {
+        let cleared = clear_relation_group::<K, V>(self.bits, key.variant_index());
+        let bits = relation_mask::<K, V>(key.variant_index(), value.variant_index())
+            .map(|mask| cleared | mask)
+            .unwrap_or(cleared);
+        Self {
+            bits,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn remove(self, key: K) -> Self {
+        Self {
+            bits: clear_relation_group::<K, V>(self.bits, key.variant_index()),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+}
+
+impl<K, V> Default for FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 impl IntoModelValue for bool {
     fn into_model_value(self) -> Value {
         Value::Bool(self)
@@ -137,12 +269,50 @@ pub trait FiniteSetSpec: Clone + Debug + Eq + Hash {
     fn variant_labels() -> &'static [&'static str];
 }
 
+pub trait FiniteRelationSpec: Clone + Debug + Eq + Hash {
+    fn left_variant_labels() -> &'static [&'static str];
+    fn right_variant_labels() -> &'static [&'static str];
+}
+
+pub trait FiniteMapSpec: Clone + Debug + Eq + Hash {
+    fn key_variant_labels() -> &'static [&'static str];
+    fn value_variant_labels() -> &'static [&'static str];
+}
+
 impl<T> FiniteSetSpec for FiniteEnumSet<T>
 where
     T: FiniteValueSpec,
 {
     fn variant_labels() -> &'static [&'static str] {
         T::variant_labels()
+    }
+}
+
+impl<A, B> FiniteRelationSpec for FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    fn left_variant_labels() -> &'static [&'static str] {
+        A::variant_labels()
+    }
+
+    fn right_variant_labels() -> &'static [&'static str] {
+        B::variant_labels()
+    }
+}
+
+impl<K, V> FiniteMapSpec for FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    fn key_variant_labels() -> &'static [&'static str] {
+        K::variant_labels()
+    }
+
+    fn value_variant_labels() -> &'static [&'static str] {
+        V::variant_labels()
     }
 }
 
@@ -197,6 +367,26 @@ where
     }
 }
 
+impl<A, B> IntoModelValue for FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    fn into_model_value(self) -> Value {
+        Value::UInt(self.bits())
+    }
+}
+
+impl<K, V> IntoModelValue for FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    fn into_model_value(self) -> Value {
+        Value::UInt(self.bits())
+    }
+}
+
 pub fn implies(left: bool, right: bool) -> bool {
     !left || right
 }
@@ -237,8 +427,127 @@ where
     set.is_empty()
 }
 
+pub fn rel_contains<A, B>(relation: FiniteRelation<A, B>, left: A, right: B) -> bool
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    relation.contains(left, right)
+}
+
+pub fn rel_insert<A, B>(relation: FiniteRelation<A, B>, left: A, right: B) -> FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    relation.insert(left, right)
+}
+
+pub fn rel_remove<A, B>(relation: FiniteRelation<A, B>, left: A, right: B) -> FiniteRelation<A, B>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    relation.remove(left, right)
+}
+
+pub fn rel_intersects<A, B>(left: FiniteRelation<A, B>, right: FiniteRelation<A, B>) -> bool
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    left.intersects(right)
+}
+
+pub fn map_contains_key<K, V>(map: FiniteMap<K, V>, key: K) -> bool
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    map.contains_key(key)
+}
+
+pub fn map_contains_entry<K, V>(map: FiniteMap<K, V>, key: K, value: V) -> bool
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    map.contains_entry(key, value)
+}
+
+pub fn map_put<K, V>(map: FiniteMap<K, V>, key: K, value: V) -> FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    map.put(key, value)
+}
+
+pub fn map_remove<K, V>(map: FiniteMap<K, V>, key: K) -> FiniteMap<K, V>
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    map.remove(key)
+}
+
 fn enum_variant_mask(index: u64) -> u64 {
     1u64.checked_shl(index as u32).unwrap_or(0)
+}
+
+fn relation_variant_count<A, B>() -> Option<u64>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    (A::variant_labels().len() as u64).checked_mul(B::variant_labels().len() as u64)
+}
+
+fn relation_mask<A, B>(left_index: u64, right_index: u64) -> Option<u64>
+where
+    A: FiniteValueSpec,
+    B: FiniteValueSpec,
+{
+    let right_len = B::variant_labels().len() as u64;
+    let bit_index = left_index
+        .checked_mul(right_len)?
+        .checked_add(right_index)?;
+    if relation_variant_count::<A, B>()? > 64 {
+        return None;
+    }
+    enum_variant_mask(bit_index).into()
+}
+
+fn clear_relation_group<K, V>(bits: u64, key_index: u64) -> u64
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    let value_len = V::variant_labels().len() as u64;
+    let mut cleared = bits;
+    for value_index in 0..value_len {
+        if let Some(mask) = relation_mask::<K, V>(key_index, value_index) {
+            cleared &= !mask;
+        }
+    }
+    cleared
+}
+
+fn map_value_bits<K, V>(bits: u64, key_index: u64) -> u64
+where
+    K: FiniteValueSpec,
+    V: FiniteValueSpec,
+{
+    let value_len = V::variant_labels().len() as u64;
+    let mut found = 0u64;
+    for value_index in 0..value_len {
+        if let Some(mask) = relation_mask::<K, V>(key_index, value_index) {
+            if bits & mask != 0 {
+                found |= mask;
+            }
+        }
+    }
+    found
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,6 +597,12 @@ pub struct StateFieldDescriptor {
     pub range: Option<&'static str>,
     pub variants: Option<Vec<&'static str>>,
     pub is_set: bool,
+    pub is_relation: bool,
+    pub relation_left_variants: Option<Vec<&'static str>>,
+    pub relation_right_variants: Option<Vec<&'static str>>,
+    pub is_map: bool,
+    pub map_key_variants: Option<Vec<&'static str>>,
+    pub map_value_variants: Option<Vec<&'static str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -693,6 +1008,12 @@ macro_rules! valid_state {
                             range: $crate::valid_state!(@range $($($meta)+)?),
                             variants: $crate::valid_state!(@variants [$field_ty] $( $($meta)+ )?),
                             is_set: $crate::valid_state!(@is_set $( $($meta)+ )?),
+                            is_relation: $crate::valid_state!(@is_relation $( $($meta)+ )?),
+                            relation_left_variants: $crate::valid_state!(@relation_left_variants [$field_ty] $( $($meta)+ )?),
+                            relation_right_variants: $crate::valid_state!(@relation_right_variants [$field_ty] $( $($meta)+ )?),
+                            is_map: $crate::valid_state!(@is_map $( $($meta)+ )?),
+                            map_key_variants: $crate::valid_state!(@map_key_variants [$field_ty] $( $($meta)+ )?),
+                            map_value_variants: $crate::valid_state!(@map_value_variants [$field_ty] $( $($meta)+ )?),
                         }
                     ),+
                 ]
@@ -708,6 +1029,12 @@ macro_rules! valid_state {
     (@range set) => {
         None
     };
+    (@range relation) => {
+        None
+    };
+    (@range map) => {
+        None
+    };
     (@range) => {
         None
     };
@@ -718,6 +1045,12 @@ macro_rules! valid_state {
         Some(<$field_ty as $crate::modeling::FiniteSetSpec>::variant_labels().to_vec())
     };
     (@variants [$field_ty:ty] range = $range:literal) => {
+        None
+    };
+    (@variants [$field_ty:ty] relation) => {
+        None
+    };
+    (@variants [$field_ty:ty] map) => {
         None
     };
     (@variants [$field_ty:ty]) => {
@@ -732,8 +1065,122 @@ macro_rules! valid_state {
     (@is_set range = $range:literal) => {
         false
     };
+    (@is_set relation) => {
+        false
+    };
+    (@is_set map) => {
+        false
+    };
     (@is_set) => {
         false
+    };
+    (@is_relation relation) => {
+        true
+    };
+    (@is_relation enum) => {
+        false
+    };
+    (@is_relation set) => {
+        false
+    };
+    (@is_relation map) => {
+        false
+    };
+    (@is_relation range = $range:literal) => {
+        false
+    };
+    (@is_relation) => {
+        false
+    };
+    (@relation_left_variants [$field_ty:ty] relation) => {
+        Some(<$field_ty as $crate::modeling::FiniteRelationSpec>::left_variant_labels().to_vec())
+    };
+    (@relation_left_variants [$field_ty:ty] enum) => {
+        None
+    };
+    (@relation_left_variants [$field_ty:ty] set) => {
+        None
+    };
+    (@relation_left_variants [$field_ty:ty] map) => {
+        None
+    };
+    (@relation_left_variants [$field_ty:ty] range = $range:literal) => {
+        None
+    };
+    (@relation_left_variants [$field_ty:ty]) => {
+        None
+    };
+    (@relation_right_variants [$field_ty:ty] relation) => {
+        Some(<$field_ty as $crate::modeling::FiniteRelationSpec>::right_variant_labels().to_vec())
+    };
+    (@relation_right_variants [$field_ty:ty] enum) => {
+        None
+    };
+    (@relation_right_variants [$field_ty:ty] set) => {
+        None
+    };
+    (@relation_right_variants [$field_ty:ty] map) => {
+        None
+    };
+    (@relation_right_variants [$field_ty:ty] range = $range:literal) => {
+        None
+    };
+    (@relation_right_variants [$field_ty:ty]) => {
+        None
+    };
+    (@is_map map) => {
+        true
+    };
+    (@is_map enum) => {
+        false
+    };
+    (@is_map set) => {
+        false
+    };
+    (@is_map relation) => {
+        false
+    };
+    (@is_map range = $range:literal) => {
+        false
+    };
+    (@is_map) => {
+        false
+    };
+    (@map_key_variants [$field_ty:ty] map) => {
+        Some(<$field_ty as $crate::modeling::FiniteMapSpec>::key_variant_labels().to_vec())
+    };
+    (@map_key_variants [$field_ty:ty] enum) => {
+        None
+    };
+    (@map_key_variants [$field_ty:ty] set) => {
+        None
+    };
+    (@map_key_variants [$field_ty:ty] relation) => {
+        None
+    };
+    (@map_key_variants [$field_ty:ty] range = $range:literal) => {
+        None
+    };
+    (@map_key_variants [$field_ty:ty]) => {
+        None
+    };
+    (@map_value_variants [$field_ty:ty] map) => {
+        Some(<$field_ty as $crate::modeling::FiniteMapSpec>::value_variant_labels().to_vec())
+    };
+    (@map_value_variants [$field_ty:ty] enum) => {
+        None
+    };
+    (@map_value_variants [$field_ty:ty] set) => {
+        None
+    };
+    (@map_value_variants [$field_ty:ty] relation) => {
+        None
+    };
+    (@map_value_variants [$field_ty:ty] range = $range:literal) => {
+        None
+    };
+    (@map_value_variants [$field_ty:ty]) => {
+        None
     };
 }
 
@@ -767,6 +1214,12 @@ macro_rules! valid_state_spec {
                             range: $crate::valid_state!(@range $($($meta)+)?),
                             variants: $crate::valid_state!(@variants [$field_ty] $( $($meta)+ )?),
                             is_set: $crate::valid_state!(@is_set $( $($meta)+ )?),
+                            is_relation: $crate::valid_state!(@is_relation $( $($meta)+ )?),
+                            relation_left_variants: $crate::valid_state!(@relation_left_variants [$field_ty] $( $($meta)+ )?),
+                            relation_right_variants: $crate::valid_state!(@relation_right_variants [$field_ty] $( $($meta)+ )?),
+                            is_map: $crate::valid_state!(@is_map $( $($meta)+ )?),
+                            map_key_variants: $crate::valid_state!(@map_key_variants [$field_ty] $( $($meta)+ )?),
+                            map_value_variants: $crate::valid_state!(@map_value_variants [$field_ty] $( $($meta)+ )?),
                         }
                     ),+
                 ]
@@ -1546,6 +1999,10 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 focus_action_id: Some(edge.action.action_id()),
                 focus_field: None,
                 expected_guard_enabled: Some(true),
+                expected_property_holds: Some(true),
+                expected_path_tags: machine_transition_tags_for_action::<M>(
+                    &edge.action.action_id(),
+                ),
                 notes: machine_transition_tags_for_action::<M>(&edge.action.action_id())
                     .into_iter()
                     .map(|tag| format!("path_tag:{tag}"))
@@ -1869,6 +2326,12 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         .map(|step| step.action_id.clone())
         .collect::<Vec<_>>()
         .join(",");
+    let property = find_property::<M>(property_id);
+    let property_holds = (property.holds)(&nodes.get(end_index)?.state);
+    let expected_path_tags = focus_action_id
+        .as_deref()
+        .map(machine_transition_tags_for_action::<M>)
+        .unwrap_or_default();
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -1912,6 +2375,8 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         focus_action_id,
         focus_field,
         expected_guard_enabled,
+        expected_property_holds: Some(property_holds),
+        expected_path_tags,
         notes,
         replay_target: None,
     })
@@ -2069,6 +2534,46 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
             variants: variants.iter().map(|item| item.to_string()).collect(),
         });
     }
+    if field.is_relation {
+        let left_variants = field
+            .relation_left_variants
+            .as_ref()
+            .ok_or_else(|| format!("missing left relation variants for field `{}`", field.name))?;
+        let right_variants = field
+            .relation_right_variants
+            .as_ref()
+            .ok_or_else(|| format!("missing right relation variants for field `{}`", field.name))?;
+        if left_variants.len().saturating_mul(right_variants.len()) > 64 {
+            return Err(format!(
+                "finite relations currently support at most 64 entries for field `{}`",
+                field.name
+            ));
+        }
+        return Ok(FieldType::EnumRelation {
+            left_variants: left_variants.iter().map(|item| item.to_string()).collect(),
+            right_variants: right_variants.iter().map(|item| item.to_string()).collect(),
+        });
+    }
+    if field.is_map {
+        let key_variants = field
+            .map_key_variants
+            .as_ref()
+            .ok_or_else(|| format!("missing map key variants for field `{}`", field.name))?;
+        let value_variants = field
+            .map_value_variants
+            .as_ref()
+            .ok_or_else(|| format!("missing map value variants for field `{}`", field.name))?;
+        if key_variants.len().saturating_mul(value_variants.len()) > 64 {
+            return Err(format!(
+                "finite maps currently support at most 64 key/value slots for field `{}`",
+                field.name
+            ));
+        }
+        return Ok(FieldType::EnumMap {
+            key_variants: key_variants.iter().map(|item| item.to_string()).collect(),
+            value_variants: value_variants.iter().map(|item| item.to_string()).collect(),
+        });
+    }
     match field.rust_type {
         "bool" => Ok(FieldType::Bool),
         "u8" => {
@@ -2161,8 +2666,62 @@ fn build_machine_enum_literal_map<M: VerifiedMachine>() -> BTreeMap<String, (Str
                 }
             }
         }
+        if field.is_relation {
+            if let (Some(left_variants), Some(right_variants)) = (
+                field.relation_left_variants.as_ref(),
+                field.relation_right_variants.as_ref(),
+            ) {
+                if let Some((left_ty, right_ty)) = relation_inner_rust_types(field.rust_type) {
+                    register_enum_literals(&mut literals, &left_ty, left_variants);
+                    register_enum_literals(&mut literals, &right_ty, right_variants);
+                }
+            }
+        }
+        if field.is_map {
+            if let (Some(key_variants), Some(value_variants)) = (
+                field.map_key_variants.as_ref(),
+                field.map_value_variants.as_ref(),
+            ) {
+                if let Some((key_ty, value_ty)) = map_inner_rust_types(field.rust_type) {
+                    register_enum_literals(&mut literals, &key_ty, key_variants);
+                    register_enum_literals(&mut literals, &value_ty, value_variants);
+                }
+            }
+        }
     }
     literals
+}
+
+fn register_enum_literals(
+    literals: &mut BTreeMap<String, (String, u64)>,
+    enum_ty: &str,
+    variants: &[&str],
+) {
+    for (index, variant) in variants.iter().enumerate() {
+        literals.insert(
+            format!("{enum_ty}::{variant}"),
+            ((*variant).to_string(), index as u64),
+        );
+        literals
+            .entry((*variant).to_string())
+            .or_insert_with(|| ((*variant).to_string(), index as u64));
+        if let Some(inner_ty) = option_inner_rust_type(enum_ty) {
+            if let Some(inner_variant) = variant
+                .strip_prefix("Some(")
+                .and_then(|value| value.strip_suffix(')'))
+            {
+                literals.insert(
+                    format!("Some({inner_ty}::{inner_variant})"),
+                    ((*variant).to_string(), index as u64),
+                );
+            } else if *variant == "None" {
+                literals.insert(
+                    "Option::None".to_string(),
+                    ((*variant).to_string(), index as u64),
+                );
+            }
+        }
+    }
 }
 
 fn set_inner_rust_type(rust_type: &str) -> Option<String> {
@@ -2189,12 +2748,48 @@ fn option_inner_rust_type(rust_type: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn relation_inner_rust_types(rust_type: &str) -> Option<(String, String)> {
+    let normalized = rust_type
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    let inner = normalized
+        .strip_prefix("FiniteRelation<")
+        .and_then(|value| value.strip_suffix('>'))?;
+    let parts = inner.split(',').map(str::to_string).collect::<Vec<_>>();
+    if parts.len() == 2 && parts.iter().all(|value| !value.is_empty()) {
+        Some((parts[0].clone(), parts[1].clone()))
+    } else {
+        None
+    }
+}
+
+fn map_inner_rust_types(rust_type: &str) -> Option<(String, String)> {
+    let normalized = rust_type
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    let inner = normalized
+        .strip_prefix("FiniteMap<")
+        .and_then(|value| value.strip_suffix('>'))?;
+    let parts = inner.split(',').map(str::to_string).collect::<Vec<_>>();
+    if parts.len() == 2 && parts.iter().all(|value| !value.is_empty()) {
+        Some((parts[0].clone(), parts[1].clone()))
+    } else {
+        None
+    }
+}
+
 fn lower_machine_expr_with_enums(
     input: &str,
     enum_literals: &BTreeMap<String, (String, u64)>,
 ) -> Option<ExprIr> {
     let trimmed = strip_wrapping_machine_parens(input.trim());
-    let normalized = trimmed.strip_prefix("state.").unwrap_or(trimmed).trim();
+    let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = normalized
+        .strip_prefix("state.")
+        .unwrap_or(normalized.as_str())
+        .trim();
     if normalized == "true" {
         return Some(ExprIr::Literal(Value::Bool(true)));
     }
@@ -2285,6 +2880,62 @@ fn lower_machine_expr_with_enums(
             op: BinaryOp::SetRemove,
             left: Box::new(lower_machine_expr_with_enums(set, enum_literals)?),
             right: Box::new(lower_machine_expr_with_enums(item, enum_literals)?),
+        });
+    }
+    if let Some([relation, left, right]) = function_args_machine(normalized, "rel_contains") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::RelationContains,
+            left: Box::new(lower_machine_expr_with_enums(relation, enum_literals)?),
+            right: Box::new(pair_literal_expr(left, right, enum_literals)?),
+        });
+    }
+    if let Some([relation, left, right]) = function_args_machine(normalized, "rel_insert") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::RelationInsert,
+            left: Box::new(lower_machine_expr_with_enums(relation, enum_literals)?),
+            right: Box::new(pair_literal_expr(left, right, enum_literals)?),
+        });
+    }
+    if let Some([relation, left, right]) = function_args_machine(normalized, "rel_remove") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::RelationRemove,
+            left: Box::new(lower_machine_expr_with_enums(relation, enum_literals)?),
+            right: Box::new(pair_literal_expr(left, right, enum_literals)?),
+        });
+    }
+    if let Some([left, right]) = function_args_machine(normalized, "rel_intersects") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::RelationIntersects,
+            left: Box::new(lower_machine_expr_with_enums(left, enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right, enum_literals)?),
+        });
+    }
+    if let Some([map, key]) = function_args_machine(normalized, "map_contains_key") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::MapContainsKey,
+            left: Box::new(lower_machine_expr_with_enums(map, enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(key, enum_literals)?),
+        });
+    }
+    if let Some([map, key, value]) = function_args_machine(normalized, "map_contains_entry") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::MapContainsEntry,
+            left: Box::new(lower_machine_expr_with_enums(map, enum_literals)?),
+            right: Box::new(pair_literal_expr(key, value, enum_literals)?),
+        });
+    }
+    if let Some([map, key, value]) = function_args_machine(normalized, "map_put") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::MapPut,
+            left: Box::new(lower_machine_expr_with_enums(map, enum_literals)?),
+            right: Box::new(pair_literal_expr(key, value, enum_literals)?),
+        });
+    }
+    if let Some([map, key]) = function_args_machine(normalized, "map_remove") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::MapRemoveKey,
+            left: Box::new(lower_machine_expr_with_enums(map, enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(key, enum_literals)?),
         });
     }
     if let Some([set]) = function_args_machine(normalized, "is_empty") {
@@ -2393,11 +3044,56 @@ fn lower_machine_expr_with_enums(
     None
 }
 
+fn pair_literal_expr(
+    left: &str,
+    right: &str,
+    enum_literals: &BTreeMap<String, (String, u64)>,
+) -> Option<ExprIr> {
+    let left_expr = lower_machine_expr_with_enums(left, enum_literals)?;
+    let right_expr = lower_machine_expr_with_enums(right, enum_literals)?;
+    match (left_expr, right_expr) {
+        (
+            ExprIr::Literal(Value::EnumVariant {
+                label: left_label,
+                index: left_index,
+            }),
+            ExprIr::Literal(Value::EnumVariant {
+                label: right_label,
+                index: right_index,
+            }),
+        ) => Some(ExprIr::Literal(Value::PairVariant {
+            left_label,
+            left_index,
+            right_label,
+            right_index,
+        })),
+        _ => None,
+    }
+}
+
 fn function_args_machine<'a, const N: usize>(input: &'a str, name: &str) -> Option<[&'a str; N]> {
-    let call = input
-        .strip_prefix(name)
-        .and_then(|rest| rest.strip_prefix('('))
-        .and_then(|rest| rest.strip_suffix(')'))?;
+    let rest = input.strip_prefix(name)?.trim_start();
+    let rest = rest.strip_prefix('(')?;
+    let mut depth = 1usize;
+    let mut end_index = None;
+    for (index, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    end_index = Some(index);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end_index = end_index?;
+    if !rest[end_index + 1..].trim().is_empty() {
+        return None;
+    }
+    let call = &rest[..end_index];
     let parts = split_top_level_args(call);
     if parts.len() != N {
         return None;
@@ -2619,7 +3315,16 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
     property_id: Option<&str>,
     action_ids: &[String],
     focus_action_id: Option<&str>,
-) -> Result<(BTreeMap<String, Value>, &'static str, Option<bool>), String> {
+) -> Result<
+    (
+        BTreeMap<String, Value>,
+        &'static str,
+        Option<bool>,
+        bool,
+        Vec<String>,
+    ),
+    String,
+> {
     let property = property_id
         .map(find_property::<M>)
         .unwrap_or_else(primary_property::<M>);
@@ -2646,7 +3351,26 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
             .map(|action| !M::step(&state, &action).is_empty())
             .unwrap_or(false)
     });
-    Ok((state.snapshot(), property.property_id, focus_action_enabled))
+    let property_holds = (property.holds)(&state);
+    let transition_ir = machine_transition_ir::<M>();
+    let mut path_tags = BTreeSet::new();
+    for action_id in action_ids {
+        for transition in transition_ir
+            .iter()
+            .filter(|transition| transition.action_id == action_id.as_str())
+        {
+            for tag in &transition.path_tags {
+                path_tags.insert((*tag).to_string());
+            }
+        }
+    }
+    Ok((
+        state.snapshot(),
+        property.property_id,
+        focus_action_enabled,
+        property_holds,
+        path_tags.into_iter().collect(),
+    ))
 }
 
 fn build_trace<M: VerifiedMachine>(
@@ -2833,9 +3557,10 @@ mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
         check_machine_outcomes, collect_machine_coverage, contains, explain_machine, iff, implies,
-        insert, is_empty, lower_machine_expr, lower_machine_model, machine_capability_report,
-        machine_transition_ir, property_ids, remove, state_field_descriptors,
-        transition_descriptors, xor, FiniteEnumSet, ModelingRunStatus, ModelingState, StateSpec,
+        insert, is_empty, lower_machine_expr, lower_machine_expr_with_enums, lower_machine_model,
+        machine_capability_report, machine_transition_ir, property_ids, remove,
+        state_field_descriptors, transition_descriptors, xor, FiniteEnumSet, ModelingRunStatus,
+        ModelingState, StateSpec,
     };
     use crate::{
         engine::{CheckOutcome, PropertySelection, RunManifest, RunPlan, RunStatus},
@@ -2843,6 +3568,7 @@ mod tests {
         solver::{run_with_adapter, AdapterConfig},
         valid_actions, valid_state,
     };
+    use std::collections::BTreeMap;
 
     valid_state! {
         struct State {
@@ -3275,6 +4001,104 @@ mod tests {
         assert!(debug.contains("GreaterThanOrEqual"));
         assert!(debug.contains("LessThan"));
         assert!(debug.contains("NotEqual"));
+    }
+
+    #[test]
+    fn lower_machine_expr_supports_relation_and_map_ops() {
+        let enum_literals = BTreeMap::from([
+            ("Member::Alice".to_string(), ("Alice".to_string(), 0)),
+            ("Tenant::Alpha".to_string(), ("Alpha".to_string(), 0)),
+            (
+                "Plan::Enterprise".to_string(),
+                ("Enterprise".to_string(), 1),
+            ),
+        ]);
+        let split = super::split_top_level_machine(
+            "rel_contains(state.memberships, Member::Alice, Tenant::Alpha) && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)",
+            "&&",
+        )
+        .expect("combined expression should split");
+        assert_eq!(
+            split.0.trim(),
+            "rel_contains(state.memberships, Member::Alice, Tenant::Alpha)"
+        );
+        assert_eq!(
+            split.1.trim(),
+            "map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)"
+        );
+        let relation = lower_machine_expr_with_enums(
+            "rel_contains(state.memberships, Member::Alice, Tenant::Alpha)",
+            &enum_literals,
+        )
+        .expect("relation expression should lower");
+        let map = lower_machine_expr_with_enums(
+            "map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)",
+            &enum_literals,
+        )
+        .expect("map expression should lower");
+        let combined = lower_machine_expr_with_enums(
+            "rel_contains(state.memberships, Member::Alice, Tenant::Alpha) && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)",
+            &enum_literals,
+        )
+        .expect("combined expression should lower");
+        let relation_debug = format!("{relation:?}");
+        let map_debug = format!("{map:?}");
+        let combined_debug = format!("{combined:?}");
+        assert!(relation_debug.contains("RelationContains"));
+        assert!(map_debug.contains("MapContainsEntry"));
+        assert!(combined_debug.contains("And"));
+    }
+
+    #[test]
+    fn relation_and_map_state_fields_expose_metadata() {
+        #[allow(dead_code)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, crate::ValidEnum)]
+        enum Member {
+            Alice,
+            Bob,
+        }
+
+        #[allow(dead_code)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, crate::ValidEnum)]
+        enum Tenant {
+            Alpha,
+            Beta,
+        }
+
+        #[allow(dead_code)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, crate::ValidEnum)]
+        enum Plan {
+            Free,
+            Enterprise,
+        }
+
+        valid_state! {
+            struct RelationMapState {
+                memberships: crate::modeling::FiniteRelation<Member, Tenant> [relation],
+                plans: crate::modeling::FiniteMap<Tenant, Plan> [map],
+            }
+        }
+
+        let fields = RelationMapState::state_fields();
+        assert_eq!(fields.len(), 2);
+        assert!(fields[0].is_relation);
+        assert_eq!(
+            fields[0].relation_left_variants.as_deref(),
+            Some(vec!["Alice", "Bob"].as_slice())
+        );
+        assert_eq!(
+            fields[0].relation_right_variants.as_deref(),
+            Some(vec!["Alpha", "Beta"].as_slice())
+        );
+        assert!(fields[1].is_map);
+        assert_eq!(
+            fields[1].map_key_variants.as_deref(),
+            Some(vec!["Alpha", "Beta"].as_slice())
+        );
+        assert_eq!(
+            fields[1].map_value_variants.as_deref(),
+            Some(vec!["Free", "Enterprise"].as_slice())
+        );
     }
 
     #[allow(dead_code)]

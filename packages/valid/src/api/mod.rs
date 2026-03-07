@@ -334,6 +334,8 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                     crate::ir::FieldType::BoundedU32 { .. } => "u32".to_string(),
                     crate::ir::FieldType::Enum { .. } => "enum".to_string(),
                     crate::ir::FieldType::EnumSet { .. } => "enum_set".to_string(),
+                    crate::ir::FieldType::EnumRelation { .. } => "enum_relation".to_string(),
+                    crate::ir::FieldType::EnumMap { .. } => "enum_map".to_string(),
                 },
                 range: match field.ty {
                     crate::ir::FieldType::Bool => None,
@@ -342,10 +344,26 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                     crate::ir::FieldType::BoundedU32 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::Enum { .. } => None,
                     crate::ir::FieldType::EnumSet { .. } => None,
+                    crate::ir::FieldType::EnumRelation { .. } => None,
+                    crate::ir::FieldType::EnumMap { .. } => None,
                 },
                 variants: match &field.ty {
                     crate::ir::FieldType::Enum { variants }
                     | crate::ir::FieldType::EnumSet { variants } => variants.clone(),
+                    crate::ir::FieldType::EnumRelation {
+                        left_variants,
+                        right_variants,
+                    } => vec![
+                        format!("left:{}", left_variants.join("|")),
+                        format!("right:{}", right_variants.join("|")),
+                    ],
+                    crate::ir::FieldType::EnumMap {
+                        key_variants,
+                        value_variants,
+                    } => vec![
+                        format!("keys:{}", key_variants.join("|")),
+                        format!("values:{}", value_variants.join("|")),
+                    ],
                     _ => Vec::new(),
                 },
                 is_set: matches!(field.ty, crate::ir::FieldType::EnumSet { .. }),
@@ -1637,6 +1655,11 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
             crate::ir::Value::Bool(value) => value.to_string(),
             crate::ir::Value::UInt(value) => value.to_string(),
             crate::ir::Value::EnumVariant { label, .. } => label.clone(),
+            crate::ir::Value::PairVariant {
+                left_label,
+                right_label,
+                ..
+            } => format!("({}, {})", left_label, right_label),
         },
         crate::ir::ExprIr::FieldRef(field) => field.clone(),
         crate::ir::ExprIr::Unary { op, expr } => match op {
@@ -1665,6 +1688,62 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
                     render_expr_ir(right)
                 )
             }
+            crate::ir::BinaryOp::RelationContains => {
+                format!(
+                    "rel_contains({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::RelationInsert => {
+                format!(
+                    "rel_insert({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::RelationRemove => {
+                format!(
+                    "rel_remove({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::RelationIntersects => {
+                format!(
+                    "rel_intersects({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::MapContainsKey => {
+                format!(
+                    "map_contains_key({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::MapContainsEntry => {
+                format!(
+                    "map_contains_entry({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::MapPut => {
+                format!(
+                    "map_put({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::MapRemoveKey => {
+                format!(
+                    "map_remove({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
             _ => {
                 let operator = match op {
                     crate::ir::BinaryOp::Add => "+",
@@ -1680,7 +1759,15 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
                     crate::ir::BinaryOp::Or => "||",
                     crate::ir::BinaryOp::SetContains
                     | crate::ir::BinaryOp::SetInsert
-                    | crate::ir::BinaryOp::SetRemove => unreachable!(),
+                    | crate::ir::BinaryOp::SetRemove
+                    | crate::ir::BinaryOp::RelationContains
+                    | crate::ir::BinaryOp::RelationInsert
+                    | crate::ir::BinaryOp::RelationRemove
+                    | crate::ir::BinaryOp::RelationIntersects
+                    | crate::ir::BinaryOp::MapContainsKey
+                    | crate::ir::BinaryOp::MapContainsEntry
+                    | crate::ir::BinaryOp::MapPut
+                    | crate::ir::BinaryOp::MapRemoveKey => unreachable!(),
                 };
                 format!(
                     "({} {} {})",

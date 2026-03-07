@@ -21,5 +21,9 @@ pub mod solver;
 pub mod support;
 pub mod testgen;
 
-pub use modeling::{contains, iff, implies, insert, is_empty, remove, xor, FiniteEnumSet};
+pub use modeling::{
+    contains, iff, implies, insert, is_empty, map_contains_entry, map_contains_key, map_put,
+    map_remove, rel_contains, rel_insert, rel_intersects, rel_remove, remove, xor, FiniteEnumSet,
+    FiniteMap, FiniteRelation,
+};
 pub use valid_derive::{ValidAction, ValidEnum, ValidState};

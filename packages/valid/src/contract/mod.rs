@@ -217,6 +217,22 @@ fn field_type_label(field_type: &FieldType) -> String {
         FieldType::BoundedU32 { min, max } => format!("u32[{min}..{max}]"),
         FieldType::Enum { variants } => format!("enum[{}]", variants.join("|")),
         FieldType::EnumSet { variants } => format!("enum_set[{}]", variants.join("|")),
+        FieldType::EnumRelation {
+            left_variants,
+            right_variants,
+        } => format!(
+            "enum_relation[{} -> {}]",
+            left_variants.join("|"),
+            right_variants.join("|")
+        ),
+        FieldType::EnumMap {
+            key_variants,
+            value_variants,
+        } => format!(
+            "enum_map[{} => {}]",
+            key_variants.join("|"),
+            value_variants.join("|")
+        ),
     }
 }
 

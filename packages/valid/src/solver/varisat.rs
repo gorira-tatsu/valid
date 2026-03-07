@@ -229,6 +229,14 @@ impl<'a> CnfEncoder<'a> {
                 | BinaryOp::SetContains
                 | BinaryOp::SetInsert
                 | BinaryOp::SetRemove
+                | BinaryOp::RelationContains
+                | BinaryOp::RelationInsert
+                | BinaryOp::RelationRemove
+                | BinaryOp::RelationIntersects
+                | BinaryOp::MapContainsKey
+                | BinaryOp::MapContainsEntry
+                | BinaryOp::MapPut
+                | BinaryOp::MapRemoveKey
                 | BinaryOp::LessThan
                 | BinaryOp::LessThanOrEqual
                 | BinaryOp::GreaterThan

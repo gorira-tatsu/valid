@@ -16,6 +16,8 @@ Current examples:
   Minimal step-first registry with `counter` and `failing-counter`.
 - `fizzbuzz.rs`
   Small declarative arithmetic model using grouped `on Action { ... }`.
+- `tenant_relation_registry.rs`
+  Small declarative relation/map model for tenant membership and tenant plan checks.
 - `iam_transition_registry.rs`
   Small declarative policy model with explicit path tags.
 - `saas_multi_tenant_registry.rs`
@@ -37,6 +39,8 @@ Typical commands:
 ```sh
 cargo valid --registry examples/valid_models.rs models
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
+cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
+cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```

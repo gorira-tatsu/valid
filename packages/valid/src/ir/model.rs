@@ -36,9 +36,30 @@ pub type PropertyId = String;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldType {
     Bool,
-    BoundedU8 { min: u8, max: u8 },
-    BoundedU16 { min: u16, max: u16 },
-    BoundedU32 { min: u32, max: u32 },
-    Enum { variants: Vec<String> },
-    EnumSet { variants: Vec<String> },
+    BoundedU8 {
+        min: u8,
+        max: u8,
+    },
+    BoundedU16 {
+        min: u16,
+        max: u16,
+    },
+    BoundedU32 {
+        min: u32,
+        max: u32,
+    },
+    Enum {
+        variants: Vec<String>,
+    },
+    EnumSet {
+        variants: Vec<String>,
+    },
+    EnumRelation {
+        left_variants: Vec<String>,
+        right_variants: Vec<String>,
+    },
+    EnumMap {
+        key_variants: Vec<String>,
+        value_variants: Vec<String>,
+    },
 }

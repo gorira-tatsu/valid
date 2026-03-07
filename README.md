@@ -113,6 +113,9 @@ Arithmetic-heavy declarative registries also work:
 cargo valid --registry examples/fizzbuzz.rs inspect fizzbuzz
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
 cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
+
+cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
+cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```
 
 Service-oriented grouped transition registries also work:
@@ -204,7 +207,9 @@ Primary commands:
 - `generate-tests <model>`
   Generate Rust tests under `generated-tests/*.rs`. JSON output includes
   `strictness` and `derivation` so CI can distinguish strict trace-backed
-  vectors from heuristic or synthetic ones.
+  vectors from heuristic or synthetic ones. Replay-backed vectors also carry
+  expected property/path assertions so reviews can tell whether a generated
+  case is checking a property failure, a witness, or a tagged policy path.
 - `replay <model>`
   Replay an action sequence and return the terminal state
 - `suite`

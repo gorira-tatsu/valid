@@ -34,13 +34,51 @@ pub fn derive_valid_state(input: TokenStream) -> TokenStream {
         } else {
             "None".to_string()
         };
+        let relation_left_variants = if field.is_relation {
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteRelationSpec>::left_variant_labels().to_vec())",
+                field.ty
+            )
+        } else {
+            "None".to_string()
+        };
+        let relation_right_variants = if field.is_relation {
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteRelationSpec>::right_variant_labels().to_vec())",
+                field.ty
+            )
+        } else {
+            "None".to_string()
+        };
+        let map_key_variants = if field.is_map {
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteMapSpec>::key_variant_labels().to_vec())",
+                field.ty
+            )
+        } else {
+            "None".to_string()
+        };
+        let map_value_variants = if field.is_map {
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteMapSpec>::value_variant_labels().to_vec())",
+                field.ty
+            )
+        } else {
+            "None".to_string()
+        };
         descriptors.push_str(&format!(
-            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range}, variants: {variants}, is_set: {is_set} }}",
+            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range}, variants: {variants}, is_set: {is_set}, is_relation: {is_relation}, relation_left_variants: {relation_left_variants}, relation_right_variants: {relation_right_variants}, is_map: {is_map}, map_key_variants: {map_key_variants}, map_value_variants: {map_value_variants} }}",
             name = field.name,
             ty = field.ty,
             range = range,
             variants = variants,
-            is_set = field.is_set
+            is_set = field.is_set,
+            is_relation = field.is_relation,
+            relation_left_variants = relation_left_variants,
+            relation_right_variants = relation_right_variants,
+            is_map = field.is_map,
+            map_key_variants = map_key_variants,
+            map_value_variants = map_value_variants
         ));
     }
     format!(
@@ -195,6 +233,8 @@ struct ParsedField {
     range: Option<String>,
     is_enum: bool,
     is_set: bool,
+    is_relation: bool,
+    is_map: bool,
 }
 
 struct ParsedEnum {
@@ -253,6 +293,8 @@ fn parse_struct_field(tokens: Vec<TokenTree>) -> ParsedField {
         range: attrs.get("range").cloned(),
         is_enum: attrs.contains_key("enum"),
         is_set: attrs.contains_key("set"),
+        is_relation: attrs.contains_key("relation"),
+        is_map: attrs.contains_key("map"),
     }
 }
 

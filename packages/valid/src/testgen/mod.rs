@@ -39,6 +39,8 @@ pub struct TestVector {
     pub focus_action_id: Option<String>,
     pub focus_field: Option<String>,
     pub expected_guard_enabled: Option<bool>,
+    pub expected_property_holds: Option<bool>,
+    pub expected_path_tags: Vec<String>,
     pub notes: Vec<String>,
     pub replay_target: Option<ReplayTarget>,
 }
@@ -112,6 +114,14 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         focus_action_id: None,
         focus_field: None,
         expected_guard_enabled: None,
+        expected_property_holds: Some(false),
+        expected_path_tags: trace
+            .steps
+            .iter()
+            .filter_map(|step| step.note.as_ref())
+            .filter_map(|note| note.strip_prefix("path_tag:"))
+            .map(str::to_string)
+            .collect(),
         notes: Vec::new(),
         replay_target: None,
     })
@@ -160,6 +170,7 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
     vector.derivation = "witness_trace".to_string();
     vector.strategy = "transition_coverage".to_string();
     vector.minimized = false;
+    vector.expected_property_holds = Some(true);
     Ok(vector)
 }
 
@@ -196,6 +207,7 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
             let mut vector = vector;
             vector.strictness = "synthetic".to_string();
             vector.derivation = "synthetic_witness".to_string();
+            vector.expected_property_holds = Some(true);
             let signature = vector
                 .actions
                 .iter()
@@ -239,6 +251,7 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
             let mut vector = vector;
             vector.strictness = "synthetic".to_string();
             vector.derivation = "synthetic_witness".to_string();
+            vector.expected_property_holds = Some(true);
             let signature = vector
                 .actions
                 .iter()
@@ -470,6 +483,13 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     } else {
         out.push_str("    let expected_guard_enabled: Option<bool> = None;\n");
     }
+    if let Some(property_holds) = vector.expected_property_holds {
+        out.push_str(&format!(
+            "    let expected_property_holds = Some({property_holds});\n"
+        ));
+    } else {
+        out.push_str("    let expected_property_holds: Option<bool> = None;\n");
+    }
     out.push_str("    let mut actions = Vec::new();\n");
     for action in &vector.actions {
         out.push_str(&format!("    actions.push(\"{}\");\n", action.action_id));
@@ -481,6 +501,10 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    let mut notes = Vec::new();\n");
     for note in &vector.notes {
         out.push_str(&format!("    notes.push({note:?});\n"));
+    }
+    out.push_str("    let mut expected_path_tags = Vec::new();\n");
+    for tag in &vector.expected_path_tags {
+        out.push_str(&format!("    expected_path_tags.push({tag:?});\n"));
     }
     if let Some(target) = &vector.replay_target {
         out.push_str(&format!("    let replay_runner = {:?};\n", target.runner));
@@ -499,7 +523,7 @@ pub fn render_rust_test(vector: &TestVector) -> String {
         out.push_str("        .expect(\"generated replay command should execute\");\n");
         out.push_str("    assert!(output.status.success(), \"replay failed: {}\", String::from_utf8_lossy(&output.stderr));\n");
         out.push_str("    let stdout = String::from_utf8(output.stdout).expect(\"replay output must be utf-8\");\n");
-        out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled);\n");
+        out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled, expected_property_holds, &expected_path_tags);\n");
     }
     out.push_str("    assert!(!vector_id.is_empty());\n");
     out.push_str("    assert!(!property_id.is_empty());\n");
@@ -507,6 +531,8 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    assert!(!strictness.is_empty());\n");
     out.push_str("    assert!(!derivation.is_empty());\n");
     out.push_str("    assert!(!strategy.is_empty());\n");
+    out.push_str("    let _ = expected_property_holds;\n");
+    out.push_str("    let _ = &expected_path_tags;\n");
     out.push_str("    let _ = &notes;\n");
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
@@ -520,6 +546,8 @@ pub fn assert_replay_output_json(
     expected_property_id: &str,
     expected_focus_action_id: Option<&str>,
     expected_guard_enabled: Option<bool>,
+    expected_property_holds: Option<bool>,
+    expected_path_tags: &[&str],
 ) {
     let normalized = body.trim();
     assert!(
@@ -554,6 +582,18 @@ pub fn assert_replay_output_json(
             "replay focus_action_enabled mismatch: {normalized}"
         );
     }
+    if let Some(property_holds) = expected_property_holds {
+        assert!(
+            normalized.contains(&format!("\"property_holds\":{property_holds}")),
+            "replay property_holds mismatch: {normalized}"
+        );
+    }
+    for tag in expected_path_tags {
+        assert!(
+            normalized.contains(&format!("\"{tag}\"")),
+            "replay missing path tag `{tag}`: {normalized}"
+        );
+    }
 }
 
 pub fn render_replay_json(
@@ -562,6 +602,8 @@ pub fn render_replay_json(
     terminal_state: &BTreeMap<String, Value>,
     focus_action_id: Option<&str>,
     focus_action_enabled: Option<bool>,
+    property_holds: Option<bool>,
+    path_tags: &[String],
 ) -> String {
     let actions = action_ids
         .iter()
@@ -574,14 +616,24 @@ pub fn render_replay_json(
     let focus_action_enabled = focus_action_enabled
         .map(|value| value.to_string())
         .unwrap_or_else(|| "null".to_string());
+    let property_holds = property_holds
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let path_tags = path_tags
+        .iter()
+        .map(|tag| format!("\"{tag}\""))
+        .collect::<Vec<_>>()
+        .join(",");
     let terminal_state = format!("{terminal_state:?}");
     format!(
-        "{{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"property_id\":\"{}\",\"replayed_actions\":[{}],\"terminal_state\":{:?},\"focus_action_id\":{},\"focus_action_enabled\":{}}}",
+        "{{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"property_id\":\"{}\",\"replayed_actions\":[{}],\"terminal_state\":{:?},\"focus_action_id\":{},\"focus_action_enabled\":{},\"property_holds\":{},\"path_tags\":[{}]}}",
         property_id,
         actions,
         terminal_state,
         focus_action_id,
-        focus_action_enabled
+        focus_action_enabled,
+        property_holds,
+        path_tags
     )
 }
 
@@ -701,6 +753,7 @@ fn build_model_guard_vectors(
                 Some(action.action_id.clone()),
                 None,
                 Some(true),
+                action.path_tags.clone(),
                 {
                     let mut notes = vec![format!("guard_true:{:?}", action.guard)];
                     notes.extend(
@@ -745,6 +798,7 @@ fn build_model_guard_vectors(
                 Some(action.action_id.clone()),
                 None,
                 Some(false),
+                action.path_tags.clone(),
                 {
                     let mut notes = vec![format!("guard_false:{:?}", action.guard)];
                     notes.extend(
@@ -812,6 +866,7 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
                 Some(action.action_id.clone()),
                 None,
                 Some(true),
+                vec![tag.clone()],
                 vec![format!("path_tag:{tag}")],
             ) {
                 let signature = (
@@ -847,7 +902,10 @@ fn build_model_boundary_vectors(
             crate::ir::FieldType::BoundedU16 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::BoundedU32 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::Bool => continue,
-            crate::ir::FieldType::Enum { .. } | crate::ir::FieldType::EnumSet { .. } => continue,
+            crate::ir::FieldType::Enum { .. }
+            | crate::ir::FieldType::EnumSet { .. }
+            | crate::ir::FieldType::EnumRelation { .. }
+            | crate::ir::FieldType::EnumMap { .. } => continue,
         };
         for target in [min, max] {
             if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
@@ -863,6 +921,7 @@ fn build_model_boundary_vectors(
                     None,
                     Some(field.name.clone()),
                     None,
+                    Vec::new(),
                     vec![format!("boundary_target:{target}")],
                 ) {
                     let signature = (
@@ -921,6 +980,7 @@ fn build_model_random_vectors(
                 None,
                 None,
                 None,
+                Vec::new(),
                 vec!["deterministic_randomized_sample".to_string()],
             )?;
             vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| {
@@ -941,6 +1001,7 @@ fn build_model_vector_for_node(
     focus_action_id: Option<String>,
     focus_field: Option<String>,
     expected_guard_enabled: Option<bool>,
+    expected_path_tags: Vec<String>,
     notes: Vec<String>,
 ) -> Option<TestVector> {
     let steps = build_model_path(model, nodes, end_index);
@@ -970,6 +1031,14 @@ fn build_model_vector_for_node(
         .collect::<Vec<_>>()
         .join(",");
     let (strictness, derivation) = vector_provenance(source_kind, strategy);
+    let property = model
+        .properties
+        .iter()
+        .find(|property| property.property_id == property_id)?;
+    let property_holds = matches!(
+        eval_expr(model, &nodes.get(end_index)?.state, &property.expr).ok(),
+        Some(Value::Bool(true))
+    );
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -1001,6 +1070,8 @@ fn build_model_vector_for_node(
         focus_action_id,
         focus_field,
         expected_guard_enabled,
+        expected_property_holds: Some(property_holds),
+        expected_path_tags,
         notes,
         replay_target: None,
     })

@@ -306,7 +306,9 @@ fn smt_sort(ty: &FieldType) -> &'static str {
         | FieldType::BoundedU16 { .. }
         | FieldType::BoundedU32 { .. }
         | FieldType::Enum { .. }
-        | FieldType::EnumSet { .. } => "Int",
+        | FieldType::EnumSet { .. }
+        | FieldType::EnumRelation { .. }
+        | FieldType::EnumMap { .. } => "Int",
     }
 }
 
@@ -326,6 +328,23 @@ fn integer_bounds(ty: &FieldType) -> Option<(u64, u64)> {
                 Some((0, (1u64 << variants.len()) - 1))
             }
         }
+        FieldType::EnumRelation {
+            left_variants,
+            right_variants,
+        }
+        | FieldType::EnumMap {
+            key_variants: left_variants,
+            value_variants: right_variants,
+        } => {
+            let slots = left_variants.len().saturating_mul(right_variants.len());
+            if slots > 64 {
+                None
+            } else if slots == 64 {
+                Some((0, u64::MAX))
+            } else {
+                Some((0, (1u64 << slots) - 1))
+            }
+        }
     }
 }
 
@@ -342,11 +361,17 @@ fn literal(value: &Value) -> String {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
         Value::EnumVariant { index, .. } => index.to_string(),
+        Value::PairVariant { .. } => {
+            panic!("pair literals must be rendered through relation/map operators")
+        }
     }
 }
 
 fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, String> {
     match expr {
+        ExprIr::Literal(Value::PairVariant { .. }) => Err(
+            "pair literals are only supported inside relation/map helper expressions".to_string(),
+        ),
         ExprIr::Literal(value) => Ok(literal(value)),
         ExprIr::FieldRef(field) => {
             let field_name = model
@@ -361,43 +386,262 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             UnaryOp::Not => Ok(format!("(not {})", render_expr(model, expr, step)?)),
             UnaryOp::SetIsEmpty => Ok(format!("(= {} 0)", render_expr(model, expr, step)?)),
         },
-        ExprIr::Binary { op, left, right } => {
-            let left = render_expr(model, left, step)?;
-            let right = render_expr(model, right, step)?;
-            match op {
-                BinaryOp::Add => Ok(format!("(+ {left} {right})")),
-                BinaryOp::Sub => Ok(format!("(- {left} {right})")),
-                BinaryOp::Mod => Ok(format!("(mod {left} {right})")),
-                BinaryOp::SetContains => {
-                    let index = extract_enum_index(right.as_str(), expr)?;
-                    Ok(format!(
-                        "(= (mod (div {left} {}) 2) 1)",
-                        enum_variant_mask(index)
-                    ))
-                }
-                BinaryOp::SetInsert => {
-                    let index = extract_enum_index(right.as_str(), expr)?;
-                    let mask = enum_variant_mask(index);
-                    Ok(format!(
-                        "(+ {left} (* (- 1 (mod (div {left} {mask}) 2)) {mask}))"
-                    ))
-                }
-                BinaryOp::SetRemove => {
-                    let index = extract_enum_index(right.as_str(), expr)?;
-                    let mask = enum_variant_mask(index);
-                    Ok(format!("(- {left} (* (mod (div {left} {mask}) 2) {mask}))"))
-                }
-                BinaryOp::LessThan => Ok(format!("(< {left} {right})")),
-                BinaryOp::LessThanOrEqual => Ok(format!("(<= {left} {right})")),
-                BinaryOp::GreaterThan => Ok(format!("(> {left} {right})")),
-                BinaryOp::GreaterThanOrEqual => Ok(format!("(>= {left} {right})")),
-                BinaryOp::Equal => Ok(format!("(= {left} {right})")),
-                BinaryOp::NotEqual => Ok(format!("(not (= {left} {right}))")),
-                BinaryOp::And => Ok(format!("(and {left} {right})")),
-                BinaryOp::Or => Ok(format!("(or {left} {right})")),
+        ExprIr::Binary { op, left, right } => match op {
+            BinaryOp::RelationContains => {
+                let left_rendered = render_expr(model, left, step)?;
+                let (left_index, right_index) = extract_pair_indexes(right.as_ref(), expr)?;
+                let mask = relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?;
+                Ok(format!("(= (mod (div {left_rendered} {mask}) 2) 1)"))
             }
-        }
+            BinaryOp::RelationInsert => {
+                let left_rendered = render_expr(model, left, step)?;
+                let (left_index, right_index) = extract_pair_indexes(right.as_ref(), expr)?;
+                let mask = relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?;
+                Ok(format!(
+                    "(+ {left_rendered} (* (- 1 (mod (div {left_rendered} {mask}) 2)) {mask}))"
+                ))
+            }
+            BinaryOp::RelationRemove => {
+                let left_rendered = render_expr(model, left, step)?;
+                let (left_index, right_index) = extract_pair_indexes(right.as_ref(), expr)?;
+                let mask = relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?;
+                Ok(format!(
+                    "(- {left_rendered} (* (mod (div {left_rendered} {mask}) 2) {mask}))"
+                ))
+            }
+            BinaryOp::RelationIntersects => {
+                let left_rendered = render_expr(model, left, step)?;
+                let right_rendered = render_expr(model, right, step)?;
+                let masks = relation_masks_for_expr(model, left.as_ref())?;
+                if masks.is_empty() {
+                    Ok("false".to_string())
+                } else {
+                    Ok(format!(
+                            "(or {})",
+                            masks
+                                .iter()
+                                .map(|mask| format!(
+                                    "(and (= (mod (div {left_rendered} {mask}) 2) 1) (= (mod (div {right_rendered} {mask}) 2) 1))"
+                                ))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        ))
+                }
+            }
+            BinaryOp::MapContainsKey => {
+                let left_rendered = render_expr(model, left, step)?;
+                let key_index = extract_enum_index_from_expr(right.as_ref(), expr)?;
+                let masks = map_masks_for_key(model, left.as_ref(), key_index)?;
+                if masks.is_empty() {
+                    Ok("false".to_string())
+                } else {
+                    Ok(format!(
+                        "(or {})",
+                        masks
+                            .iter()
+                            .map(|mask| format!("(= (mod (div {left_rendered} {mask}) 2) 1)"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ))
+                }
+            }
+            BinaryOp::MapContainsEntry => {
+                let left_rendered = render_expr(model, left, step)?;
+                let (key_index, value_index) = extract_pair_indexes(right.as_ref(), expr)?;
+                let mask = relation_mask_for_expr(model, left.as_ref(), key_index, value_index)?;
+                Ok(format!("(= (mod (div {left_rendered} {mask}) 2) 1)"))
+            }
+            BinaryOp::MapPut => {
+                let left_rendered = render_expr(model, left, step)?;
+                let (key_index, value_index) = extract_pair_indexes(right.as_ref(), expr)?;
+                let clear = render_map_clear_expr(model, left.as_ref(), &left_rendered, key_index)?;
+                let mask = relation_mask_for_expr(model, left.as_ref(), key_index, value_index)?;
+                Ok(format!(
+                    "(+ {clear} (* (- 1 (mod (div {clear} {mask}) 2)) {mask}))"
+                ))
+            }
+            BinaryOp::MapRemoveKey => {
+                let left_rendered = render_expr(model, left, step)?;
+                let key_index = extract_enum_index_from_expr(right.as_ref(), expr)?;
+                render_map_clear_expr(model, left.as_ref(), &left_rendered, key_index)
+            }
+            BinaryOp::Add => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(+ {left} {right})"))
+            }
+            BinaryOp::Sub => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(- {left} {right})"))
+            }
+            BinaryOp::Mod => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(mod {left} {right})"))
+            }
+            BinaryOp::SetContains => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                let index = extract_enum_index(right.as_str(), expr)?;
+                Ok(format!(
+                    "(= (mod (div {left} {}) 2) 1)",
+                    enum_variant_mask(index)
+                ))
+            }
+            BinaryOp::SetInsert => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                let index = extract_enum_index(right.as_str(), expr)?;
+                let mask = enum_variant_mask(index);
+                Ok(format!(
+                    "(+ {left} (* (- 1 (mod (div {left} {mask}) 2)) {mask}))"
+                ))
+            }
+            BinaryOp::SetRemove => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                let index = extract_enum_index(right.as_str(), expr)?;
+                let mask = enum_variant_mask(index);
+                Ok(format!("(- {left} (* (mod (div {left} {mask}) 2) {mask}))"))
+            }
+            BinaryOp::LessThan => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(< {left} {right})"))
+            }
+            BinaryOp::LessThanOrEqual => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(<= {left} {right})"))
+            }
+            BinaryOp::GreaterThan => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(> {left} {right})"))
+            }
+            BinaryOp::GreaterThanOrEqual => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(>= {left} {right})"))
+            }
+            BinaryOp::Equal => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(= {left} {right})"))
+            }
+            BinaryOp::NotEqual => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(not (= {left} {right}))"))
+            }
+            BinaryOp::And => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(and {left} {right})"))
+            }
+            BinaryOp::Or => {
+                let left = render_expr(model, left, step)?;
+                let right = render_expr(model, right, step)?;
+                Ok(format!("(or {left} {right})"))
+            }
+        },
     }
+}
+
+fn field_type_for_expr<'a>(model: &'a ModelIr, expr: &ExprIr) -> Option<&'a FieldType> {
+    match expr {
+        ExprIr::FieldRef(field) => model
+            .state_fields
+            .iter()
+            .find(|state_field| state_field.id == *field)
+            .map(|state_field| &state_field.ty),
+        ExprIr::Binary { op, left, .. } => match op {
+            BinaryOp::SetInsert
+            | BinaryOp::SetRemove
+            | BinaryOp::RelationInsert
+            | BinaryOp::RelationRemove
+            | BinaryOp::MapPut
+            | BinaryOp::MapRemoveKey => field_type_for_expr(model, left),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn relation_mask_for_expr(
+    model: &ModelIr,
+    expr: &ExprIr,
+    left_index: u64,
+    right_index: u64,
+) -> Result<u64, String> {
+    let right_len = match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumRelation { right_variants, .. }) => right_variants.len() as u64,
+        Some(FieldType::EnumMap { value_variants, .. }) => value_variants.len() as u64,
+        other => {
+            return Err(format!(
+                "relation/map operation requires a relation or map field, got `{other:?}`"
+            ))
+        }
+    };
+    let bit_index = left_index
+        .checked_mul(right_len)
+        .and_then(|value| value.checked_add(right_index))
+        .ok_or_else(|| "relation/map bit index overflow".to_string())?;
+    Ok(enum_variant_mask(bit_index))
+}
+
+fn relation_masks_for_expr(model: &ModelIr, expr: &ExprIr) -> Result<Vec<u64>, String> {
+    match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumRelation {
+            left_variants,
+            right_variants,
+        })
+        | Some(FieldType::EnumMap {
+            key_variants: left_variants,
+            value_variants: right_variants,
+        }) => Ok((0..left_variants.len() as u64)
+            .flat_map(|left_index| {
+                (0..right_variants.len() as u64).map(move |right_index| {
+                    enum_variant_mask(left_index * right_variants.len() as u64 + right_index)
+                })
+            })
+            .collect()),
+        other => Err(format!(
+            "relation/map operation requires a relation or map field, got `{other:?}`"
+        )),
+    }
+}
+
+fn map_masks_for_key(model: &ModelIr, expr: &ExprIr, key_index: u64) -> Result<Vec<u64>, String> {
+    match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumMap { value_variants, .. }) => Ok((0..value_variants.len() as u64)
+            .map(|value_index| relation_mask_for_expr(model, expr, key_index, value_index))
+            .collect::<Result<Vec<_>, _>>()?),
+        other => Err(format!(
+            "map operation requires a map field, got `{other:?}`"
+        )),
+    }
+}
+
+fn render_map_clear_expr(
+    model: &ModelIr,
+    expr: &ExprIr,
+    rendered_left: &str,
+    key_index: u64,
+) -> Result<String, String> {
+    let masks = map_masks_for_key(model, expr, key_index)?;
+    if masks.is_empty() {
+        return Ok(rendered_left.to_string());
+    }
+    Ok(format!(
+        "(- {rendered_left} (+ {}))",
+        masks
+            .iter()
+            .map(|mask| format!("(* (mod (div {rendered_left} {mask}) 2) {mask})"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    ))
 }
 
 fn extract_enum_index(rendered_right: &str, expr: &ExprIr) -> Result<u64, String> {
@@ -409,6 +653,28 @@ fn extract_enum_index(rendered_right: &str, expr: &ExprIr) -> Result<u64, String
             )),
         },
         _ => Err("internal error extracting enum index for set operation".to_string()),
+    }
+}
+
+fn extract_enum_index_from_expr(expr: &ExprIr, parent: &ExprIr) -> Result<u64, String> {
+    match expr {
+        ExprIr::Literal(Value::EnumVariant { index, .. }) => Ok(*index),
+        other => Err(format!(
+            "operation requires a finite enum literal, got `{other:?}` in `{parent:?}`"
+        )),
+    }
+}
+
+fn extract_pair_indexes(expr: &ExprIr, parent: &ExprIr) -> Result<(u64, u64), String> {
+    match expr {
+        ExprIr::Literal(Value::PairVariant {
+            left_index,
+            right_index,
+            ..
+        }) => Ok((*left_index, *right_index)),
+        other => Err(format!(
+            "relation/map operation requires a finite pair literal, got `{other:?}` in `{parent:?}`"
+        )),
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    ir::{BinaryOp, ExprIr, ModelIr, UnaryOp, Value},
+    ir::{BinaryOp, ExprIr, FieldType, ModelIr, UnaryOp, Value},
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
 
@@ -25,9 +25,9 @@ pub fn eval_expr(
             }
         }
         ExprIr::Binary { op, left, right } => {
-            let left = eval_expr(model, state, left)?;
-            let right = eval_expr(model, state, right)?;
-            match (op, left, right) {
+            let left_value = eval_expr(model, state, left)?;
+            let right_value = eval_expr(model, state, right)?;
+            match (op, left_value, right_value) {
                 (BinaryOp::Add, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::UInt(left.saturating_add(right)))
                 }
@@ -49,6 +49,90 @@ pub fn eval_expr(
                 }
                 (BinaryOp::SetRemove, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
                     Ok(Value::UInt(bits & !enum_variant_mask(index)))
+                }
+                (
+                    BinaryOp::RelationContains,
+                    Value::UInt(bits),
+                    Value::PairVariant {
+                        left_index,
+                        right_index,
+                        ..
+                    },
+                ) => Ok(Value::Bool(
+                    relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?
+                        .map(|mask| bits & mask != 0)
+                        .unwrap_or(false),
+                )),
+                (
+                    BinaryOp::RelationInsert,
+                    Value::UInt(bits),
+                    Value::PairVariant {
+                        left_index,
+                        right_index,
+                        ..
+                    },
+                ) => Ok(Value::UInt(
+                    relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?
+                        .map(|mask| bits | mask)
+                        .unwrap_or(bits),
+                )),
+                (
+                    BinaryOp::RelationRemove,
+                    Value::UInt(bits),
+                    Value::PairVariant {
+                        left_index,
+                        right_index,
+                        ..
+                    },
+                ) => Ok(Value::UInt(
+                    relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?
+                        .map(|mask| bits & !mask)
+                        .unwrap_or(bits),
+                )),
+                (BinaryOp::RelationIntersects, Value::UInt(left), Value::UInt(right)) => {
+                    Ok(Value::Bool(left & right != 0))
+                }
+                (BinaryOp::MapContainsKey, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
+                    Ok(Value::Bool(
+                        map_group_bits(model, left.as_ref(), bits, index)? != 0,
+                    ))
+                }
+                (
+                    BinaryOp::MapContainsEntry,
+                    Value::UInt(bits),
+                    Value::PairVariant {
+                        left_index,
+                        right_index,
+                        ..
+                    },
+                ) => Ok(Value::Bool(
+                    relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?
+                        .map(|mask| bits & mask != 0)
+                        .unwrap_or(false),
+                )),
+                (
+                    BinaryOp::MapPut,
+                    Value::UInt(bits),
+                    Value::PairVariant {
+                        left_index,
+                        right_index,
+                        ..
+                    },
+                ) => {
+                    let cleared = clear_map_group(model, left.as_ref(), bits, left_index)?;
+                    Ok(Value::UInt(
+                        relation_mask_for_expr(model, left.as_ref(), left_index, right_index)?
+                            .map(|mask| cleared | mask)
+                            .unwrap_or(cleared),
+                    ))
+                }
+                (BinaryOp::MapRemoveKey, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
+                    Ok(Value::UInt(clear_map_group(
+                        model,
+                        left.as_ref(),
+                        bits,
+                        index,
+                    )?))
                 }
                 (BinaryOp::LessThan, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::Bool(left < right))
@@ -78,6 +162,96 @@ pub fn eval_expr(
 
 fn enum_variant_mask(index: u64) -> u64 {
     1u64.checked_shl(index as u32).unwrap_or(0)
+}
+
+fn relation_mask_for_expr(
+    model: &ModelIr,
+    expr: &ExprIr,
+    left_index: u64,
+    right_index: u64,
+) -> Result<Option<u64>, Diagnostic> {
+    let right_len = match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumRelation { right_variants, .. }) => right_variants.len() as u64,
+        Some(FieldType::EnumMap { value_variants, .. }) => value_variants.len() as u64,
+        _ => {
+            return Err(eval_error(
+                "relation/map operation requires a relation- or map-typed field".to_string(),
+            ))
+        }
+    };
+    let bit_index = left_index
+        .checked_mul(right_len)
+        .and_then(|value| value.checked_add(right_index))
+        .ok_or_else(|| eval_error("relation/map index overflow".to_string()))?;
+    Ok(Some(enum_variant_mask(bit_index)))
+}
+
+fn map_group_bits(
+    model: &ModelIr,
+    expr: &ExprIr,
+    bits: u64,
+    key_index: u64,
+) -> Result<u64, Diagnostic> {
+    let value_len = match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumMap { value_variants, .. }) => value_variants.len() as u64,
+        _ => {
+            return Err(eval_error(
+                "map operation requires a finite map field".to_string(),
+            ))
+        }
+    };
+    let mut found = 0u64;
+    for value_index in 0..value_len {
+        if let Some(mask) = relation_mask_for_expr(model, expr, key_index, value_index)? {
+            if bits & mask != 0 {
+                found |= mask;
+            }
+        }
+    }
+    Ok(found)
+}
+
+fn clear_map_group(
+    model: &ModelIr,
+    expr: &ExprIr,
+    bits: u64,
+    key_index: u64,
+) -> Result<u64, Diagnostic> {
+    let value_len = match field_type_for_expr(model, expr) {
+        Some(FieldType::EnumMap { value_variants, .. }) => value_variants.len() as u64,
+        _ => {
+            return Err(eval_error(
+                "map operation requires a finite map field".to_string(),
+            ))
+        }
+    };
+    let mut cleared = bits;
+    for value_index in 0..value_len {
+        if let Some(mask) = relation_mask_for_expr(model, expr, key_index, value_index)? {
+            cleared &= !mask;
+        }
+    }
+    Ok(cleared)
+}
+
+fn field_type_for_expr<'a>(model: &'a ModelIr, expr: &ExprIr) -> Option<&'a FieldType> {
+    match expr {
+        ExprIr::FieldRef(field) => model
+            .state_fields
+            .iter()
+            .find(|state_field| state_field.id == *field)
+            .map(|state_field| &state_field.ty),
+        ExprIr::Binary { op, left, .. } => match op {
+            BinaryOp::SetInsert
+            | BinaryOp::SetRemove
+            | BinaryOp::RelationInsert
+            | BinaryOp::RelationRemove
+            | BinaryOp::MapPut
+            | BinaryOp::MapRemoveKey => field_type_for_expr(model, left),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn eval_error(message: String) -> Diagnostic {
