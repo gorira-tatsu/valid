@@ -144,6 +144,65 @@ cargo run --bin valid -- verify tests/fixtures/models/failing_counter.valid
 cargo run --bin valid -- explain tests/fixtures/models/failing_counter.valid
 ```
 
+## MCP Server
+
+`valid-mcp` exposes `valid` over MCP stdio so Claude Code, Claude Desktop, and
+other MCP clients can call it as tools.
+
+Available tools:
+
+- `valid_inspect`
+- `valid_check`
+- `valid_explain`
+- `valid_coverage`
+- `valid_testgen`
+- `valid_replay`
+- `valid_contract_snapshot`
+- `valid_contract_check`
+- `valid_list_models`
+- `valid_graph`
+- `valid_lint`
+
+Build or install it:
+
+```sh
+cargo build --bin valid-mcp
+# or
+cargo install --path . --features varisat-backend
+```
+
+### DSL Mode
+
+Use this when the source of truth is a `.valid` file.
+
+```sh
+claude mcp add valid-dsl -- /absolute/path/to/valid-mcp --model-file /absolute/path/to/model.valid
+```
+
+If you do not pin `--model-file` at startup, pass `model_file` or `source` in
+each tool call.
+
+### Registry Mode
+
+Use this when the source of truth is a Rust registry binary.
+
+```sh
+cargo build --example valid_models
+claude mcp add valid-registry -- /absolute/path/to/valid-mcp --registry-binary /absolute/path/to/target/debug/examples/valid_models
+```
+
+When `--registry-binary` is configured at startup, tool calls only need
+`model_name`. Without it, pass `registry_binary` and `model_name` per call.
+
+`valid_contract_snapshot` and `valid_contract_check` can operate on one
+registry model when `model_name` is provided, or on the full registry when it
+is omitted.
+
+Configuration templates live at:
+
+- [docs/mcp/claude_desktop_config.json](/Users/tatsuhiko/.codex/worktrees/eb0d/valid/docs/mcp/claude_desktop_config.json)
+- [docs/mcp/claude_code.mcp.json](/Users/tatsuhiko/.codex/worktrees/eb0d/valid/docs/mcp/claude_code.mcp.json)
+
 ## Mental Model
 
 There are two ways to use the repo today.

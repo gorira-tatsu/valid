@@ -11,6 +11,7 @@ pub mod evidence;
 pub mod frontend;
 pub mod ir;
 pub mod kernel;
+pub mod mcp;
 pub mod modeling;
 pub mod orchestrator;
 pub mod project;
