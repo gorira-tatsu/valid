@@ -1,4 +1,8 @@
-use std::{env, path::{Path, PathBuf}, process};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process,
+};
 use std::process::Command;
 
 use valid::{
@@ -16,6 +20,9 @@ use valid::{
 
 fn main() {
     let parsed = maybe_auto_discover_external(parse_cli(env::args().skip(1).collect()));
+    if parsed.command == "clean" {
+        cmd_clean(&parsed);
+    }
     if parsed.manifest_path.is_some()
         || parsed.example.is_some()
         || parsed.bin.is_some()
@@ -47,13 +54,15 @@ fn main() {
         "orchestrate" => cmd_orchestrate(local_args),
         "testgen" => cmd_testgen(local_args),
         "replay" => cmd_replay(local_args),
+        "help" => usage_exit(&primary_usage()),
         _ => {
-            eprintln!(
-                "usage: cargo valid <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> ... [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"
-            );
-            process::exit(3);
+            usage_exit(&primary_usage());
         }
     }
+}
+
+fn primary_usage() -> String {
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <models|inspect|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
 }
 
 fn run_external_registry(parsed: CliArgs) -> ! {
@@ -506,6 +515,48 @@ fn cmd_replay(parsed: ParsedArgs) {
     println!("{output}");
 }
 
+fn cmd_clean(parsed: &CliArgs) -> ! {
+    let scope = parsed.model.as_deref().unwrap_or("all");
+    let root = clean_root(parsed);
+    let mut removed = Vec::new();
+    match scope {
+        "all" => {
+            removed.extend(clean_generated_tests(&root));
+            removed.extend(clean_artifacts(&root));
+        }
+        "generated" | "generated-tests" => {
+            removed.extend(clean_generated_tests(&root));
+        }
+        "artifacts" => {
+            removed.extend(clean_artifacts(&root));
+        }
+        other => usage_exit(&format!(
+            "usage: cargo valid clean [generated|artifacts|all] [--json]\nunknown clean scope `{other}`"
+        )),
+    }
+    if parsed.json {
+        println!(
+            "{{\"status\":\"ok\",\"root\":\"{}\",\"removed\":[{}]}}",
+            root.display(),
+            removed
+                .iter()
+                .map(|path| format!("\"{}\"", path))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    } else {
+        println!("clean root: {}", root.display());
+        if removed.is_empty() {
+            println!("removed: none");
+        } else {
+            for path in &removed {
+                println!("removed: {path}");
+            }
+        }
+    }
+    process::exit(0);
+}
+
 #[derive(Default)]
 struct ParsedArgs {
     json: bool,
@@ -543,6 +594,7 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--manifest-path" => parsed.manifest_path = Some(next_arg(&mut iter, "--manifest-path")),
+            "--registry" => parsed.file = Some(next_arg(&mut iter, "--registry")),
             "--example" => parsed.example = Some(next_arg(&mut iter, "--example")),
             "--bin" => parsed.bin = Some(next_arg(&mut iter, "--bin")),
             "--file" => parsed.file = Some(next_arg(&mut iter, "--file")),
@@ -569,18 +621,30 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             _ if arg.starts_with("--focus-action=") => {
                 parsed.focus_action_id = Some(arg.trim_start_matches("--focus-action=").to_string())
             }
-            _ if parsed.command.is_empty() => parsed.command = arg,
+            _ if parsed.command.is_empty() => parsed.command = normalize_command(&arg),
             _ if parsed.model.is_none() => parsed.model = Some(arg),
-            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"),
+            _ => usage_exit(&primary_usage()),
         }
     }
     if parsed.command.is_empty() {
-        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
+        usage_exit(&primary_usage());
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");
     }
     parsed
+}
+
+fn normalize_command(command: &str) -> String {
+    match command {
+        "models" => "list",
+        "readiness" => "lint",
+        "verify" => "check",
+        "suite" => "all",
+        "generate-tests" => "testgen",
+        other => other,
+    }
+    .to_string()
 }
 
 fn next_arg(iter: &mut impl Iterator<Item = String>, flag: &str) -> String {
@@ -602,6 +666,9 @@ struct ExternalTarget {
 }
 
 fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
+    if parsed.command == "clean" {
+        return parsed;
+    }
     if parsed.manifest_path.is_some()
         || parsed.file.is_some()
         || parsed.example.is_some()
@@ -726,4 +793,63 @@ fn aggregate_exit_code(current: i32, next: i32) -> i32 {
 fn usage_exit(usage: &str) -> ! {
     eprintln!("{usage}");
     process::exit(3);
+}
+
+fn clean_root(parsed: &CliArgs) -> PathBuf {
+    if let Some(manifest_path) = &parsed.manifest_path {
+        let path = PathBuf::from(manifest_path);
+        return path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+    }
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn clean_generated_tests(root: &Path) -> Vec<String> {
+    let generated_dir = root.join("tests").join("generated");
+    let mut removed = Vec::new();
+    let Ok(entries) = fs::read_dir(&generated_dir) else {
+        return removed;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let keep = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == ".gitkeep" || name == ".gitignore")
+            .unwrap_or(false);
+        let removable = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext == "rs")
+            .unwrap_or(false);
+        if !keep && removable && fs::remove_file(&path).is_ok() {
+            removed.push(path.display().to_string());
+        }
+    }
+    removed
+}
+
+fn clean_artifacts(root: &Path) -> Vec<String> {
+    let artifacts_dir = root.join("artifacts");
+    if !artifacts_dir.exists() {
+        return Vec::new();
+    }
+    let Ok(entries) = fs::read_dir(&artifacts_dir) else {
+        return Vec::new();
+    };
+    let mut removed = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let result = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        if result.is_ok() {
+            removed.push(path.display().to_string());
+        }
+    }
+    removed
 }

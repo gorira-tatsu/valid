@@ -62,7 +62,7 @@ macro_rules! valid_models {
 pub fn run_registry_cli(models: Vec<RegisteredModel>) {
     let models = models;
     let mut args = env::args().skip(1);
-    let command = args.next().unwrap_or_default();
+    let command = normalize_command(&args.next().unwrap_or_default());
     let remaining = args.collect::<Vec<_>>();
 
     match command.as_str() {
@@ -75,8 +75,20 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "orchestrate" => cmd_orchestrate(&models, remaining),
         "testgen" => cmd_testgen(&models, remaining),
         "replay" => cmd_replay(&models, remaining),
+        "help" => usage_exit(),
         _ => usage_exit(),
     }
+}
+
+fn normalize_command(command: &str) -> String {
+    match command {
+        "models" => "list",
+        "readiness" => "lint",
+        "verify" => "check",
+        "generate-tests" => "testgen",
+        other => other,
+    }
+    .to_string()
 }
 
 fn cmd_list(models: &[RegisteredModel], args: Vec<String>) {
@@ -607,6 +619,6 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <list|inspect|lint|check|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
+    eprintln!("usage: <registry-bin> <models|inspect|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
     process::exit(3);
 }

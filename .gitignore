@@ -1,3 +1,4 @@
 /target
 /artifacts
+/tests/generated/*.rs
 .DS_Store

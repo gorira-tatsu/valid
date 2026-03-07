@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use valid::api::{
@@ -21,6 +22,14 @@ fn read_fixture(relative: &str) -> String {
 
 fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_valid"))
+}
+
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be monotonic enough")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 
 fn cleanup_generated_files(paths: &[String]) {
@@ -203,7 +212,7 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
     let multi = repo_path("examples/models/multi_property.valid");
 
     let safe_output = Command::new(binary_path())
-        .arg("check")
+        .arg("verify")
         .arg(&safe)
         .arg("--json")
         .output()
@@ -227,6 +236,41 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
     assert!(orchestrate.status.success());
     let stdout = String::from_utf8_lossy(&orchestrate.stdout);
     assert!(stdout.contains("\"aggregate_coverage\""));
+}
+
+#[test]
+fn cli_readiness_and_clean_work() {
+    let safe = repo_path("examples/models/safe_counter.valid");
+    let temp_root = unique_temp_dir("valid-cli-clean");
+    let generated = temp_root.join("tests/generated/valid-clean-sentinel.rs");
+    let artifact_dir = temp_root.join("artifacts/valid-clean-sentinel");
+    fs::create_dir_all(generated.parent().unwrap()).expect("generated dir");
+    fs::create_dir_all(&artifact_dir).expect("artifact dir");
+    fs::write(&generated, "// sentinel\n").expect("generated sentinel");
+    fs::write(artifact_dir.join("report.json"), "{}\n").expect("artifact sentinel");
+
+    let lint = Command::new(binary_path())
+        .arg("readiness")
+        .arg(&safe)
+        .arg("--json")
+        .output()
+        .expect("readiness should run");
+    assert_eq!(lint.status.code(), Some(0));
+
+    let clean = Command::new(binary_path())
+        .current_dir(&temp_root)
+        .arg("clean")
+        .arg("all")
+        .arg("--json")
+        .output()
+        .expect("clean should run");
+    assert!(clean.status.success());
+    let stdout = String::from_utf8_lossy(&clean.stdout);
+    assert!(stdout.contains("valid-clean-sentinel.rs"));
+    assert!(stdout.contains("artifacts/valid-clean-sentinel"));
+    assert!(!generated.exists());
+    assert!(!artifact_dir.exists());
+    let _ = fs::remove_dir_all(temp_root);
 }
 
 #[test]

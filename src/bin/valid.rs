@@ -29,7 +29,7 @@ use valid::{
 
 fn main() {
     let mut args = env::args().skip(1);
-    let command = args.next().unwrap_or_default();
+    let command = normalize_command(&args.next().unwrap_or_default());
 
     match command.as_str() {
         "check" => cmd_check(args.collect()),
@@ -44,12 +44,23 @@ fn main() {
         "testgen" => cmd_testgen(args.collect()),
         "replay" => cmd_replay(args.collect()),
         "coverage" => cmd_coverage(args.collect()),
+        "clean" => cmd_clean(args.collect()),
         "selfcheck" => cmd_selfcheck(),
         _ => {
-            eprintln!("usage: valid <check|inspect|lint|capabilities|explain|minimize|contract|trace|orchestrate|testgen|replay|coverage|selfcheck> ...");
+            eprintln!("usage: valid <inspect|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck> ...");
             process::exit(3);
         }
     }
+}
+
+fn normalize_command(command: &str) -> String {
+    match command {
+        "readiness" => "lint",
+        "verify" => "check",
+        "generate-tests" => "testgen",
+        other => other,
+    }
+    .to_string()
 }
 
 fn cmd_check(args: Vec<String>) {
@@ -743,6 +754,49 @@ fn cmd_selfcheck() {
     }
 }
 
+fn cmd_clean(args: Vec<String>) {
+    let json = args.iter().any(|arg| arg == "--json");
+    let scope = args
+        .iter()
+        .find(|arg| !arg.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("all");
+    let root = env::current_dir().unwrap_or_else(|_| ".".into());
+    let mut removed = Vec::new();
+    match scope {
+        "all" => {
+            removed.extend(clean_generated_tests(&root));
+            removed.extend(clean_artifacts(&root));
+        }
+        "generated" | "generated-tests" => removed.extend(clean_generated_tests(&root)),
+        "artifacts" => removed.extend(clean_artifacts(&root)),
+        other => {
+            eprintln!("usage: valid clean [generated|artifacts|all] [--json]\nunknown clean scope `{other}`");
+            process::exit(3);
+        }
+    }
+    if json {
+        println!(
+            "{{\"status\":\"ok\",\"root\":\"{}\",\"removed\":[{}]}}",
+            root.display(),
+            removed
+                .iter()
+                .map(|path| format!("\"{}\"", path))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    } else {
+        println!("clean root: {}", root.display());
+        if removed.is_empty() {
+            println!("removed: none");
+        } else {
+            for path in &removed {
+                println!("removed: {path}");
+            }
+        }
+    }
+}
+
 fn read_source(path: &str) -> String {
     if is_bundled_model_ref(path) {
         return String::new();
@@ -774,6 +828,54 @@ fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
             }
         }
     }
+}
+
+fn clean_generated_tests(root: &std::path::Path) -> Vec<String> {
+    let generated_dir = root.join("tests").join("generated");
+    let mut removed = Vec::new();
+    let Ok(entries) = fs::read_dir(&generated_dir) else {
+        return removed;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let keep = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == ".gitkeep" || name == ".gitignore")
+            .unwrap_or(false);
+        let removable = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext == "rs")
+            .unwrap_or(false);
+        if !keep && removable && fs::remove_file(&path).is_ok() {
+            removed.push(path.display().to_string());
+        }
+    }
+    removed
+}
+
+fn clean_artifacts(root: &std::path::Path) -> Vec<String> {
+    let artifacts_dir = root.join("artifacts");
+    if !artifacts_dir.exists() {
+        return Vec::new();
+    }
+    let Ok(entries) = fs::read_dir(&artifacts_dir) else {
+        return Vec::new();
+    };
+    let mut removed = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let result = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        if result.is_ok() {
+            removed.push(path.display().to_string());
+        }
+    }
+    removed
 }
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {

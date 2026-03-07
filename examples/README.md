@@ -45,26 +45,28 @@ run_registry_cli(valid_models![
 Run it through the cargo subcommand with:
 
 ```sh
-cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- lint counter --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-counter --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=boundary --json
-cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
-cargo run --bin cargo-valid -- testgen iam-access --strategy=path --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- readiness counter --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify failing-counter --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=witness --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=boundary --json
+cargo run --bin cargo-valid -- --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard --json
+cargo run --bin cargo-valid -- generate-tests iam-access --strategy=path --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs suite --json
+cargo run --bin cargo-valid -- clean all --json
 ```
 
 Command meanings:
 
-- `list`: show the model names exported by the registry file
+- `models`: show the model names exported by the registry file
 - `inspect <model>`: show the model shape without verifying it
-- `lint <model>`: show capability-based migration hints and readiness findings
-- `check <model>`: verify one model
+- `readiness <model>`: show capability-based migration hints and readiness findings
+- `verify <model>`: verify one model
 - `replay <model>`: replay an explicit action sequence and inspect the terminal state
-- `all`: run `check` for every model exported by the registry file
+- `suite`: run `verify` for every model exported by the registry file
+- `clean`: remove generated tests and artifact output
 
 `inspect --json` also reports a capability matrix. In practice:
 
@@ -99,6 +101,34 @@ allow/deny/boundary/session paths explicit instead of relying on heuristics.
 `iam_enterprise_registry.rs` is the heavier variant intended to pressure the
 current lowering path. It uses explicit tags plus richer boolean expressions
 such as `==`, `||`, and parenthesized guards / properties.
+
+`practical_use_cases_registry.rs` is the business-oriented suite for trying the
+tool against more realistic workflows. It currently includes:
+
+- `prod-deploy-safe`
+  approvals + QA + freeze window + incident gating
+- `breakglass-access-regression`
+  a deliberate security exception regression that should fail
+- `refund-control`
+  fraud / risk / manager approval interaction
+- `data-export-control`
+  contract / DPA / region alignment gating
+
+You can run the whole suite with:
+
+```sh
+sh examples/run_practical_suite.sh
+```
+
+Or use `cargo-valid` directly:
+
+```sh
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs models --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs readiness prod-deploy-safe --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs coverage refund-control --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path --json
+```
 
 ## Rust model examples
 
@@ -175,8 +205,9 @@ If you install the cargo subcommand binary, you can also use:
 ```sh
 cargo valid list --json
 cargo valid inspect counter --json
-cargo valid check failing-counter --json
-cargo valid --file examples/valid_models.rs all --json
+cargo valid verify failing-counter --json
+cargo valid --registry examples/valid_models.rs suite --json
+cargo valid clean all --json
 ```
 
 From another crate root, `cargo valid` also auto-discovers

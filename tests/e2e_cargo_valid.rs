@@ -52,7 +52,7 @@ fn unique_temp_project_dir(prefix: &str) -> PathBuf {
 fn cargo_valid_lists_registered_models() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
-        .arg("list")
+        .arg("models")
         .arg("--json")
         .output()
         .expect("cargo-valid list should run");
@@ -61,6 +61,21 @@ fn cargo_valid_lists_registered_models() {
     assert!(stdout.contains("\"counter\""));
     assert!(stdout.contains("\"failing-counter\""));
     assert!(stdout.contains("\"iam-access\""));
+}
+
+#[test]
+fn cargo_valid_registry_flag_alias_works() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("models")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid models via --registry should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"counter\""));
 }
 
 #[test]
@@ -103,7 +118,7 @@ fn cargo_valid_checks_registered_model() {
 fn cargo_valid_lints_registered_model_with_migration_hints() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
-        .arg("lint")
+        .arg("readiness")
         .arg("counter")
         .arg("--json")
         .output()
@@ -191,7 +206,7 @@ fn cargo_valid_checks_all_example_models_from_file() {
 fn cargo_valid_testgen_witness_generates_files() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
-        .arg("testgen")
+        .arg("generate-tests")
         .arg("counter")
         .arg("--strategy=witness")
         .arg("--json")
@@ -206,6 +221,33 @@ fn cargo_valid_testgen_witness_generates_files() {
         assert!(body.contains("assert_replay_output_json"));
     }
     cleanup_generated_files(&stdout);
+}
+
+#[test]
+fn cargo_valid_clean_removes_generated_and_artifacts() {
+    let _guard = cargo_lock().lock().unwrap();
+    let temp_root = unique_temp_project_dir("valid-clean");
+    let generated = temp_root.join("tests").join("generated").join("clean-sentinel.rs");
+    let artifact_dir = temp_root.join("artifacts").join("clean-sentinel");
+    fs::create_dir_all(generated.parent().unwrap()).expect("generated dir");
+    fs::create_dir_all(&artifact_dir).expect("artifact dir");
+    fs::write(&generated, "// sentinel\n").expect("generated sentinel");
+    fs::write(artifact_dir.join("report.json"), "{}\n").expect("artifact sentinel");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&temp_root)
+        .arg("clean")
+        .arg("all")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid clean should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("clean-sentinel.rs"));
+    assert!(stdout.contains("artifacts/clean-sentinel"));
+    assert!(!generated.exists());
+    assert!(!artifact_dir.exists());
+    let _ = fs::remove_dir_all(temp_root);
 }
 
 #[test]
@@ -257,7 +299,7 @@ fn cargo_valid_testgen_path_generates_tagged_files() {
 fn cargo_valid_check_can_target_specific_property() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
-        .arg("check")
+        .arg("verify")
         .arg("failing-counter")
         .arg("--property=P_FAIL")
         .arg("--json")

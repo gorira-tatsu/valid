@@ -7,7 +7,7 @@ stateful workflow rules. The main path is:
 
 1. Write a model in Rust
 2. Export it through a small registry file
-3. Run `cargo-valid` to inspect, check, explain, cover, and generate tests
+3. Run `cargo-valid` to inspect, verify, explain, cover, clean, and generate tests
 
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
@@ -48,10 +48,10 @@ cargo test -q
 Try the Rust-first path:
 
 ```sh
-cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-counter --json
-cargo run --bin cargo-valid -- check failing-counter --property=P_FAIL --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify failing-counter --json
+cargo run --bin cargo-valid -- verify failing-counter --property=P_FAIL --json
 ```
 
 Try the legacy `.valid` path:
@@ -72,7 +72,7 @@ Use this for new work.
 
 - Put model code in `examples/*.rs`, `src/bin/*.rs`, or another Rust target
 - Export models through `run_registry_cli(valid_models![...])`
-- Run them with `cargo-valid --file <path>`
+- Run them with `cargo-valid --registry <path>`
 
 ### 2. `.valid` path
 
@@ -85,36 +85,43 @@ If you are deciding between the two, use the Rust-first path.
 
 ## Command Guide
 
-These commands are the most important ones:
+Primary commands:
 
-- `list`
+- `models`
   Show the model names exported by a registry file
 - `inspect <model>`
   Show model structure without running verification
-- `lint <model>`
+- `readiness <model>`
   Report capability-based migration findings and analysis-readiness gaps
-- `check <model>`
+- `verify <model>`
   Verify one model and return `PASS` / `FAIL` / `UNKNOWN`
 - `explain <model>`
   Summarize why a failure likely happened
 - `coverage <model>`
   Show action and guard coverage
-- `testgen <model>`
+- `generate-tests <model>`
   Generate Rust tests under `tests/generated/*.rs`
 - `replay <model>`
   Replay an action sequence and return the terminal state
-- `all`
+- `suite`
   Run `check` for every model exported by a registry file
+- `clean`
+  Remove generated tests and artifact output
+
+Legacy aliases still work:
+
+- `list`, `lint`, `check`, `testgen`, `all`, `--file`
 
 Examples:
 
 ```sh
-cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- lint iam-access --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs check counter --json
-cargo run --bin cargo-valid -- check failing-counter --property=P_FAIL --json
-cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- readiness iam-access --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify counter --json
+cargo run --bin cargo-valid -- verify failing-counter --property=P_FAIL --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs suite --json
+cargo run --bin cargo-valid -- clean all --json
 ```
 
 `inspect --json` now includes:
@@ -228,7 +235,7 @@ fn main() {
 Save that as `examples/valid_models.rs` or another registry file, then run:
 
 ```sh
-cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
 ```
 
 ## Declarative Transition Mode
@@ -300,9 +307,9 @@ Available strategies:
 Examples:
 
 ```sh
-cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
-cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
-cargo run --bin cargo-valid -- testgen iam-access --strategy=path --json
+cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=witness --json
+cargo run --bin cargo-valid -- --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard --json
+cargo run --bin cargo-valid -- generate-tests iam-access --strategy=path --json
 cargo run --bin valid -- testgen examples/models/safe_counter.valid --strategy=boundary --json
 cargo run --bin valid -- testgen examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample --json
 cargo run --bin cargo-valid -- replay failing-counter --property=P_FAIL --actions=INC,INC --json
@@ -315,6 +322,7 @@ Rust-first examples:
 - [valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs)
 - [iam_transition_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_transition_registry.rs)
 - [iam_enterprise_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_enterprise_registry.rs)
+- [practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/examples/practical_use_cases_registry.rs)
 - [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
 
 Domain-oriented examples:
@@ -329,6 +337,36 @@ Compatibility fixtures:
 - [safe_counter.valid](/Users/tatsuhiko/code/valid/examples/models/safe_counter.valid)
 - [failing_counter.valid](/Users/tatsuhiko/code/valid/examples/models/failing_counter.valid)
 - [multi_property.valid](/Users/tatsuhiko/code/valid/examples/models/multi_property.valid)
+
+## Practical Use-Case Suite
+
+The repo now includes a business-oriented registry suite under
+[practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/examples/practical_use_cases_registry.rs).
+It is intended to answer the question "would this survive real policy and
+workflow modeling?" with concrete cases instead of toy counters.
+
+Current suite:
+
+- `prod-deploy-safe`
+  Production deploy gating with approvals, QA, freeze windows, and incidents
+- `breakglass-access-regression`
+  Intentional security regression showing how exception paths can bypass
+  incident/approval controls
+- `refund-control`
+  Finance workflow with fraud clearance, risk escalation, and manager approval
+- `data-export-control`
+  Contract/DPA/region gating for compliance-sensitive exports
+
+Quick trial:
+
+```sh
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs models --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify prod-deploy-safe --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs coverage refund-control --json
+cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path --json
+sh examples/run_practical_suite.sh
+```
 
 ## Solver Use
 
@@ -373,15 +411,22 @@ common case can be as short as:
 cargo valid inspect my-model --json
 ```
 
+To remove generated test files and artifact output:
+
+```sh
+cargo valid clean all --json
+valid clean all --json
+```
+
 ## Recommended Workflow
 
 For new models:
 
 1. Start with a Rust registry file under `examples/` or your own crate
 2. Use `inspect` to confirm state fields, actions, and properties
-3. Use `check` to get the first proof or counterexample
+3. Use `verify` to get the first proof or counterexample
 4. Use `coverage` to see missing action and guard behavior
-5. Use `testgen` to turn interesting traces into regression assets
+5. Use `generate-tests` to turn interesting traces into regression assets
 6. Move to declarative `transitions` when the model gets large enough that
    reads/writes/guards matter
 
