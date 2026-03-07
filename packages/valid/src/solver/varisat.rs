@@ -209,6 +209,10 @@ impl<'a> CnfEncoder<'a> {
                     "backend=sat-varisat does not yet support set operations; use explicit or smt-cvc5"
                         .to_string(),
                 ),
+                UnaryOp::StringLen => Err(
+                    "backend=sat-varisat does not yet support string length expressions; use explicit backend"
+                        .to_string(),
+                ),
             },
             ExprIr::Binary { op, left, right } => match op {
                 BinaryOp::And => {
@@ -223,6 +227,14 @@ impl<'a> CnfEncoder<'a> {
                 }
                 BinaryOp::Equal => self.encode_bool_equal(step, left, right),
                 BinaryOp::NotEqual => Ok(!self.encode_bool_equal(step, left, right)?),
+                BinaryOp::StringContains => Err(
+                    "backend=sat-varisat does not yet support string contains expressions; use explicit backend"
+                        .to_string(),
+                ),
+                BinaryOp::RegexMatch => Err(
+                    "backend=sat-varisat does not yet support regex_match expressions; use explicit backend"
+                        .to_string(),
+                ),
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mod
