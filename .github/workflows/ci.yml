@@ -59,3 +59,43 @@ jobs:
         with:
           name: benchmark-reports
           path: artifacts/benchmarks
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run contract check when lock file exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ci
+          if [[ -f valid.lock.json ]]; then
+            cargo run --quiet --bin cargo-valid -- contract check valid.lock.json --json | tee artifacts/ci/contract-check.json
+          else
+            echo "No valid.lock.json found; skipping contract check."
+          fi
+      - name: Upload contract artifact
+        if: always() && hashFiles('artifacts/ci/contract-check.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-contract
+          path: artifacts/ci/contract-check.json
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Evaluate coverage gate
+        run: python3 scripts/ci/coverage_gate.py
+      - name: Upload coverage artifacts
+        if: always() && hashFiles('artifacts/ci/coverage/*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-coverage
+          path: artifacts/ci/coverage/
