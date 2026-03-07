@@ -682,6 +682,41 @@ pub struct MachineTransitionUpdateIr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityDetail {
+    pub reason: String,
+    pub migration_hint: Option<String>,
+    pub unsupported_features: Vec<String>,
+}
+
+impl Default for CapabilityDetail {
+    fn default() -> Self {
+        Self::ready()
+    }
+}
+
+impl CapabilityDetail {
+    pub fn ready() -> Self {
+        Self {
+            reason: String::new(),
+            migration_hint: None,
+            unsupported_features: Vec::new(),
+        }
+    }
+
+    fn blocked(
+        reason: impl Into<String>,
+        migration_hint: impl Into<String>,
+        unsupported_features: Vec<String>,
+    ) -> Self {
+        Self {
+            reason: reason.into(),
+            migration_hint: Some(migration_hint.into()),
+            unsupported_features: sorted_unique_strings(unsupported_features),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineTransitionIr {
     pub action_variant: &'static str,
     pub action_id: &'static str,
@@ -696,14 +731,36 @@ pub struct MachineTransitionIr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineCapabilityReport {
     pub parse_ready: bool,
+    pub parse: CapabilityDetail,
     pub explicit_ready: bool,
+    pub explicit: CapabilityDetail,
     pub ir_ready: bool,
+    pub ir: CapabilityDetail,
     pub solver_ready: bool,
+    pub solver: CapabilityDetail,
     pub coverage_ready: bool,
+    pub coverage: CapabilityDetail,
     pub explain_ready: bool,
+    pub explain: CapabilityDetail,
     pub testgen_ready: bool,
+    pub testgen: CapabilityDetail,
     pub machine_ir_error: Option<String>,
     pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CapabilityAssessment {
+    codes: Vec<String>,
+    detail: CapabilityDetail,
+}
+
+impl CapabilityAssessment {
+    fn ready() -> Self {
+        Self {
+            codes: Vec::new(),
+            detail: CapabilityDetail::ready(),
+        }
+    }
 }
 
 pub fn infer_decision_path_tags<'a, RI, WI>(
@@ -880,75 +937,298 @@ pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityRepor
     let machine_ir = lower_machine_model::<M>();
     match machine_ir {
         Ok(model) => {
-            let solver_subset_reasons = machine_solver_subset_reasons(&model);
+            let solver_subset = machine_solver_capability_assessment(&model);
             MachineCapabilityReport {
                 parse_ready: true,
+                parse: CapabilityDetail::ready(),
                 explicit_ready: true,
+                explicit: CapabilityDetail::ready(),
                 ir_ready: true,
-                solver_ready: solver_subset_reasons.is_empty(),
+                ir: CapabilityDetail::ready(),
+                solver_ready: solver_subset.codes.is_empty(),
+                solver: solver_subset.detail,
                 coverage_ready: true,
+                coverage: CapabilityDetail::ready(),
                 explain_ready: true,
+                explain: CapabilityDetail::ready(),
                 testgen_ready: true,
+                testgen: CapabilityDetail::ready(),
                 machine_ir_error: None,
-                reasons: solver_subset_reasons,
+                reasons: solver_subset.codes,
             }
         }
-        Err(error) => MachineCapabilityReport {
-            parse_ready: true,
-            explicit_ready: true,
-            ir_ready: false,
-            solver_ready: false,
-            coverage_ready: true,
-            explain_ready: true,
-            testgen_ready: true,
-            machine_ir_error: Some(error.clone()),
-            reasons: machine_capability_reasons::<M>(&error),
-        },
+        Err(error) => {
+            let ir = machine_ir_capability_assessment::<M>(&error);
+            let solver = solver_capability_blocked_by_ir(&ir.detail);
+            MachineCapabilityReport {
+                parse_ready: true,
+                parse: CapabilityDetail::ready(),
+                explicit_ready: true,
+                explicit: CapabilityDetail::ready(),
+                ir_ready: false,
+                ir: ir.detail.clone(),
+                solver_ready: false,
+                solver,
+                coverage_ready: true,
+                coverage: CapabilityDetail::ready(),
+                explain_ready: true,
+                explain: CapabilityDetail::ready(),
+                testgen_ready: true,
+                testgen: CapabilityDetail::ready(),
+                machine_ir_error: Some(error),
+                reasons: ir.codes,
+            }
+        }
     }
 }
 
-fn machine_solver_subset_reasons(model: &ModelIr) -> Vec<String> {
-    let mut reasons = BTreeSet::new();
+fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment {
+    let mut codes = BTreeSet::new();
+    let mut unsupported_features = BTreeSet::new();
     for field in &model.state_fields {
         if matches!(field.ty, FieldType::String { .. }) {
-            reasons.insert("string_fields_require_explicit_backend".to_string());
+            codes.insert("string_fields_require_explicit_backend".to_string());
+            unsupported_features.insert(format!("state field `{}`: String", field.name));
         }
     }
     for action in &model.actions {
-        collect_solver_subset_reasons_from_expr(&action.guard, &mut reasons);
+        collect_solver_subset_reasons_from_expr(
+            &action.guard,
+            &mut codes,
+            &mut unsupported_features,
+        );
         for update in &action.updates {
-            collect_solver_subset_reasons_from_expr(&update.value, &mut reasons);
+            collect_solver_subset_reasons_from_expr(
+                &update.value,
+                &mut codes,
+                &mut unsupported_features,
+            );
         }
     }
     for property in &model.properties {
-        collect_solver_subset_reasons_from_expr(&property.expr, &mut reasons);
+        collect_solver_subset_reasons_from_expr(
+            &property.expr,
+            &mut codes,
+            &mut unsupported_features,
+        );
     }
-    reasons.into_iter().collect()
+    let codes = codes.into_iter().collect::<Vec<_>>();
+    if codes.is_empty() {
+        CapabilityAssessment::ready()
+    } else {
+        CapabilityAssessment {
+            codes,
+            detail: CapabilityDetail::blocked(
+                "solver backends only support the scalar IR subset; this model still needs the explicit backend",
+                "replace String-heavy state and helpers with finite enums or bounded integers, or keep running with `--backend explicit` until solver encodings land",
+                unsupported_features.into_iter().collect(),
+            ),
+        }
+    }
 }
 
-fn collect_solver_subset_reasons_from_expr(expr: &ExprIr, reasons: &mut BTreeSet<String>) {
+fn collect_solver_subset_reasons_from_expr(
+    expr: &ExprIr,
+    reasons: &mut BTreeSet<String>,
+    unsupported_features: &mut BTreeSet<String>,
+) {
     match expr {
         ExprIr::Literal(Value::String(_)) => {
             reasons.insert("string_literals_require_explicit_backend".to_string());
+            unsupported_features.insert("string literal".to_string());
         }
         ExprIr::Unary { op, expr } => {
             if matches!(op, UnaryOp::StringLen) {
                 reasons.insert("string_ops_require_explicit_backend".to_string());
+                unsupported_features.insert("len(...)".to_string());
             }
-            collect_solver_subset_reasons_from_expr(expr, reasons);
+            collect_solver_subset_reasons_from_expr(expr, reasons, unsupported_features);
         }
         ExprIr::Binary { op, left, right } => {
             if matches!(op, BinaryOp::StringContains | BinaryOp::RegexMatch) {
                 reasons.insert("string_ops_require_explicit_backend".to_string());
             }
+            if matches!(op, BinaryOp::StringContains) {
+                unsupported_features.insert("str_contains(...)".to_string());
+            }
             if matches!(op, BinaryOp::RegexMatch) {
                 reasons.insert("regex_match_requires_explicit_backend".to_string());
+                unsupported_features.insert("regex_match(...)".to_string());
             }
-            collect_solver_subset_reasons_from_expr(left, reasons);
-            collect_solver_subset_reasons_from_expr(right, reasons);
+            collect_solver_subset_reasons_from_expr(left, reasons, unsupported_features);
+            collect_solver_subset_reasons_from_expr(right, reasons, unsupported_features);
         }
         ExprIr::Literal(_) | ExprIr::FieldRef(_) => {}
     }
+}
+
+fn machine_ir_capability_assessment<M: VerifiedMachine>(error: &str) -> CapabilityAssessment {
+    let mut codes = BTreeSet::new();
+    let mut unsupported_features = BTreeSet::new();
+    let mut reason = None;
+    let mut migration_hint = None;
+
+    if M::transitions().is_empty() {
+        codes.insert("opaque_step_closure".to_string());
+        codes.insert("missing_declarative_transitions".to_string());
+        unsupported_features.insert("step(state, action)".to_string());
+        reason.get_or_insert_with(|| {
+            "opaque step models cannot be lowered into machine IR".to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "rewrite the model using declarative `transitions { ... }` blocks so guards and updates become first-class IR".to_string()
+        });
+    }
+    if error.contains("requires exactly one init state") {
+        codes.insert("multiple_init_states".to_string());
+        unsupported_features.insert("multiple init states".to_string());
+        reason.get_or_insert_with(|| {
+            "machine IR currently requires exactly one initial state".to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "collapse the init cases into a single representative initial state, then branch in the first transition if needed".to_string()
+        });
+    }
+    if error.contains("unsupported machine guard expression") {
+        codes.insert("unsupported_machine_guard_expr".to_string());
+        unsupported_features.extend(
+            backtick_segments(error)
+                .into_iter()
+                .map(|segment| format!("guard: {segment}")),
+        );
+        reason.get_or_insert_with(|| {
+            "one or more declarative guards use syntax outside the current machine IR subset"
+                .to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "simplify guard expressions to the current IR subset, or extend lowering support for the reported guard form".to_string()
+        });
+    }
+    if error.contains("unsupported machine update expression") {
+        codes.insert("unsupported_machine_update_expr".to_string());
+        unsupported_features.extend(
+            backtick_segments(error)
+                .into_iter()
+                .map(|segment| format!("update: {segment}")),
+        );
+        reason.get_or_insert_with(|| {
+            "one or more transition updates use syntax outside the current machine IR subset"
+                .to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "rewrite transition updates with the supported arithmetic/boolean subset, or add lowering support for the reported update form".to_string()
+        });
+    }
+    if error.contains("not representable in the current IR subset") {
+        codes.insert("unsupported_machine_property_expr".to_string());
+        unsupported_features.extend(
+            backtick_segments(error)
+                .into_iter()
+                .map(|segment| format!("property: {segment}")),
+        );
+        reason.get_or_insert_with(|| {
+            "one or more properties cannot be represented in the current machine IR subset"
+                .to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "keep property expressions within the supported boolean/arithmetic subset for machine IR and solver-backed checks".to_string()
+        });
+    }
+    if error.contains("unsupported rust field type") {
+        codes.insert("unsupported_rust_field_type".to_string());
+        unsupported_features.extend(
+            backtick_segments(error)
+                .into_iter()
+                .map(|segment| format!("field type: {segment}")),
+        );
+        reason.get_or_insert_with(|| {
+            "one or more state fields use Rust types that machine IR does not support".to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "replace the field with a supported scalar type, String, or a finite enum/set/relation/map".to_string()
+        });
+    }
+    if error.contains("exceeds supported") {
+        codes.insert("unsupported_field_range".to_string());
+        unsupported_features.extend(
+            backtick_segments(error)
+                .into_iter()
+                .map(|segment| format!("range/detail: {segment}")),
+        );
+        reason.get_or_insert_with(|| {
+            "one or more declared field ranges exceed the current machine IR bounds".to_string()
+        });
+        migration_hint.get_or_insert_with(|| {
+            "narrow the declared field range to the supported bounds for the chosen scalar type"
+                .to_string()
+        });
+    }
+
+    let codes = codes.into_iter().collect::<Vec<_>>();
+    if codes.is_empty() {
+        let unsupported_features = backtick_segments(error);
+        CapabilityAssessment {
+            codes: vec!["machine_ir_lowering_failed".to_string()],
+            detail: CapabilityDetail::blocked(
+                "machine IR lowering failed for a construct outside the current subset",
+                "inspect the reported construct, then simplify it or extend lowering support before retrying solver-backed tooling",
+                unsupported_features,
+            ),
+        }
+    } else {
+        CapabilityAssessment {
+            codes,
+            detail: CapabilityDetail::blocked(
+                reason.unwrap_or_else(|| {
+                    "machine IR lowering failed for a construct outside the current subset"
+                        .to_string()
+                }),
+                migration_hint.unwrap_or_else(|| {
+                    "simplify the reported construct so it fits the current machine IR subset"
+                        .to_string()
+                }),
+                unsupported_features.into_iter().collect(),
+            ),
+        }
+    }
+}
+
+fn solver_capability_blocked_by_ir(ir_detail: &CapabilityDetail) -> CapabilityDetail {
+    CapabilityDetail::blocked(
+        format!(
+            "solver backends require machine IR first; blocking IR reason: {}",
+            if ir_detail.reason.is_empty() {
+                "machine IR is unavailable".to_string()
+            } else {
+                ir_detail.reason.clone()
+            }
+        ),
+        ir_detail
+            .migration_hint
+            .clone()
+            .unwrap_or_else(|| "resolve the machine IR blocker first".to_string()),
+        ir_detail.unsupported_features.clone(),
+    )
+}
+
+fn backtick_segments(input: &str) -> Vec<String> {
+    sorted_unique_strings(
+        input
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn sorted_unique_strings(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 pub fn machine_transition_tags_for_action<M: ModelSpec>(action_id: &str) -> Vec<String> {
@@ -1002,38 +1282,6 @@ pub fn machine_transition_path_for_action<M: ModelSpec>(
         ));
     }
     path
-}
-
-fn machine_capability_reasons<M: VerifiedMachine>(error: &str) -> Vec<String> {
-    let mut reasons = Vec::new();
-    if M::transitions().is_empty() {
-        reasons.push("opaque_step_closure".to_string());
-    }
-    if error.contains("requires exactly one init state") {
-        reasons.push("multiple_init_states".to_string());
-    }
-    if error.contains("declarative transitions") {
-        reasons.push("missing_declarative_transitions".to_string());
-    }
-    if error.contains("unsupported machine guard expression") {
-        reasons.push("unsupported_machine_guard_expr".to_string());
-    }
-    if error.contains("unsupported machine update expression") {
-        reasons.push("unsupported_machine_update_expr".to_string());
-    }
-    if error.contains("not representable in the current IR subset") {
-        reasons.push("unsupported_machine_property_expr".to_string());
-    }
-    if error.contains("unsupported rust field type") {
-        reasons.push("unsupported_rust_field_type".to_string());
-    }
-    if error.contains("exceeds supported u8 bounds") {
-        reasons.push("unsupported_field_range".to_string());
-    }
-    if reasons.is_empty() {
-        reasons.push("machine_ir_lowering_failed".to_string());
-    }
-    reasons
 }
 
 #[doc(hidden)]
@@ -4439,10 +4687,29 @@ mod tests {
         assert!(report.explicit_ready);
         assert!(!report.ir_ready);
         assert!(!report.solver_ready);
+        assert!(report.ir.reason.contains("opaque step models"));
+        assert_eq!(
+            report.ir.migration_hint.as_deref(),
+            Some(
+                "rewrite the model using declarative `transitions { ... }` blocks so guards and updates become first-class IR"
+            )
+        );
+        assert!(report
+            .ir
+            .unsupported_features
+            .contains(&"step(state, action)".to_string()));
         assert!(report.reasons.contains(&"opaque_step_closure".to_string()));
         assert!(report
             .reasons
             .contains(&"missing_declarative_transitions".to_string()));
+        assert!(report
+            .solver
+            .reason
+            .contains("solver backends require machine IR"));
+        assert!(report
+            .solver
+            .unsupported_features
+            .contains(&"step(state, action)".to_string()));
     }
 
     #[test]
@@ -4716,11 +4983,27 @@ mod tests {
         assert!(report.ir_ready);
         assert!(!report.solver_ready);
         assert!(report
+            .solver
+            .reason
+            .contains("still needs the explicit backend"));
+        assert!(report
+            .solver
+            .unsupported_features
+            .contains(&"state field `password`: String".to_string()));
+        assert!(report
+            .solver
+            .unsupported_features
+            .contains(&"len(...)".to_string()));
+        assert!(report
             .reasons
             .contains(&"string_fields_require_explicit_backend".to_string()));
         assert!(report
             .reasons
             .contains(&"regex_match_requires_explicit_backend".to_string()));
+        assert!(report
+            .solver
+            .unsupported_features
+            .contains(&"regex_match(...)".to_string()));
 
         let model = lower_machine_model::<PasswordPolicySafeModel>()
             .expect("password policy model should lower to machine IR");
