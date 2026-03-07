@@ -14,6 +14,7 @@
 - [rust_native_modeling_specs.md](rust_native_modeling_specs.md)
 - [explicit_engine_and_evidence_specs.md](explicit_engine_and_evidence_specs.md)
 - [testgen_contract_coverage_specs.md](testgen_contract_coverage_specs.md)
+- [decision_path_ir.md](decision_path_ir.md)
 - [ai_solver_selfcheck_specs.md](ai_solver_selfcheck_specs.md)
 - [full_technology_usage_plan.md](full_technology_usage_plan.md)
 - [../09_reference](../09_reference)

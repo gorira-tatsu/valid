@@ -20,10 +20,14 @@ pub struct CoverageReport {
     pub schema_version: String,
     pub model_id: String,
     pub transition_coverage_percent: u32,
+    pub decision_coverage_percent: u32,
     pub guard_full_coverage_percent: u32,
     pub covered_actions: BTreeSet<String>,
+    pub covered_decisions: BTreeSet<String>,
     pub total_actions: BTreeSet<String>,
+    pub total_decisions: BTreeSet<String>,
     pub action_execution_counts: BTreeMap<String, usize>,
+    pub decision_counts: BTreeMap<String, usize>,
     pub visited_state_count: usize,
     pub repeated_state_count: usize,
     pub max_depth_observed: u32,
@@ -58,7 +62,19 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         .iter()
         .map(|a| a.action_id.clone())
         .collect::<BTreeSet<_>>();
+    let total_decisions = model
+        .actions
+        .iter()
+        .flat_map(|action| {
+            action
+                .decision_path()
+                .decision_ids()
+                .into_iter()
+                .chain(action.decision_path_for_guard(false).decision_ids())
+        })
+        .collect::<BTreeSet<_>>();
     let mut covered_actions = BTreeSet::new();
+    let mut covered_decisions = BTreeSet::new();
     let mut visited_states = BTreeSet::new();
     let mut all_seen_states = 0usize;
     let mut max_depth_observed = 0u32;
@@ -68,6 +84,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     let mut guard_false_counts = BTreeMap::new();
     let mut path_tag_counts = BTreeMap::new();
     let mut action_execution_counts = BTreeMap::new();
+    let mut decision_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut step_count = 0usize;
     for trace in traces {
@@ -91,17 +108,29 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 *action_execution_counts
                     .entry(action_id.clone())
                     .or_insert(0) += 1;
-                if let Some(state) = machine_state_from_snapshot(model, &step.state_before) {
-                    for action in model
+                let path = step.path.clone().or_else(|| {
+                    let state = machine_state_from_snapshot(model, &step.state_before)?;
+                    model
                         .actions
                         .iter()
-                        .filter(|action| &action.action_id == action_id)
+                        .find(|action| {
+                            &action.action_id == action_id
+                                && matches!(evaluate_guard(model, &state, action), Ok(true))
+                        })
+                        .map(|action| action.decision_path())
+                });
+                if let Some(path) = path {
+                    for decision_id in path
+                        .decisions
+                        .iter()
+                        .skip(1)
+                        .map(|decision| decision.decision_id().to_string())
                     {
-                        if matches!(evaluate_guard(model, &state, action), Ok(true)) {
-                            for tag in &action.path_tags {
-                                *path_tag_counts.entry(tag.clone()).or_insert(0) += 1;
-                            }
-                        }
+                        covered_decisions.insert(decision_id.clone());
+                        *decision_counts.entry(decision_id).or_insert(0) += 1;
+                    }
+                    for tag in path.legacy_path_tags() {
+                        *path_tag_counts.entry(tag).or_insert(0) += 1;
                     }
                 }
             }
@@ -110,12 +139,32 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 for action in &model.actions {
                     match evaluate_guard(model, &state, action) {
                         Ok(true) => {
+                            for decision_id in action
+                                .decision_path_for_guard(true)
+                                .decisions
+                                .into_iter()
+                                .take(1)
+                                .map(|decision| decision.decision_id())
+                            {
+                                covered_decisions.insert(decision_id.clone());
+                                *decision_counts.entry(decision_id).or_insert(0) += 1;
+                            }
                             guard_true_actions.insert(action.action_id.clone());
                             *guard_true_counts
                                 .entry(action.action_id.clone())
                                 .or_insert(0) += 1;
                         }
                         Ok(false) => {
+                            for decision_id in action
+                                .decision_path_for_guard(false)
+                                .decisions
+                                .into_iter()
+                                .take(1)
+                                .map(|decision| decision.decision_id())
+                            {
+                                covered_decisions.insert(decision_id.clone());
+                                *decision_counts.entry(decision_id).or_insert(0) += 1;
+                            }
                             guard_false_actions.insert(action.action_id.clone());
                             *guard_false_counts
                                 .entry(action.action_id.clone())
@@ -134,6 +183,11 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         100
     } else {
         ((covered_actions.len() * 100) / total_actions.len()) as u32
+    };
+    let decision_coverage_percent = if total_decisions.is_empty() {
+        100
+    } else {
+        ((covered_decisions.len() * 100) / total_decisions.len()) as u32
     };
     let fully_covered_guards = total_actions
         .iter()
@@ -164,10 +218,14 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         schema_version: "1.0.0".to_string(),
         model_id: model.model_id.clone(),
         transition_coverage_percent,
+        decision_coverage_percent,
         guard_full_coverage_percent,
         covered_actions,
+        covered_decisions,
         total_actions,
+        total_decisions,
         action_execution_counts,
+        decision_counts,
         visited_state_count: visited_states.len(),
         repeated_state_count: all_seen_states.saturating_sub(visited_states.len()),
         max_depth_observed,
@@ -212,8 +270,9 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
     out.push_str(&format!(",\"model_id\":\"{}\"", report.model_id));
     out.push_str(&format!(
-        ",\"summary\":{{\"transition_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
+        ",\"summary\":{{\"transition_coverage_percent\":{},\"decision_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
         report.transition_coverage_percent,
+        report.decision_coverage_percent,
         report.guard_full_coverage_percent,
         report.visited_state_count,
         report.repeated_state_count,
@@ -232,6 +291,23 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
             report
                 .action_execution_counts
                 .get(action)
+                .copied()
+                .unwrap_or(0)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"decisions\":[");
+    for (index, decision_id) in report.total_decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"decision_id\":\"{}\",\"covered\":{},\"count\":{}}}",
+            decision_id,
+            report.covered_decisions.contains(decision_id),
+            report
+                .decision_counts
+                .get(decision_id)
                 .copied()
                 .unwrap_or(0)
         ));
@@ -318,9 +394,10 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
 pub fn render_coverage_text(report: &CoverageReport) -> String {
     let gate = evaluate_coverage_gate(report, 80);
     format!(
-        "COVERAGE model={}\ntransition_coverage_percent={}\nguard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
+        "COVERAGE model={}\ntransition_coverage_percent={}\ndecision_coverage_percent={}\nguard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
         report.model_id,
         report.transition_coverage_percent,
+        report.decision_coverage_percent,
         report.guard_full_coverage_percent,
         report.visited_state_count,
         report.repeated_state_count,
@@ -350,6 +427,9 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     if report.transition_coverage_percent > 100 {
         return Err("transition_coverage_percent must not exceed 100".to_string());
     }
+    if report.decision_coverage_percent > 100 {
+        return Err("decision_coverage_percent must not exceed 100".to_string());
+    }
     if report.guard_full_coverage_percent > 100 {
         return Err("guard_full_coverage_percent must not exceed 100".to_string());
     }
@@ -364,6 +444,19 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     for action in report.action_execution_counts.keys() {
         if !report.total_actions.contains(action) {
             return Err("action_execution_counts must reference declared actions only".to_string());
+        }
+    }
+    if report.covered_decisions.len() > report.total_decisions.len() {
+        return Err("covered_decisions must be a subset of total_decisions".to_string());
+    }
+    for decision_id in &report.covered_decisions {
+        if !report.total_decisions.contains(decision_id) {
+            return Err("covered_decisions must reference declared decisions only".to_string());
+        }
+    }
+    for decision_id in report.decision_counts.keys() {
+        if !report.total_decisions.contains(decision_id) {
+            return Err("decision_counts must reference declared decisions only".to_string());
         }
     }
     for action in report.guard_true_counts.keys() {
@@ -394,6 +487,7 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         "summary",
     )?;
     require_number_field(summary, "transition_coverage_percent")?;
+    require_number_field(summary, "decision_coverage_percent")?;
     require_number_field(summary, "guard_full_coverage_percent")?;
     require_number_field(summary, "visited_state_count")?;
     require_number_field(summary, "repeated_state_count")?;
@@ -404,6 +498,12 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         require_string_field(action_object, "action_id")?;
         require_bool_field(action_object, "covered")?;
         require_number_field(action_object, "count")?;
+    }
+    for decision in require_array_field(object, "decisions")? {
+        let decision_object = require_object(decision, "decisions[]")?;
+        require_string_field(decision_object, "decision_id")?;
+        require_bool_field(decision_object, "covered")?;
+        require_number_field(decision_object, "count")?;
     }
     for guard in require_array_field(object, "guards")? {
         let guard_object = require_object(guard, "guards[]")?;
@@ -493,6 +593,7 @@ mod tests {
                 depth: 1,
                 state_before: BTreeMap::from([("x".to_string(), Value::UInt(0))]),
                 state_after: BTreeMap::from([("x".to_string(), Value::UInt(1))]),
+                path: None,
                 note: None,
             }],
         };
@@ -500,6 +601,7 @@ mod tests {
         assert_eq!(report.schema_version, "1.0.0");
         assert_eq!(report.model_id, "A");
         assert_eq!(report.transition_coverage_percent, 50);
+        assert_eq!(report.decision_coverage_percent, 50);
         assert_eq!(report.guard_full_coverage_percent, 0);
         assert_eq!(report.visited_state_count, 2);
         assert_eq!(report.repeated_state_count, 0);
@@ -523,6 +625,7 @@ mod tests {
         let text = render_coverage_text(&report);
         assert!(text.contains("gate_status=fail"));
         assert!(text.contains("transition_coverage_percent=50"));
+        assert!(text.contains("decision_coverage_percent=50"));
         assert!(text.contains("repeated_state_count=0"));
     }
 

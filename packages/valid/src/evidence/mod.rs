@@ -7,7 +7,7 @@ use crate::{
         explicit::{CheckErrorEnvelope, CheckOutcome, ExplicitRunResult},
         ArtifactPolicy, AssuranceLevel, ErrorStatus, RunStatus, UnknownReason,
     },
-    ir::Value,
+    ir::{DecisionKind, DecisionOutcome, Path, Value},
     support::{
         artifact::{evidence_path, run_result_path, vector_path},
         diagnostics::Diagnostic,
@@ -48,6 +48,7 @@ pub struct TraceStep {
     pub depth: u32,
     pub state_before: BTreeMap<String, Value>,
     pub state_after: BTreeMap<String, Value>,
+    pub path: Option<Path>,
     pub note: Option<String>,
 }
 
@@ -116,6 +117,19 @@ pub fn validate_trace(trace: &EvidenceTrace) -> Result<(), String> {
         }
         require_non_empty(&step.from_state_id, "steps[].from_state_id")?;
         require_non_empty(&step.to_state_id, "steps[].to_state_id")?;
+        if let Some(path) = &step.path {
+            for decision in &path.decisions {
+                require_non_empty(
+                    &decision.point.decision_id,
+                    "steps[].path.decisions[].decision_id",
+                )?;
+                require_non_empty(
+                    &decision.point.action_id,
+                    "steps[].path.decisions[].action_id",
+                )?;
+                require_non_empty(&decision.point.label, "steps[].path.decisions[].label")?;
+            }
+        }
     }
     Ok(())
 }
@@ -194,6 +208,11 @@ pub fn render_trace_json(trace: &EvidenceTrace) -> String {
         out.push_str(&format!(",\"depth\":{}", step.depth));
         append_state_map(&mut out, "state_before", &step.state_before);
         append_state_map(&mut out, "state_after", &step.state_after);
+        if let Some(path) = &step.path {
+            out.push_str(&format!(",\"path\":{}", render_path_json(path)));
+        } else {
+            out.push_str(",\"path\":null");
+        }
         out.push('}');
     }
     out.push_str("]}");
@@ -277,6 +296,20 @@ pub fn validate_rendered_trace_json(body: &str) -> Result<(), String> {
         require_string_field(step_object, "from_state_id")?;
         require_string_field(step_object, "to_state_id")?;
         require_number_field(step_object, "depth")?;
+        if let Some(path) = step_object.get("path") {
+            if !matches!(path, crate::support::json::JsonValue::Null) {
+                let path_object = require_object(path, "trace.steps[].path")?;
+                for decision in require_array_field(path_object, "decisions")? {
+                    let decision_object =
+                        require_object(decision, "trace.steps[].path.decisions[]")?;
+                    require_string_field(decision_object, "decision_id")?;
+                    require_string_field(decision_object, "action_id")?;
+                    require_string_field(decision_object, "kind")?;
+                    require_string_field(decision_object, "label")?;
+                    require_string_field(decision_object, "outcome")?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -358,6 +391,66 @@ fn render_completed_text(result: &ExplicitRunResult) -> String {
         }
     }
     out
+}
+
+fn render_path_json(path: &Path) -> String {
+    let mut out = String::from("{\"decisions\":[");
+    for (index, decision) in path.decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!(
+            "\"decision_id\":\"{}\"",
+            escape_json(&decision.decision_id())
+        ));
+        out.push_str(&format!(
+            ",\"action_id\":\"{}\"",
+            escape_json(&decision.point.action_id)
+        ));
+        out.push_str(&format!(
+            ",\"kind\":\"{}\"",
+            match decision.point.kind {
+                DecisionKind::Guard => "guard",
+                DecisionKind::StateUpdate => "state_update",
+            }
+        ));
+        out.push_str(&format!(
+            ",\"label\":\"{}\"",
+            escape_json(&decision.point.label)
+        ));
+        if let Some(field) = &decision.point.field {
+            out.push_str(&format!(",\"field\":\"{}\"", escape_json(field)));
+        } else {
+            out.push_str(",\"field\":null");
+        }
+        append_string_array(&mut out, "reads", &decision.point.reads);
+        append_string_array(&mut out, "writes", &decision.point.writes);
+        append_string_array(&mut out, "path_tags", &decision.point.path_tags);
+        out.push_str(&format!(
+            ",\"outcome\":\"{}\"",
+            match decision.outcome {
+                DecisionOutcome::GuardTrue => "guard_true",
+                DecisionOutcome::GuardFalse => "guard_false",
+                DecisionOutcome::UpdateApplied => "update_applied",
+            }
+        ));
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
+}
+
+fn append_string_array(out: &mut String, key: &str, values: &[String]) {
+    out.push_str(&format!(",\"{}\":", key));
+    out.push('[');
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(value)));
+    }
+    out.push(']');
 }
 
 fn render_error_text(error: &CheckErrorEnvelope) -> String {
@@ -741,6 +834,7 @@ mod tests {
                     depth: 1,
                     state_before: BTreeMap::from([("x".to_string(), crate::ir::Value::UInt(0))]),
                     state_after: BTreeMap::from([("x".to_string(), crate::ir::Value::UInt(2))]),
+                    path: None,
                     note: None,
                 }],
             }),
@@ -823,6 +917,7 @@ mod tests {
                 depth: 1,
                 state_before: BTreeMap::new(),
                 state_after: BTreeMap::new(),
+                path: None,
                 note: None,
             }],
         };

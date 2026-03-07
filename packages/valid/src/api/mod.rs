@@ -12,7 +12,7 @@ use crate::{
     },
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
-    ir::ModelIr,
+    ir::{DecisionKind, DecisionOutcome, ModelIr, Path},
     orchestrator::run_all_properties_with_backend,
     solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
     support::{
@@ -130,6 +130,7 @@ pub struct ExplainResponse {
     pub property_id: String,
     pub failure_step_index: usize,
     pub failing_action_id: Option<String>,
+    pub decision_path: Path,
     pub failing_action_reads: Vec<String>,
     pub failing_action_writes: Vec<String>,
     pub failing_action_path_tags: Vec<String>,
@@ -791,7 +792,8 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 failure_step.action_id.as_ref().map(|action_id| {
                     let mut reads = std::collections::BTreeSet::new();
                     let mut writes = std::collections::BTreeSet::new();
-                    let mut path_tags = std::collections::BTreeSet::new();
+                    let traced_path = failure_step.path.clone();
+                    let mut decision_path = failure_step.path.clone().unwrap_or_default();
                     for action in model
                         .actions
                         .iter()
@@ -800,14 +802,16 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         if matches!(evaluate_guard(model, &state, action), Ok(true)) {
                             reads.extend(action.reads.iter().cloned());
                             writes.extend(action.writes.iter().cloned());
-                            path_tags.extend(action.path_tags.iter().cloned());
+                            if traced_path.is_none() {
+                                decision_path.extend(action.decision_path());
+                            }
                         }
                     }
                     (
                         action_id.clone(),
                         reads.into_iter().collect::<Vec<_>>(),
                         writes.into_iter().collect::<Vec<_>>(),
-                        path_tags.into_iter().collect::<Vec<_>>(),
+                        decision_path,
                     )
                 })
             });
@@ -844,7 +848,8 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 ]
             } else {
                 let mut causes = Vec::new();
-                if let Some((action_id, reads, writes, path_tags)) = &action_metadata {
+                if let Some((action_id, reads, writes, decision_path)) = &action_metadata {
+                    let path_tags = decision_path.legacy_path_tags();
                     if !write_overlap.is_empty() {
                         causes.push(ExplainCandidateCause {
                             kind: "write_set_overlap".to_string(),
@@ -970,6 +975,11 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 property_id: trace.property_id.clone(),
                 failure_step_index: failure_step.index,
                 failing_action_id: failure_step.action_id.clone(),
+                decision_path: action_metadata
+                    .as_ref()
+                    .map(|(_, _, _, path)| path.clone())
+                    .or_else(|| failure_step.path.clone())
+                    .unwrap_or_default(),
                 failing_action_reads: action_metadata
                     .as_ref()
                     .map(|(_, reads, _, _)| reads.clone())
@@ -980,7 +990,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     .unwrap_or_default(),
                 failing_action_path_tags: action_metadata
                     .as_ref()
-                    .map(|(_, _, _, path_tags)| path_tags.clone())
+                    .map(|(_, _, _, path)| path.legacy_path_tags())
                     .unwrap_or_default(),
                 write_overlap_fields: write_overlap.clone(),
                 involved_fields,
@@ -1546,7 +1556,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
@@ -1558,6 +1568,7 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
             .as_ref()
             .map(|value| format!("\"{}\"", escape_json(value)))
             .unwrap_or_else(|| "null".to_string()),
+        render_path_json(&response.decision_path),
         render_string_array(&response.failing_action_reads),
         render_string_array(&response.failing_action_writes),
         render_string_array(&response.failing_action_path_tags),
@@ -1606,6 +1617,21 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     ));
     if let Some(action_id) = &response.failing_action_id {
         out.push_str(&format!("failing_action_id: {}\n", action_id));
+    }
+    if !response.decision_path.decisions.is_empty() {
+        out.push_str("decision_path:\n");
+        for decision in &response.decision_path.decisions {
+            out.push_str(&format!(
+                "- {} [{}] {}\n",
+                decision.point.decision_id,
+                match decision.outcome {
+                    DecisionOutcome::GuardTrue => "guard_true",
+                    DecisionOutcome::GuardFalse => "guard_false",
+                    DecisionOutcome::UpdateApplied => "update_applied",
+                },
+                decision.point.label
+            ));
+        }
     }
     if !response.failing_action_reads.is_empty() || !response.failing_action_writes.is_empty() {
         out.push_str(&format!(
@@ -2388,10 +2414,77 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
     require_non_empty(&response.request_id, "request_id")?;
     require_non_empty(&response.evidence_id, "evidence_id")?;
     require_non_empty(&response.property_id, "property_id")?;
+    for decision in &response.decision_path.decisions {
+        require_non_empty(
+            &decision.point.decision_id,
+            "decision_path.decisions[].decision_id",
+        )?;
+        require_non_empty(
+            &decision.point.action_id,
+            "decision_path.decisions[].action_id",
+        )?;
+    }
     if !(0.0..=1.0).contains(&response.confidence) {
         return Err("confidence must be between 0.0 and 1.0".to_string());
     }
     Ok(())
+}
+
+fn render_path_json(path: &Path) -> String {
+    let mut out = String::from("{\"decisions\":[");
+    for (index, decision) in path.decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!(
+            "\"decision_id\":\"{}\"",
+            escape_json(&decision.decision_id())
+        ));
+        out.push_str(&format!(
+            ",\"action_id\":\"{}\"",
+            escape_json(&decision.point.action_id)
+        ));
+        out.push_str(&format!(
+            ",\"kind\":\"{}\"",
+            match decision.point.kind {
+                DecisionKind::Guard => "guard",
+                DecisionKind::StateUpdate => "state_update",
+            }
+        ));
+        out.push_str(&format!(
+            ",\"label\":\"{}\"",
+            escape_json(&decision.point.label)
+        ));
+        if let Some(field) = &decision.point.field {
+            out.push_str(&format!(",\"field\":\"{}\"", escape_json(field)));
+        } else {
+            out.push_str(",\"field\":null");
+        }
+        out.push_str(&format!(
+            ",\"reads\":{}",
+            render_string_array(&decision.point.reads)
+        ));
+        out.push_str(&format!(
+            ",\"writes\":{}",
+            render_string_array(&decision.point.writes)
+        ));
+        out.push_str(&format!(
+            ",\"path_tags\":{}",
+            render_string_array(&decision.point.path_tags)
+        ));
+        out.push_str(&format!(
+            ",\"outcome\":\"{}\"",
+            match decision.outcome {
+                DecisionOutcome::GuardTrue => "guard_true",
+                DecisionOutcome::GuardFalse => "guard_false",
+                DecisionOutcome::UpdateApplied => "update_applied",
+            }
+        ));
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
 }
 
 pub fn validate_minimize_request(request: &MinimizeRequest) -> Result<(), String> {
@@ -2639,6 +2732,7 @@ mod tests {
         assert_eq!(response.property_id, "P_SAFE");
         assert_eq!(response.failure_step_index, 0);
         assert_eq!(response.involved_fields, vec!["x".to_string()]);
+        assert!(!response.decision_path.decisions.is_empty());
         assert!(response
             .candidate_causes
             .iter()
@@ -2660,6 +2754,7 @@ mod tests {
             .repair_hints
             .iter()
             .any(|hint| hint.contains("both guard outcomes")));
+        assert!(super::render_explain_json(&response).contains("\"decision_path\""));
         validate_explain_response(&response).unwrap();
     }
 

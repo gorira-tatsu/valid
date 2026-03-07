@@ -872,6 +872,7 @@ mod tests {
                 depth: 1,
                 state_before: BTreeMap::from([("x".to_string(), Value::UInt(0))]),
                 state_after: BTreeMap::from([("x".to_string(), Value::UInt(2))]),
+                path: None,
                 note: None,
             }],
         };

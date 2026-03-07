@@ -28,7 +28,7 @@ use valid::{
         render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
-    testgen::render_replay_json,
+    testgen::{render_replay_json, replay_path_for_model},
 };
 
 fn main() {
@@ -610,18 +610,12 @@ fn cmd_replay(args: Vec<String>) {
             valid::kernel::eval::eval_expr(&model, &terminal, &property.expr),
             Ok(valid::ir::Value::Bool(true))
         );
-        let mut path_tags = std::collections::BTreeSet::new();
-        for action_id in &parsed.actions {
-            for action in model
-                .actions
-                .iter()
-                .filter(|action| action.action_id == *action_id)
-            {
-                for tag in &action.path_tags {
-                    path_tags.insert(tag.clone());
-                }
-            }
-        }
+        let replay_path = replay_path_for_model(
+            &model,
+            &parsed.actions,
+            parsed.focus_action_id.as_deref(),
+            focus_enabled,
+        );
         Ok(render_replay_json(
             property_id,
             &parsed.actions,
@@ -629,7 +623,7 @@ fn cmd_replay(args: Vec<String>) {
             parsed.focus_action_id.as_deref(),
             focus_enabled,
             Some(property_holds),
-            &path_tags.into_iter().collect::<Vec<_>>(),
+            &replay_path,
         ))
     }
     .unwrap_or_else(|message| {

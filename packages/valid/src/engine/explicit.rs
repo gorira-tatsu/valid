@@ -62,6 +62,7 @@ struct NodeRecord {
     state: MachineState,
     depth: usize,
     parent: Option<usize>,
+    via_action_index: Option<usize>,
     via_action: Option<String>,
     note: Option<String>,
 }
@@ -100,6 +101,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         state: initial.clone(),
         depth: 0,
         parent: None,
+        via_action_index: None,
         via_action: None,
         note: Some("initial state".to_string()),
     }];
@@ -127,7 +129,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         }
 
         let mut enabled = 0usize;
-        for action in &model.actions {
+        for (action_index, action) in model.actions.iter().enumerate() {
             explored_transitions += 1;
             match apply_action_transition(model, &node.state, action)? {
                 Some(next_state) => {
@@ -153,6 +155,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
                             state: next_state,
                             depth: node.depth + 1,
                             parent: Some(node_index),
+                            via_action_index: Some(action_index),
                             via_action: Some(action.action_id.clone()),
                             note: None,
                         });
@@ -445,6 +448,10 @@ fn build_trace(
             depth: to.depth as u32,
             state_before: from.state.as_named_map(model),
             state_after: to.state.as_named_map(model),
+            path: to
+                .via_action_index
+                .and_then(|action_index| model.actions.get(action_index))
+                .map(|action| action.decision_path()),
             note: if window[1] == end_index {
                 final_note.clone().or_else(|| to.note.clone())
             } else {
