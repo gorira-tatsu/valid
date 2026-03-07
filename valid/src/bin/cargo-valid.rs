@@ -15,7 +15,10 @@ use valid::{
     coverage::{render_coverage_json, render_coverage_text},
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
-    project::{load_project_config, render_project_config_template},
+    project::{
+        load_project_config, render_project_config_template, render_registry_source_template,
+        ProjectConfig,
+    },
     reporter::render_model_mermaid,
 };
 
@@ -320,8 +323,14 @@ fn cmd_graph(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
     };
+    let env_default_format = env::var("VALID_DEFAULT_GRAPH_FORMAT").ok();
+    let default_format = parsed
+        .format
+        .as_deref()
+        .or(env_default_format.as_deref())
+        .unwrap_or("mermaid");
     match inspect_source(&request) {
-        Ok(response) => match parsed.format.as_deref().unwrap_or("mermaid") {
+        Ok(response) => match default_format {
             "json" => println!("{}", render_inspect_json(&response)),
             "text" => print!("{}", render_inspect_text(&response)),
             _ => println!("{}", render_model_mermaid(&response)),
@@ -750,14 +759,17 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
     let cargo_toml = current_dir.join("Cargo.toml");
     match load_project_config(&current_dir) {
         Ok(Some(config)) => {
+            apply_project_runtime_config(&config);
+            let explicit_registry_target =
+                parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some();
             if parsed.backend.is_none() {
-                parsed.backend = config.default_backend;
+                parsed.backend = config.default_backend.clone();
             }
-            if parsed.suite_models.is_empty() {
-                parsed.suite_models = config.suite_models;
+            if parsed.suite_models.is_empty() && !explicit_registry_target {
+                parsed.suite_models = config.suite_models.clone();
             }
-            if parsed.file.is_none() && parsed.example.is_none() && parsed.bin.is_none() {
-                if let Some(registry) = config.registry {
+            if !explicit_registry_target {
+                if let Some(registry) = config.registry.clone() {
                     parsed.file = Some(current_dir.join(registry).to_string_lossy().to_string());
                 }
             }
@@ -920,25 +932,54 @@ fn cmd_init(parsed: &CliArgs) -> ! {
     }
     let registry = parsed.file.as_deref().unwrap_or("examples/valid_models.rs");
     let body = render_project_config_template(registry);
+    let registry_path = root.join(registry);
+    if let Some(parent) = registry_path.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|err| {
+            eprintln!("failed to create `{}`: {err}", parent.display());
+            process::exit(3);
+        });
+    }
+    if !registry_path.exists() {
+        fs::write(&registry_path, render_registry_source_template()).unwrap_or_else(|err| {
+            eprintln!("failed to write `{}`: {err}", registry_path.display());
+            process::exit(3);
+        });
+    }
+    let generated_dir = root.join("tests").join("generated");
+    fs::create_dir_all(&generated_dir).unwrap_or_else(|err| {
+        eprintln!("failed to create `{}`: {err}", generated_dir.display());
+        process::exit(3);
+    });
+    let gitkeep = generated_dir.join(".gitkeep");
+    if !gitkeep.exists() {
+        fs::write(&gitkeep, "").unwrap_or_else(|err| {
+            eprintln!("failed to write `{}`: {err}", gitkeep.display());
+            process::exit(3);
+        });
+    }
     fs::write(&config_path, body).unwrap_or_else(|err| {
         eprintln!("failed to write `{}`: {err}", config_path.display());
         process::exit(3);
     });
     if parsed.json {
         println!(
-            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\"}}",
+            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\"}}",
             config_path.display(),
-            registry
+            registry,
+            registry_path.display(),
+            generated_dir.display(),
         );
     } else {
         println!("created: {}", config_path.display());
         println!("registry: {registry}");
+        println!("scaffolded_registry: {}", registry_path.display());
+        println!("generated_tests_dir: {}", generated_dir.display());
     }
     process::exit(0);
 }
 
 fn clean_generated_tests(root: &Path) -> Vec<String> {
-    let generated_dir = root.join("tests").join("generated");
+    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "tests/generated");
     let mut removed = Vec::new();
     let Ok(entries) = fs::read_dir(&generated_dir) else {
         return removed;
@@ -963,7 +1004,7 @@ fn clean_generated_tests(root: &Path) -> Vec<String> {
 }
 
 fn clean_artifacts(root: &Path) -> Vec<String> {
-    let artifacts_dir = root.join("artifacts");
+    let artifacts_dir = resolve_project_dir(root, "VALID_ARTIFACTS_DIR", "artifacts");
     if !artifacts_dir.exists() {
         return Vec::new();
     }
@@ -983,4 +1024,30 @@ fn clean_artifacts(root: &Path) -> Vec<String> {
         }
     }
     removed
+}
+
+fn resolve_project_dir(root: &Path, env_key: &str, default_rel: &str) -> PathBuf {
+    env::var(env_key)
+        .ok()
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
+        .unwrap_or_else(|| root.join(default_rel))
+}
+
+fn apply_project_runtime_config(config: &ProjectConfig) {
+    if let Some(generated_tests_dir) = &config.generated_tests_dir {
+        env::set_var("VALID_GENERATED_TESTS_DIR", generated_tests_dir);
+    }
+    if let Some(artifacts_dir) = &config.artifacts_dir {
+        env::set_var("VALID_ARTIFACTS_DIR", artifacts_dir);
+    }
+    if let Some(default_graph_format) = &config.default_graph_format {
+        env::set_var("VALID_DEFAULT_GRAPH_FORMAT", default_graph_format);
+    }
 }

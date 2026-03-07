@@ -1,5 +1,14 @@
 use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
 
+#[proc_macro]
+pub fn valid_model(input: TokenStream) -> TokenStream {
+    let tokens = input.clone().into_iter().collect::<Vec<_>>();
+    if let Err(message) = validate_valid_model_header(&tokens) {
+        return compile_error_tokens(&message);
+    }
+    wrap_valid_model_tokens(input)
+}
+
 #[proc_macro_derive(ValidState, attributes(valid))]
 pub fn derive_valid_state(input: TokenStream) -> TokenStream {
     let parsed = parse_struct(input);
@@ -139,6 +148,63 @@ struct ParsedVariant {
     action_id: String,
     reads: Vec<String>,
     writes: Vec<String>,
+}
+
+fn validate_valid_model_header(tokens: &[TokenTree]) -> Result<(), String> {
+    let mut iter = tokens.iter();
+    match iter.next() {
+        Some(TokenTree::Ident(ident)) if ident.to_string() == "model" => {}
+        _ => return Err("valid_model! expects a `model Name<State, Action>;` header".to_string()),
+    }
+
+    let Some(TokenTree::Ident(_)) = iter.next() else {
+        return Err("valid_model! expected a model name after `model`".to_string());
+    };
+
+    let mut saw_generics = false;
+    let mut depth = 0usize;
+    let mut saw_header_end = false;
+    for token in iter {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == '<' => {
+                saw_generics = true;
+                depth += 1;
+            }
+            TokenTree::Punct(punct) if punct.as_char() == '>' => {
+                depth = depth.saturating_sub(1);
+            }
+            TokenTree::Punct(punct) if punct.as_char() == ';' && depth == 0 => {
+                saw_header_end = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !saw_header_end {
+        return Err("valid_model! expected `;` after `model Name<State, Action>`".to_string());
+    }
+    if !saw_generics {
+        return Err(
+            "valid_model! requires explicit state/action types. Use `model Name<State, Action>;`."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn wrap_valid_model_tokens(input: TokenStream) -> TokenStream {
+    let mut output = "::valid::__valid_model_internal!"
+        .parse::<TokenStream>()
+        .expect("valid_model proc-macro prelude should parse");
+    output.extend([TokenTree::Group(Group::new(Delimiter::Brace, input))]);
+    output
+}
+
+fn compile_error_tokens(message: &str) -> TokenStream {
+    format!("compile_error!({message:?});")
+        .parse()
+        .expect("compile_error! token emission must succeed")
 }
 
 fn parse_struct(input: TokenStream) -> ParsedStruct {
@@ -360,5 +426,29 @@ fn as_group(token: &TokenTree) -> Option<Group> {
     match token {
         TokenTree::Group(group) => Some(group.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_valid_model_header;
+
+    #[test]
+    fn valid_model_header_requires_explicit_state_and_action_types() {
+        let tokens =
+            "model CounterModel<State, Action>; init []; properties { invariant P |state| true; }"
+                .parse()
+                .unwrap();
+        assert!(validate_valid_model_header(&tokens.into_iter().collect::<Vec<_>>()).is_ok());
+    }
+
+    #[test]
+    fn valid_model_header_rejects_shorthand_form() {
+        let tokens = "model CounterModel; init []; properties { invariant P |state| true; }"
+            .parse()
+            .unwrap();
+        let error = validate_valid_model_header(&tokens.into_iter().collect::<Vec<_>>())
+            .expect_err("shorthand form should be rejected");
+        assert!(error.contains("explicit state/action types"));
     }
 }

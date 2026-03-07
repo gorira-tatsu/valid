@@ -49,18 +49,18 @@ Project-first flow:
 
 ```sh
 cargo install --path .
-cargo valid init
 cargo valid models
-cargo valid inspect counter
-cargo valid graph counter
-cargo valid readiness counter
-cargo valid verify failing-counter
-cargo valid generate-tests counter --strategy=witness
-cargo valid generate-tests counter --strategy=boundary
-cargo valid replay failing-counter --property=P_FAIL --actions=INC,INC
+cargo valid inspect refund-control
+cargo valid graph refund-control
+cargo valid readiness breakglass-access-regression
+cargo valid verify breakglass-access-regression
+cargo valid generate-tests refund-control --strategy=path
 cargo valid suite
 cargo valid clean all
 ```
+
+For a new project, `cargo valid init` now creates `valid.toml`, scaffolds
+`examples/valid_models.rs`, and creates `tests/generated/.gitkeep`.
 
 Registry override examples:
 
@@ -84,6 +84,7 @@ Command meanings:
 
 - `counter` is explicit-ready but not solver-ready because it is written with a free-form `step`
 - `iam-access` is solver-ready because it uses declarative `transitions { ... }`
+- declarative graphs now show guard conditions, concrete field updates, and path tags directly
 - `transition_details.path_tags` and `coverage.path_tags` expose the shared decision/path vocabulary
 
 If you prefer ordinary Rust type declarations instead of `valid_state!` and
@@ -133,6 +134,7 @@ cargo valid --registry examples/practical_use_cases_registry.rs models
 cargo valid --registry examples/practical_use_cases_registry.rs readiness prod-deploy-safe
 cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-control
+cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
 cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
 cargo valid --registry examples/practical_use_cases_registry.rs suite
 ```

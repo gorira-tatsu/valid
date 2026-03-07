@@ -76,6 +76,13 @@ pub struct InspectTransition {
     pub reads: Vec<String>,
     pub writes: Vec<String>,
     pub path_tags: Vec<String>,
+    pub updates: Vec<InspectTransitionUpdate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectTransitionUpdate {
+    pub field: String,
+    pub expr: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,11 +298,19 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .iter()
             .map(|action| InspectTransition {
                 action_id: action.action_id.clone(),
-                guard: Some(format!("{:?}", action.guard)),
-                effect: Some(format!("{:?}", action.updates)),
+                guard: Some(render_expr_ir(&action.guard)),
+                effect: Some(render_update_effect(&action.updates)),
                 reads: action.reads.clone(),
                 writes: action.writes.clone(),
                 path_tags: action.path_tags.clone(),
+                updates: action
+                    .updates
+                    .iter()
+                    .map(|update| InspectTransitionUpdate {
+                        field: update.field.clone(),
+                        expr: render_expr_ir(&update.value),
+                    })
+                    .collect(),
             })
             .collect(),
         property_details: model
@@ -1254,7 +1269,7 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{}}}",
+            "{{\"action_id\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{},\"updates\":[{}]}}",
             escape_json(&transition.action_id),
             transition
                 .guard
@@ -1268,7 +1283,17 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
                 .unwrap_or_else(|| "null".to_string()),
             render_string_array(&transition.reads),
             render_string_array(&transition.writes),
-            render_string_array(&transition.path_tags)
+            render_string_array(&transition.path_tags),
+            transition
+                .updates
+                .iter()
+                .map(|update| format!(
+                    "{{\"field\":\"{}\",\"expr\":\"{}\"}}",
+                    escape_json(&update.field),
+                    escape_json(&update.expr)
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
         ));
     }
     out.push(']');
@@ -1355,9 +1380,51 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
                 transition.effect.as_deref().unwrap_or("n/a"),
                 transition.path_tags.join(", ")
             ));
+            for update in &transition.updates {
+                out.push_str(&format!("  update {} := {}\n", update.field, update.expr));
+            }
         }
     }
     out
+}
+
+fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
+    match expr {
+        crate::ir::ExprIr::Literal(value) => match value {
+            crate::ir::Value::Bool(value) => value.to_string(),
+            crate::ir::Value::UInt(value) => value.to_string(),
+        },
+        crate::ir::ExprIr::FieldRef(field) => field.clone(),
+        crate::ir::ExprIr::Unary { op, expr } => match op {
+            crate::ir::UnaryOp::Not => format!("!({})", render_expr_ir(expr)),
+        },
+        crate::ir::ExprIr::Binary { op, left, right } => {
+            let operator = match op {
+                crate::ir::BinaryOp::Add => "+",
+                crate::ir::BinaryOp::LessThanOrEqual => "<=",
+                crate::ir::BinaryOp::Equal => "==",
+                crate::ir::BinaryOp::And => "&&",
+                crate::ir::BinaryOp::Or => "||",
+            };
+            format!(
+                "({} {} {})",
+                render_expr_ir(left),
+                operator,
+                render_expr_ir(right)
+            )
+        }
+    }
+}
+
+fn render_update_effect(updates: &[crate::ir::UpdateIr]) -> String {
+    if updates.is_empty() {
+        return "[]".to_string();
+    }
+    updates
+        .iter()
+        .map(|update| format!("{} := {}", update.field, render_expr_ir(&update.value)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn lint_source(request: &InspectRequest) -> Result<LintResponse, Vec<Diagnostic>> {

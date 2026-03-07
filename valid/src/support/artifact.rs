@@ -1,21 +1,50 @@
 //! Deterministic artifact path helpers.
 
+fn path_from_env_or_default(env_key: &str, default_prefix: &str, suffix: &str) -> String {
+    match std::env::var(env_key) {
+        Ok(prefix) if !prefix.trim().is_empty() => {
+            format!("{}/{}", prefix.trim_end_matches('/'), suffix)
+        }
+        _ => format!("{default_prefix}/{suffix}"),
+    }
+}
+
 pub fn run_result_path(run_id: &str) -> String {
-    format!("artifacts/{run_id}/check-result.json")
+    path_from_env_or_default(
+        "VALID_ARTIFACTS_DIR",
+        "artifacts",
+        &format!("{run_id}/check-result.json"),
+    )
 }
 
 pub fn evidence_path(run_id: &str, evidence_id: &str) -> String {
-    format!("artifacts/{run_id}/evidence/{evidence_id}.trace.json")
+    path_from_env_or_default(
+        "VALID_ARTIFACTS_DIR",
+        "artifacts",
+        &format!("{run_id}/evidence/{evidence_id}.trace.json"),
+    )
 }
 
 pub fn vector_path(run_id: &str, vector_id: &str) -> String {
-    format!("artifacts/{run_id}/vectors/{vector_id}.json")
+    path_from_env_or_default(
+        "VALID_ARTIFACTS_DIR",
+        "artifacts",
+        &format!("{run_id}/vectors/{vector_id}.json"),
+    )
 }
 
 pub fn generated_test_path(vector_id: &str) -> String {
-    format!("tests/generated/{vector_id}.rs")
+    path_from_env_or_default(
+        "VALID_GENERATED_TESTS_DIR",
+        "tests/generated",
+        &format!("{vector_id}.rs"),
+    )
 }
 
 pub fn selfcheck_report_path(suite_id: &str, run_id: &str) -> String {
-    format!("artifacts/selfcheck/{suite_id}/{run_id}/report.json")
+    path_from_env_or_default(
+        "VALID_ARTIFACTS_DIR",
+        "artifacts",
+        &format!("selfcheck/{suite_id}/{run_id}/report.json"),
+    )
 }

@@ -107,9 +107,9 @@ fn cargo_valid_lists_registered_models() {
         .expect("cargo-valid list should run");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"counter\""));
-    assert!(stdout.contains("\"failing-counter\""));
-    assert!(stdout.contains("\"iam-access\""));
+    assert!(stdout.contains("\"prod-deploy-safe\""));
+    assert!(stdout.contains("\"breakglass-access-regression\""));
+    assert!(stdout.contains("\"refund-control\""));
 }
 
 #[test]
@@ -131,6 +131,8 @@ fn cargo_valid_registry_flag_alias_works() {
 fn cargo_valid_inspects_registered_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("inspect")
         .arg("counter")
         .arg("--json")
@@ -153,6 +155,12 @@ fn cargo_valid_inspects_registered_model() {
 fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("graph")
         .arg("iam-access")
         .output()
@@ -169,6 +177,8 @@ fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
 fn cargo_valid_graph_marks_step_models_as_explicit_only() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("graph")
         .arg("counter")
         .output()
@@ -185,6 +195,8 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
 fn cargo_valid_checks_registered_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("check")
         .arg("failing-counter")
         .arg("--json")
@@ -199,6 +211,8 @@ fn cargo_valid_checks_registered_model() {
 fn cargo_valid_lints_registered_model_with_migration_hints() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("readiness")
         .arg("counter")
         .arg("--json")
@@ -287,6 +301,8 @@ fn cargo_valid_checks_all_example_models_from_file() {
 fn cargo_valid_testgen_witness_generates_files() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("generate-tests")
         .arg("counter")
         .arg("--strategy=witness")
@@ -367,6 +383,12 @@ fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
 fn cargo_valid_testgen_path_generates_tagged_files() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("testgen")
         .arg("iam-access")
         .arg("--strategy=path")
@@ -387,6 +409,8 @@ fn cargo_valid_testgen_path_generates_tagged_files() {
 fn cargo_valid_check_can_target_specific_property() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
         .arg("verify")
         .arg("failing-counter")
         .arg("--property=P_FAIL")
@@ -430,6 +454,12 @@ fn cargo_valid_external_registry_can_use_command_backend() {
 fn cargo_valid_inspects_bundled_declarative_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("inspect")
         .arg("iam-access")
         .arg("--json")
@@ -451,6 +481,12 @@ fn cargo_valid_inspects_bundled_declarative_model() {
 fn cargo_valid_lints_declarative_model_cleanly() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("lint")
         .arg("iam-access")
         .arg("--json")
@@ -536,6 +572,16 @@ fn cargo_valid_init_writes_valid_toml() {
     let body = fs::read_to_string(project_dir.join("valid.toml")).expect("valid.toml must exist");
     assert!(body.contains("registry = \"examples/valid_models.rs\""));
     assert!(body.contains("default_backend = \"explicit\""));
+    assert!(body.contains("generated_tests_dir = \"tests/generated\""));
+    assert!(project_dir
+        .join("examples")
+        .join("valid_models.rs")
+        .exists());
+    assert!(project_dir
+        .join("tests")
+        .join("generated")
+        .join(".gitkeep")
+        .exists());
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -602,6 +648,12 @@ fn cargo_valid_suite_uses_valid_toml_suite_models() {
 fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("check")
         .arg("iam-access")
         .arg("--property=P_BILLING_READ_REQUIRES_SESSION")
@@ -626,6 +678,12 @@ fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
 fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("check")
         .arg("iam-access")
         .arg("--property=P_BILLING_READ_REQUIRES_SESSION")
@@ -688,6 +746,12 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
 fn cargo_valid_bundled_declarative_testgen_can_use_command_backend() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("testgen")
         .arg("iam-access")
         .arg("--property=P_BILLING_READ_REQUIRES_SESSION")

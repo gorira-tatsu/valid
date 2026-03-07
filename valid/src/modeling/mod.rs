@@ -648,8 +648,9 @@ macro_rules! valid_action_spec {
     };
 }
 
+#[doc(hidden)]
 #[macro_export]
-macro_rules! valid_model {
+macro_rules! __valid_model_internal {
     (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
@@ -715,7 +716,7 @@ macro_rules! valid_model {
                                 effect: stringify!($state_ctor { $($field: $update_expr),* }),
                                 reads: descriptor.reads,
                                 writes: descriptor.writes,
-                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+                                path_tags: $crate::__valid_model_internal!(@path_tags $($($path_tag),*)?),
                                 updates: &[
                                     $(
                                         $crate::modeling::TransitionUpdateDescriptor {
@@ -796,7 +797,7 @@ macro_rules! valid_model {
                                 effect: stringify!([$($next_state),*]),
                                 reads: descriptor.reads,
                                 writes: descriptor.writes,
-                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+                                path_tags: $crate::__valid_model_internal!(@path_tags $($($path_tag),*)?),
                                 updates: &[],
                             }
                         }
@@ -855,7 +856,7 @@ macro_rules! valid_model {
         step |$state:ident, $action:ident| $step_body:block
         invariant |$holds_state:ident| $holds_expr:expr;
     ) => {
-        $crate::valid_model! {
+        $crate::__valid_model_internal! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             step |$state, $action| $step_body
@@ -2231,7 +2232,7 @@ mod tests {
         }
     }
 
-    crate::valid_model! {
+    valid_derive::valid_model! {
         model CounterModel<State, Action>;
         init [State {
             x: 0,
@@ -2260,7 +2261,7 @@ mod tests {
         }
     }
 
-    crate::valid_model! {
+    valid_derive::valid_model! {
         model FailingCounterModel<State, Action>;
         init [State {
             x: 0,
@@ -2431,7 +2432,7 @@ mod tests {
         }
     }
 
-    crate::valid_model! {
+    valid_derive::valid_model! {
         model AccessModel<AccessState, AccessAction>;
         init [AccessState {
             attached: false,

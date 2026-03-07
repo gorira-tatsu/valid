@@ -1,0 +1,6 @@
+registry = "examples/practical_use_cases_registry.rs"
+default_backend = "explicit"
+suite_models = ["prod-deploy-safe", "breakglass-access-regression", "refund-control", "data-export-control"]
+generated_tests_dir = "tests/generated"
+artifacts_dir = "artifacts"
+default_graph_format = "mermaid"

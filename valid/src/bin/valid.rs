@@ -261,8 +261,14 @@ fn cmd_graph(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
     };
+    let env_default_format = std::env::var("VALID_DEFAULT_GRAPH_FORMAT").ok();
+    let render_format = parsed
+        .format
+        .as_deref()
+        .or(env_default_format.as_deref())
+        .unwrap_or("mermaid");
     match inspect_source(&request) {
-        Ok(response) => match parsed.format.as_deref().unwrap_or("mermaid") {
+        Ok(response) => match render_format {
             "json" => println!("{}", render_inspect_json(&response)),
             "text" => print!("{}", render_inspect_text(&response)),
             _ => println!("{}", render_model_mermaid(&response)),
@@ -870,7 +876,7 @@ fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
 }
 
 fn clean_generated_tests(root: &std::path::Path) -> Vec<String> {
-    let generated_dir = root.join("tests").join("generated");
+    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "tests/generated");
     let mut removed = Vec::new();
     let Ok(entries) = fs::read_dir(&generated_dir) else {
         return removed;
@@ -895,7 +901,7 @@ fn clean_generated_tests(root: &std::path::Path) -> Vec<String> {
 }
 
 fn clean_artifacts(root: &std::path::Path) -> Vec<String> {
-    let artifacts_dir = root.join("artifacts");
+    let artifacts_dir = resolve_project_dir(root, "VALID_ARTIFACTS_DIR", "artifacts");
     if !artifacts_dir.exists() {
         return Vec::new();
     }
@@ -915,6 +921,24 @@ fn clean_artifacts(root: &std::path::Path) -> Vec<String> {
         }
     }
     removed
+}
+
+fn resolve_project_dir(
+    root: &std::path::Path,
+    env_key: &str,
+    default_rel: &str,
+) -> std::path::PathBuf {
+    std::env::var(env_key)
+        .ok()
+        .map(std::path::PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
+        .unwrap_or_else(|| root.join(default_rel))
 }
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {

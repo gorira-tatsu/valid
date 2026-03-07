@@ -1,8 +1,8 @@
 use crate::{
     api::{
         ExplainResponse, InspectAction, InspectCapabilities, InspectProperty, InspectResponse,
-        InspectStateField, InspectTransition, OrchestrateResponse, OrchestratedRunSummary,
-        TestgenResponse,
+        InspectStateField, InspectTransition, InspectTransitionUpdate, OrchestrateResponse,
+        OrchestratedRunSummary, TestgenResponse,
     },
     coverage::collect_coverage,
     coverage::CoverageReport,
@@ -36,7 +36,7 @@ crate::valid_actions! {
     }
 }
 
-crate::valid_model! {
+valid_derive::valid_model! {
     model CounterModel<State, Action>;
     init [State {
         x: 0,
@@ -65,7 +65,7 @@ crate::valid_model! {
     }
 }
 
-crate::valid_model! {
+valid_derive::valid_model! {
     model FailingCounterModel<State, Action>;
     init [State {
         x: 0,
@@ -109,7 +109,7 @@ crate::valid_actions! {
     }
 }
 
-crate::valid_model! {
+valid_derive::valid_model! {
     model IamAccessModel<AccessState, AccessAction>;
     init [AccessState {
         boundary_attached: false,
@@ -482,6 +482,16 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
                 transition.guard,
                 transition.effect,
             ),
+            updates: transition
+                .updates
+                .iter()
+                .filter_map(|update| {
+                    update.expr.map(|expr| InspectTransitionUpdate {
+                        field: update.field.to_string(),
+                        expr: expr.to_string(),
+                    })
+                })
+                .collect(),
         })
         .collect::<Vec<_>>();
     let property_details = M::properties()

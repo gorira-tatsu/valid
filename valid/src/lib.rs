@@ -19,4 +19,4 @@ pub mod solver;
 pub mod support;
 pub mod testgen;
 
-pub use valid_derive::{ValidAction, ValidState};
+pub use valid_derive::{valid_model, ValidAction, ValidState};

@@ -111,10 +111,7 @@ pub fn render_model_mermaid(response: &InspectResponse) -> String {
             let node = sanitize_id(&format!("transition_{}_{}", transition.action_id, index));
             let mut lines = vec![transition.action_id.clone()];
             if let Some(guard) = &transition.guard {
-                lines.push(format!("when: {guard}"));
-            }
-            if let Some(effect) = &transition.effect {
-                lines.push(format!("effect: {effect}"));
+                lines.push(format!("guard: {guard}"));
             }
             if !transition.path_tags.is_empty() {
                 lines.push(format!("tags: {}", transition.path_tags.join(", ")));
@@ -122,6 +119,40 @@ pub fn render_model_mermaid(response: &InspectResponse) -> String {
             out.push_str(&format!("    {node}[\"{}\"]\n", mermaid_label(&lines)));
             let action_node = sanitize_id(&format!("action_{}", transition.action_id));
             out.push_str(&format!("  {action_node} --> {node}\n"));
+
+            if let Some(guard) = &transition.guard {
+                let guard_node = sanitize_id(&format!("guard_{}_{}", transition.action_id, index));
+                out.push_str(&format!(
+                    "    {guard_node}[\"{}\"]\n",
+                    mermaid_label(&["guard".to_string(), guard.clone()])
+                ));
+                out.push_str(&format!("  {node} --> {guard_node}\n"));
+            }
+
+            if !transition.updates.is_empty() {
+                let update_node =
+                    sanitize_id(&format!("updates_{}_{}", transition.action_id, index));
+                let mut update_lines = vec!["updates".to_string()];
+                update_lines.extend(
+                    transition
+                        .updates
+                        .iter()
+                        .map(|update| format!("{} := {}", update.field, update.expr)),
+                );
+                out.push_str(&format!(
+                    "    {update_node}[\"{}\"]\n",
+                    mermaid_label(&update_lines)
+                ));
+                out.push_str(&format!("  {node} --> {update_node}\n"));
+            } else if let Some(effect) = &transition.effect {
+                let effect_node =
+                    sanitize_id(&format!("effect_{}_{}", transition.action_id, index));
+                out.push_str(&format!(
+                    "    {effect_node}[\"{}\"]\n",
+                    mermaid_label(&["effect".to_string(), effect.clone()])
+                ));
+                out.push_str(&format!("  {node} --> {effect_node}\n"));
+            }
         }
         out.push_str("  end\n");
     } else if !response.transition_details.is_empty() {
@@ -187,7 +218,7 @@ mod tests {
     use crate::{
         api::{
             InspectAction, InspectCapabilities, InspectProperty, InspectResponse,
-            InspectStateField, InspectTransition,
+            InspectStateField, InspectTransition, InspectTransitionUpdate,
         },
         engine::AssuranceLevel,
         evidence::{EvidenceKind, EvidenceTrace, TraceStep},
@@ -264,6 +295,10 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["allow_path".to_string()],
+                updates: vec![InspectTransitionUpdate {
+                    field: "x".to_string(),
+                    expr: "x + 1".to_string(),
+                }],
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
@@ -275,6 +310,7 @@ mod tests {
         assert!(mermaid.contains("CounterModel"));
         assert!(mermaid.contains("INC"));
         assert!(mermaid.contains("allow_path"));
+        assert!(mermaid.contains("updates"));
         assert!(mermaid.contains("P_RANGE"));
     }
 
@@ -320,6 +356,7 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["transition_path".to_string()],
+                updates: Vec::new(),
             }],
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),

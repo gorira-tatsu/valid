@@ -7,7 +7,7 @@ stateful workflow rules. The main path is:
 
 1. Write a model in Rust
 2. Export it through a small registry file
-3. Run `cargo valid init` once
+3. Run `cargo valid init` once for a new project
 4. Use `cargo valid` from the project root
 
 `.valid` files still work, but they are now the compatibility path rather than
@@ -53,28 +53,34 @@ cargo install --path .
 cargo valid init
 ```
 
-This creates a minimal `valid.toml`:
+`cargo valid init` creates a minimal `valid.toml` and scaffolds a starter
+registry file under `examples/valid_models.rs`:
 
 ```toml
 registry = "examples/valid_models.rs"
 default_backend = "explicit"
 suite_models = []
+generated_tests_dir = "tests/generated"
+artifacts_dir = "artifacts"
+default_graph_format = "mermaid"
 ```
 
-Use the Rust-first path:
+This repository already includes a `valid.toml`, so from the repo root the
+default `cargo valid` workflow points at the practical business suite:
 
 ```sh
 cargo valid models
-cargo valid inspect counter
-cargo valid readiness counter
-cargo valid verify failing-counter
+cargo valid inspect refund-control
+cargo valid graph refund-control
+cargo valid readiness breakglass-access-regression
+cargo valid verify breakglass-access-regression
 cargo valid suite
 ```
 
 Use `--json` for CI, scripts, or AI integrations:
 
 ```sh
-cargo valid verify failing-counter --property=P_FAIL --json
+cargo valid verify breakglass-access-regression --json
 ```
 
 Try the legacy `.valid` path:
@@ -112,7 +118,7 @@ If you are deciding between the two, use the Rust-first path.
 Primary commands:
 
 - `init`
-  Write a minimal `valid.toml` in the current Cargo project
+  Write `valid.toml`, scaffold a registry file, and create `tests/generated/`
 - `models`
   Show the model names exported by the configured registry
 - `inspect <model>`
@@ -145,11 +151,11 @@ Examples:
 ```sh
 cargo valid init
 cargo valid models
-cargo valid inspect counter
-cargo valid graph counter
-cargo valid readiness iam-access
-cargo valid verify counter
-cargo valid verify failing-counter --property=P_FAIL --json
+cargo valid inspect refund-control
+cargo valid graph refund-control
+cargo valid readiness breakglass-access-regression
+cargo valid verify breakglass-access-regression
+cargo valid verify breakglass-access-regression --json
 cargo valid suite
 cargo valid clean all
 ```
@@ -157,9 +163,11 @@ cargo valid clean all
 Override the configured registry only when needed:
 
 ```sh
+cargo valid --registry examples/valid_models.rs inspect counter
 cargo valid --registry examples/practical_use_cases_registry.rs models
 cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
+cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 ```
 
 `inspect --json` now includes:
@@ -181,6 +189,10 @@ while a declarative transition model can be solver-ready.
 such as `allow_path`, `deny_path`, `boundary_path`, `guard_path`, and
 `write_path`. These are the shared decision/path vocabulary used by inspect,
 coverage, explain, and test generation.
+
+`graph` is built from the same inspect data. Declarative models render guard
+conditions, concrete field updates, and path tags in Mermaid. Step-only models
+are explicitly marked `explicit-only / opaque-step`.
 
 ## Rust DSL
 
@@ -356,10 +368,10 @@ Examples:
 ```sh
 cargo valid --registry examples/valid_models.rs generate-tests counter --strategy=witness
 cargo valid --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard
-cargo valid generate-tests iam-access --strategy=path
+cargo valid generate-tests refund-control --strategy=path
 cargo run --bin valid -- generate-tests examples/models/safe_counter.valid --strategy=boundary
 cargo run --bin valid -- generate-tests examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample
-cargo valid replay failing-counter --property=P_FAIL --actions=INC,INC
+cargo valid --registry examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC
 ```
 
 ## Examples In This Repo

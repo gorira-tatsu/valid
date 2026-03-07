@@ -18,8 +18,8 @@ use crate::{
 use crate::api::{
     lint_from_inspect, render_inspect_json, render_inspect_text, render_lint_json,
     render_lint_text, ExplainResponse, InspectAction, InspectCapabilities, InspectProperty,
-    InspectResponse, InspectStateField, InspectTransition, OrchestrateResponse,
-    OrchestratedRunSummary, TestgenResponse,
+    InspectResponse, InspectStateField, InspectTransition, InspectTransitionUpdate,
+    OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
 };
 
 pub struct RegisteredModel {
@@ -351,6 +351,16 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
                 transition.guard,
                 transition.effect,
             ),
+            updates: transition
+                .updates
+                .iter()
+                .filter_map(|update| {
+                    update.expr.map(|expr| InspectTransitionUpdate {
+                        field: update.field.to_string(),
+                        expr: expr.to_string(),
+                    })
+                })
+                .collect(),
         })
         .collect::<Vec<_>>();
     let property_details = M::properties()
