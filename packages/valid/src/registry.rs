@@ -6,6 +6,10 @@ use crate::{
         render_benchmark_comparison_json, render_benchmark_comparison_text, render_benchmark_json,
         render_benchmark_text,
     },
+    contract::{
+        build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
+        snapshot_model, write_lock_file, ContractSnapshot,
+    },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
@@ -41,6 +45,7 @@ pub struct RegisteredModel {
     pub orchestrate: fn(&str, Option<&AdapterConfig>) -> Result<OrchestrateResponse, String>,
     pub testgen: fn(Option<&str>, &str) -> TestgenResponse,
     pub replay: fn(Option<&str>, &[String], Option<&str>) -> Result<String, String>,
+    pub contract_snapshot: fn() -> Result<ContractSnapshot, String>,
 }
 
 impl RegisteredModel {
@@ -54,6 +59,7 @@ impl RegisteredModel {
             orchestrate: orchestrate_machine::<M>,
             testgen: testgen_machine::<M>,
             replay: replay_machine::<M>,
+            contract_snapshot: contract_snapshot_machine::<M>,
         }
     }
 }
@@ -88,6 +94,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "orchestrate" => cmd_orchestrate(&models, remaining),
         "testgen" => cmd_testgen(&models, remaining),
         "replay" => cmd_replay(&models, remaining),
+        "contract" => cmd_contract(&models, remaining),
         "help" => usage_exit(),
         _ => usage_exit(),
     }
@@ -752,6 +759,11 @@ fn replay_machine<M: VerifiedMachine>(
     ))
 }
 
+fn contract_snapshot_machine<M: VerifiedMachine>() -> Result<ContractSnapshot, String> {
+    let model = lower_machine_model::<M>()?;
+    Ok(snapshot_model(&model))
+}
+
 fn annotate_registry_replay_targets<M: VerifiedMachine>(
     property_id: Option<&str>,
     vectors: &mut [crate::testgen::TestVector],
@@ -996,7 +1008,127 @@ fn registry_migration_output_path(model: &str, requested: &str) -> String {
     )
 }
 
+fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
+    let json = args.iter().any(|a| a == "--json");
+    let positional: Vec<&str> = args.iter().filter(|a| !a.starts_with("--")).map(|a| a.as_str()).collect();
+    let sub = positional.first().copied().unwrap_or("snapshot");
+    let lock_path = positional.get(1).map(|s| s.to_string());
+
+    match sub {
+        "snapshot" => {
+            let mut snapshots = Vec::new();
+            for model in models {
+                match (model.contract_snapshot)() {
+                    Ok(snapshot) => snapshots.push(snapshot),
+                    Err(message) => {
+                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
+                        process::exit(3);
+                    }
+                }
+            }
+            if json {
+                let body = snapshots
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{{\"model_id\":\"{}\",\"contract_hash\":\"{}\"}}",
+                            s.model_id, s.contract_hash
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                println!("{{\"snapshots\":[{body}]}}");
+            } else {
+                for snapshot in &snapshots {
+                    println!("{}: {}", snapshot.model_id, snapshot.contract_hash);
+                }
+            }
+        }
+        "lock" => {
+            let output = lock_path.unwrap_or_else(|| "valid.lock.json".to_string());
+            let mut snapshots = Vec::new();
+            for model in models {
+                match (model.contract_snapshot)() {
+                    Ok(snapshot) => snapshots.push(snapshot),
+                    Err(message) => {
+                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
+                        process::exit(3);
+                    }
+                }
+            }
+            let lock = build_lock_file(snapshots);
+            write_lock_file(&output, &lock).unwrap_or_else(|err| {
+                eprintln!("{err}");
+                process::exit(3);
+            });
+            if json {
+                println!("{}", render_lock_json(&lock));
+            } else {
+                println!("lock written: {output}");
+            }
+        }
+        "drift" | "check" => {
+            let lock_file = lock_path.unwrap_or_else(|| "valid.lock.json".to_string());
+            let lock_body = fs::read_to_string(&lock_file).unwrap_or_else(|err| {
+                eprintln!("failed to read lock file `{lock_file}`: {err}");
+                process::exit(3);
+            });
+            let lock = parse_lock_file(&lock_body).unwrap_or_else(|err| {
+                eprintln!("failed to parse lock file: {err}");
+                process::exit(3);
+            });
+            let mut has_drift = false;
+            let mut reports = Vec::new();
+            for model in models {
+                let snapshot = match (model.contract_snapshot)() {
+                    Ok(snapshot) => snapshot,
+                    Err(message) => {
+                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
+                        process::exit(3);
+                    }
+                };
+                let expected = lock
+                    .entries
+                    .iter()
+                    .find(|entry| entry.model_id == snapshot.model_id);
+                let Some(expected) = expected else {
+                    let report = format!(
+                        "{{\"status\":\"missing\",\"contract_id\":\"{}\"}}",
+                        snapshot.model_id
+                    );
+                    if !json {
+                        println!("{}: missing from lock file", snapshot.model_id);
+                    }
+                    reports.push(report);
+                    has_drift = true;
+                    continue;
+                };
+                let drift = compare_snapshot(expected, &snapshot);
+                if drift.status != "unchanged" {
+                    has_drift = true;
+                }
+                if json {
+                    reports.push(render_drift_json(&drift));
+                } else {
+                    println!("{}: {}", drift.contract_id, drift.status);
+                    for change in &drift.changes {
+                        println!("  changed: {change}");
+                    }
+                }
+            }
+            if json {
+                println!("{{\"reports\":[{}]}}", reports.join(","));
+            }
+            process::exit(if has_drift { 2 } else { 0 });
+        }
+        _ => {
+            eprintln!("usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json]");
+            process::exit(3);
+        }
+    }
+}
+
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
     process::exit(3);
 }

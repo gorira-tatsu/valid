@@ -531,9 +531,20 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    assert!(!strictness.is_empty());\n");
     out.push_str("    assert!(!derivation.is_empty());\n");
     out.push_str("    assert!(!strategy.is_empty());\n");
-    out.push_str("    let _ = expected_property_holds;\n");
-    out.push_str("    let _ = &expected_path_tags;\n");
-    out.push_str("    let _ = &notes;\n");
+    out.push_str("    if let Some(expected) = expected_property_holds {\n");
+    out.push_str("        if strategy == \"counterexample\" {\n");
+    out.push_str("            assert!(!expected, \"counterexample vector should expect property violation\");\n");
+    out.push_str("        }\n");
+    out.push_str("        if strategy == \"witness\" {\n");
+    out.push_str("            assert!(expected, \"witness vector should expect property to hold\");\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    for tag in &expected_path_tags {\n");
+    out.push_str("        assert!(!tag.is_empty(), \"path tag must be non-empty\");\n");
+    out.push_str("    }\n");
+    out.push_str("    for note in &notes {\n");
+    out.push_str("        assert!(!note.is_empty(), \"note must be non-empty\");\n");
+    out.push_str("    }\n");
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
     out
