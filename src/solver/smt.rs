@@ -342,6 +342,7 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             match op {
                 BinaryOp::Add => Ok(format!("(+ {left} {right})")),
                 BinaryOp::LessThanOrEqual => Ok(format!("(<= {left} {right})")),
+                BinaryOp::And => Ok(format!("(and {left} {right})")),
             }
         }
     }

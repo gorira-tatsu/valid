@@ -32,6 +32,7 @@ pub struct CoverageReport {
     pub guard_true_counts: BTreeMap<String, usize>,
     pub guard_false_counts: BTreeMap<String, usize>,
     pub uncovered_guards: Vec<String>,
+    pub path_tag_counts: BTreeMap<String, usize>,
     pub depth_histogram: BTreeMap<u32, usize>,
     pub step_count: usize,
 }
@@ -65,6 +66,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     let mut guard_false_actions = BTreeSet::new();
     let mut guard_true_counts = BTreeMap::new();
     let mut guard_false_counts = BTreeMap::new();
+    let mut path_tag_counts = BTreeMap::new();
     let mut action_execution_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut step_count = 0usize;
@@ -89,6 +91,18 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 *action_execution_counts
                     .entry(action_id.clone())
                     .or_insert(0) += 1;
+                if let Some(action) = model.actions.iter().find(|action| &action.action_id == action_id) {
+                    for tag in crate::modeling::decision_path_tags(
+                        &[],
+                        &action.action_id,
+                        action.reads.iter().map(String::as_str),
+                        action.writes.iter().map(String::as_str),
+                        Some(&format!("{:?}", action.guard)),
+                        Some(&format!("{:?}", action.updates)),
+                    ) {
+                        *path_tag_counts.entry(tag).or_insert(0) += 1;
+                    }
+                }
             }
 
             if let Some(state) = machine_state_from_snapshot(model, &step.state_before) {
@@ -161,6 +175,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         guard_true_counts,
         guard_false_counts,
         uncovered_guards,
+        path_tag_counts,
         depth_histogram,
         step_count,
     }
@@ -245,6 +260,18 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
         out.push_str(&format!("\"{}\":{}", depth, count));
     }
     out.push('}');
+    out.push_str(",\"path_tags\":[");
+    for (index, (tag, count)) in report.path_tag_counts.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"tag\":\"{}\",\"count\":{}}}",
+            tag,
+            count
+        ));
+    }
+    out.push(']');
     out.push_str(&format!(
         ",\"visited_state_count\":{}",
         report.visited_state_count
@@ -303,10 +330,19 @@ pub fn render_coverage_text(report: &CoverageReport) -> String {
         report.step_count,
         report.max_depth_observed,
         coverage_gate_status_label(&gate.status),
-        if report.uncovered_guards.is_empty() {
+        if report.uncovered_guards.is_empty() && report.path_tag_counts.is_empty() {
             "uncovered_guards=".to_string()
         } else {
-            format!("uncovered_guards={}", report.uncovered_guards.join(", "))
+            format!(
+                "uncovered_guards={}\npath_tag_counts={}",
+                report.uncovered_guards.join(", "),
+                report
+                    .path_tag_counts
+                    .iter()
+                    .map(|(tag, count)| format!("{tag}:{count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
     )
 }
@@ -342,6 +378,9 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
         if !report.total_actions.contains(action) {
             return Err("guard_false_counts must reference declared actions only".to_string());
         }
+    }
+    for tag in report.path_tag_counts.keys() {
+        require_non_empty(tag, "path_tag_counts[]")?;
     }
     Ok(())
 }
@@ -384,6 +423,11 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
             .ok_or_else(|| "depth_histogram must be present".to_string())?,
         "depth_histogram",
     )?;
+    for path_tag in require_array_field(object, "path_tags")? {
+        let path_tag_object = require_object(path_tag, "path_tags[]")?;
+        require_string_field(path_tag_object, "tag")?;
+        require_number_field(path_tag_object, "count")?;
+    }
     let gate = require_object(
         object
             .get("gate")
@@ -468,6 +512,7 @@ mod tests {
         assert!(report.guard_true_actions.contains("A_DEC"));
         assert!(!report.guard_false_actions.contains("A_DEC"));
         assert_eq!(report.guard_true_counts.get("A_INC"), Some(&1));
+        assert_eq!(report.path_tag_counts.get("write_path"), Some(&1));
         assert_eq!(report.depth_histogram.get(&0), Some(&1));
         assert_eq!(report.depth_histogram.get(&1), Some(&1));
         assert_eq!(

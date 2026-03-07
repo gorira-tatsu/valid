@@ -47,10 +47,12 @@ Run it through the cargo subcommand with:
 ```sh
 cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- lint counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=boundary --json
 cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
+cargo run --bin cargo-valid -- --file examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
 ```
 
@@ -58,8 +60,20 @@ Command meanings:
 
 - `list`: show the model names exported by the registry file
 - `inspect <model>`: show the model shape without verifying it
+- `lint <model>`: show capability-based migration hints and readiness findings
 - `check <model>`: verify one model
+- `replay <model>`: replay an explicit action sequence and inspect the terminal state
 - `all`: run `check` for every model exported by the registry file
+
+`inspect --json` also reports a capability matrix. In practice:
+
+- `counter` is explicit-ready but not solver-ready because it is written with a free-form `step`
+- `iam-access` is solver-ready because it uses declarative `transitions { ... }`
+- `transition_details.path_tags` and `coverage.path_tags` expose the shared decision/path vocabulary
+
+If you prefer ordinary Rust type declarations instead of `valid_state!` and
+`valid_actions!`, the crate also supports `#[derive(ValidState)]` and
+`#[derive(ValidAction)]` for the current common cases.
 
 `iam_transition_registry.rs` shows the declarative transition mode, where
 action/guard/effect structure is written as:
@@ -69,14 +83,17 @@ valid_model! {
     model IamAccessModel<AccessState, AccessAction>;
     init [/* ... */];
     transitions {
-        transition AttachBoundary when |state| !state.boundary_attached => [/* next state */];
-        transition AssumeSession when |state| state.boundary_attached && !state.session_active => [/* next state */];
+        transition AttachBoundary [tags = ["boundary_path"]] when |state| !state.boundary_attached => [/* next state */];
+        transition AssumeSession [tags = ["session_path"]] when |state| state.boundary_attached && !state.session_active => [/* next state */];
     }
     properties {
         invariant P_BILLING_READ_REQUIRES_BOUNDARY |state| !state.billing_read_allowed || state.boundary_attached;
     }
 }
 ```
+
+`tags = [...]` is optional, but it is the preferred way to make
+allow/deny/boundary/session paths explicit instead of relying on heuristics.
 
 ## Rust model examples
 

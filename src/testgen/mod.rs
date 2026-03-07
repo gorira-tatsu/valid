@@ -15,6 +15,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayTarget {
+    pub runner: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestVector {
     pub schema_version: String,
     pub vector_id: String,
@@ -32,6 +38,7 @@ pub struct TestVector {
     pub focus_field: Option<String>,
     pub expected_guard_enabled: Option<bool>,
     pub notes: Vec<String>,
+    pub replay_target: Option<ReplayTarget>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +95,7 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         focus_field: None,
         expected_guard_enabled: None,
         notes: Vec::new(),
+        replay_target: None,
     })
 }
 
@@ -238,6 +246,24 @@ pub fn build_model_test_vectors_for_strategy(
         "random" => build_model_random_vectors(model, property_id, 5),
         _ => Ok(Vec::new()),
     }
+}
+
+fn model_transition_tags(model: &ModelIr, action_id: &str) -> Vec<String> {
+    model
+        .actions
+        .iter()
+        .find(|action| action.action_id == action_id)
+        .map(|action| {
+            crate::modeling::decision_path_tags(
+                &[],
+                &action.action_id,
+                action.reads.iter().map(String::as_str),
+                action.writes.iter().map(String::as_str),
+                Some(&format!("{:?}", action.guard)),
+                Some(&format!("{:?}", action.updates)),
+            )
+        })
+        .unwrap_or_else(|| vec!["transition_path".to_string()])
 }
 
 fn synthetic_trace_from_states(
@@ -432,6 +458,25 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     for state in &vector.expected_states {
         out.push_str(&format!("    expected_states.push({state:?});\n"));
     }
+    if let Some(target) = &vector.replay_target {
+        out.push_str(&format!("    let replay_runner = {:?};\n", target.runner));
+        out.push_str("    let mut replay_args = Vec::new();\n");
+        for arg in &target.args {
+            out.push_str(&format!("    replay_args.push({arg:?});\n"));
+        }
+        out.push_str("    let runner_path = match replay_runner {\n");
+        out.push_str("        \"valid\" => env!(\"CARGO_BIN_EXE_valid\"),\n");
+        out.push_str("        \"cargo-valid\" => env!(\"CARGO_BIN_EXE_cargo-valid\"),\n");
+        out.push_str("        other => panic!(\"unknown replay runner: {other}\"),\n");
+        out.push_str("    };\n");
+        out.push_str("    let output = std::process::Command::new(runner_path)\n");
+        out.push_str("        .args(&replay_args)\n");
+        out.push_str("        .output()\n");
+        out.push_str("        .expect(\"generated replay command should execute\");\n");
+        out.push_str("    assert!(output.status.success(), \"replay failed: {}\", String::from_utf8_lossy(&output.stderr));\n");
+        out.push_str("    let stdout = String::from_utf8(output.stdout).expect(\"replay output must be utf-8\");\n");
+        out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled);\n");
+    }
     out.push_str("    assert!(!vector_id.is_empty());\n");
     out.push_str("    assert!(!property_id.is_empty());\n");
     out.push_str("    assert!(!source_kind.is_empty());\n");
@@ -439,6 +484,75 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
     out
+}
+
+pub fn assert_replay_output_json(
+    body: &str,
+    expected_actions: &[&str],
+    expected_states: &[&str],
+    expected_property_id: &str,
+    expected_focus_action_id: Option<&str>,
+    expected_guard_enabled: Option<bool>,
+) {
+    let normalized = body.trim();
+    assert!(normalized.contains("\"status\":\"ok\""), "replay must return ok: {normalized}");
+    assert!(
+        normalized.contains(&format!("\"property_id\":\"{expected_property_id}\"")),
+        "replay property_id mismatch: {normalized}"
+    );
+    for action in expected_actions {
+        assert!(
+            normalized.contains(&format!("\"{action}\"")),
+            "replay missing action `{action}`: {normalized}"
+        );
+    }
+    if let Some(last_state) = expected_states.last() {
+        assert!(
+            normalized.contains(&format!("\"terminal_state\":{last_state:?}")),
+            "replay terminal state mismatch: expected {last_state}, got {normalized}"
+        );
+    }
+    if let Some(action_id) = expected_focus_action_id {
+        assert!(
+            normalized.contains(&format!("\"focus_action_id\":\"{action_id}\"")),
+            "replay focus_action_id mismatch: {normalized}"
+        );
+    }
+    if let Some(enabled) = expected_guard_enabled {
+        assert!(
+            normalized.contains(&format!("\"focus_action_enabled\":{enabled}")),
+            "replay focus_action_enabled mismatch: {normalized}"
+        );
+    }
+}
+
+pub fn render_replay_json(
+    property_id: &str,
+    action_ids: &[String],
+    terminal_state: &BTreeMap<String, Value>,
+    focus_action_id: Option<&str>,
+    focus_action_enabled: Option<bool>,
+) -> String {
+    let actions = action_ids
+        .iter()
+        .map(|action| format!("\"{action}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let focus_action_id = focus_action_id
+        .map(|action| format!("\"{action}\""))
+        .unwrap_or_else(|| "null".to_string());
+    let focus_action_enabled = focus_action_enabled
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let terminal_state = format!("{terminal_state:?}");
+    format!(
+        "{{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"property_id\":\"{}\",\"replayed_actions\":[{}],\"terminal_state\":{:?},\"focus_action_id\":{},\"focus_action_enabled\":{}}}",
+        property_id,
+        actions,
+        terminal_state,
+        focus_action_id,
+        focus_action_enabled
+    )
 }
 
 pub fn generated_test_output_path(vector: &TestVector) -> String {
@@ -548,7 +662,15 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
                 Some(action.action_id.clone()),
                 None,
                 Some(true),
-                vec![format!("guard_true:{:?}", action.guard)],
+                {
+                    let mut notes = vec![format!("guard_true:{:?}", action.guard)];
+                    notes.extend(
+                        model_transition_tags(model, &action.action_id)
+                            .into_iter()
+                            .map(|tag| format!("path_tag:{tag}")),
+                    );
+                    notes
+                },
             ) {
                 let signature = (
                     vector.focus_action_id.clone(),
@@ -583,7 +705,15 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
                 Some(action.action_id.clone()),
                 None,
                 Some(false),
-                vec![format!("guard_false:{:?}", action.guard)],
+                {
+                    let mut notes = vec![format!("guard_false:{:?}", action.guard)];
+                    notes.extend(
+                        model_transition_tags(model, &action.action_id)
+                            .into_iter()
+                            .map(|tag| format!("path_tag:{tag}")),
+                    );
+                    notes
+                },
             ) {
                 let signature = (
                     vector.focus_action_id.clone(),
@@ -752,6 +882,7 @@ fn build_model_vector_for_node(
         focus_field,
         expected_guard_enabled,
         notes,
+        replay_target: None,
     })
 }
 

@@ -3,6 +3,9 @@ name = "valid"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["valid_derive"]
+
 [lib]
 name = "valid"
 path = "src/lib.rs"
@@ -12,3 +15,4 @@ name = "valid"
 path = "src/bin/valid.rs"
 
 [dependencies]
+valid_derive = { path = "valid_derive" }

@@ -27,17 +27,17 @@ valid_model! {
         billing_read_allowed: false,
     }];
     transitions {
-        transition AttachBoundary when |state| !state.boundary_attached => [AccessState {
+        transition AttachBoundary [tags = ["boundary_path"]] when |state| !state.boundary_attached => [AccessState {
             boundary_attached: true,
             session_active: state.session_active,
             billing_read_allowed: state.billing_read_allowed,
         }];
-        transition AssumeSession when |state| state.boundary_attached && !state.session_active => [AccessState {
+        transition AssumeSession [tags = ["session_path"]] when |state| state.boundary_attached && !state.session_active => [AccessState {
             boundary_attached: state.boundary_attached,
             session_active: true,
             billing_read_allowed: state.billing_read_allowed,
         }];
-        transition EvaluateBillingRead when |state| state.boundary_attached && state.session_active => [AccessState {
+        transition EvaluateBillingRead [tags = ["allow_path", "boundary_path", "session_path"]] when |state| state.boundary_attached && state.session_active => [AccessState {
             boundary_attached: state.boundary_attached,
             session_active: state.session_active,
             billing_read_allowed: true,

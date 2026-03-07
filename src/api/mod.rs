@@ -20,7 +20,7 @@ use crate::{
     testgen::{
         build_counterexample_vector, build_model_test_vectors_for_strategy,
         build_synthetic_witness_vectors, minimize_counterexample_vector,
-        write_generated_test_files, MinimizeResult,
+        write_generated_test_files, MinimizeResult, ReplayTarget,
     },
 };
 
@@ -30,9 +30,58 @@ pub struct InspectResponse {
     pub request_id: String,
     pub status: String,
     pub model_id: String,
+    pub machine_ir_ready: bool,
+    pub machine_ir_error: Option<String>,
+    pub capabilities: InspectCapabilities,
     pub state_fields: Vec<String>,
     pub actions: Vec<String>,
     pub properties: Vec<String>,
+    pub state_field_details: Vec<InspectStateField>,
+    pub action_details: Vec<InspectAction>,
+    pub transition_details: Vec<InspectTransition>,
+    pub property_details: Vec<InspectProperty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectCapabilities {
+    pub parse_ready: bool,
+    pub explicit_ready: bool,
+    pub ir_ready: bool,
+    pub solver_ready: bool,
+    pub coverage_ready: bool,
+    pub explain_ready: bool,
+    pub testgen_ready: bool,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectStateField {
+    pub name: String,
+    pub rust_type: String,
+    pub range: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectAction {
+    pub action_id: String,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectTransition {
+    pub action_id: String,
+    pub guard: Option<String>,
+    pub effect: Option<String>,
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub path_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectProperty {
+    pub property_id: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +124,24 @@ pub struct ExplainResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LintFinding {
+    pub severity: String,
+    pub code: String,
+    pub message: String,
+    pub suggestion: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LintResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub status: String,
+    pub model_id: String,
+    pub capabilities: InspectCapabilities,
+    pub findings: Vec<LintFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MinimizeRequest {
     pub request_id: String,
     pub source_name: String,
@@ -100,6 +167,7 @@ pub struct TestgenRequest {
     pub request_id: String,
     pub source_name: String,
     pub source: String,
+    pub property_id: Option<String>,
     pub strategy: String,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
@@ -173,12 +241,75 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         request_id: request.request_id.clone(),
         status: "ok".to_string(),
         model_id: model.model_id.clone(),
+        machine_ir_ready: true,
+        machine_ir_error: None,
+        capabilities: InspectCapabilities {
+            parse_ready: true,
+            explicit_ready: true,
+            ir_ready: true,
+            solver_ready: true,
+            coverage_ready: true,
+            explain_ready: true,
+            testgen_ready: true,
+            reasons: Vec::new(),
+        },
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
         actions: model.actions.iter().map(|a| a.action_id.clone()).collect(),
         properties: model
             .properties
             .iter()
             .map(|p| p.property_id.clone())
+            .collect(),
+        state_field_details: model
+            .state_fields
+            .iter()
+            .map(|field| InspectStateField {
+                name: field.name.clone(),
+                rust_type: match field.ty {
+                    crate::ir::FieldType::Bool => "bool".to_string(),
+                    crate::ir::FieldType::BoundedU8 { .. } => "u8".to_string(),
+                },
+                range: match field.ty {
+                    crate::ir::FieldType::Bool => None,
+                    crate::ir::FieldType::BoundedU8 { min, max } => Some(format!("{min}..={max}")),
+                },
+            })
+            .collect(),
+        action_details: model
+            .actions
+            .iter()
+            .map(|action| InspectAction {
+                action_id: action.action_id.clone(),
+                reads: action.reads.clone(),
+                writes: action.writes.clone(),
+            })
+            .collect(),
+        transition_details: model
+            .actions
+            .iter()
+            .map(|action| InspectTransition {
+                action_id: action.action_id.clone(),
+                guard: Some(format!("{:?}", action.guard)),
+                effect: Some(format!("{:?}", action.updates)),
+                reads: action.reads.clone(),
+                writes: action.writes.clone(),
+                path_tags: crate::modeling::decision_path_tags(
+                    &[],
+                    &action.action_id,
+                    action.reads.iter().map(String::as_str),
+                    action.writes.iter().map(String::as_str),
+                    Some(&format!("{:?}", action.guard)),
+                    Some(&format!("{:?}", action.updates)),
+                ),
+            })
+            .collect(),
+        property_details: model
+            .properties
+            .iter()
+            .map(|property| InspectProperty {
+                property_id: property.property_id.clone(),
+                kind: format!("{:?}", property.kind),
+            })
             .collect(),
     })
 }
@@ -223,7 +354,32 @@ pub fn orchestrate_source(
     request: &OrchestrateRequest,
 ) -> Result<OrchestrateResponse, CheckErrorEnvelope> {
     if is_bundled_model_ref(&request.source_name) {
-        return orchestrate_bundled_model(&request.request_id, &request.source_name).map_err(
+        let backend = backend_config_from_orchestrate_request(request).map_err(
+            |message| CheckErrorEnvelope {
+                manifest: RunManifest {
+                    request_id: request.request_id.clone(),
+                    run_id: format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    schema_version: "1.0.0".to_string(),
+                    source_hash: stable_hash_hex(&request.source_name),
+                    contract_hash: stable_hash_hex(&request.source_name),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    backend_name: crate::engine::BackendKind::Explicit,
+                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: None,
+                },
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            },
+        )?;
+        return orchestrate_bundled_model(&request.request_id, &request.source_name, Some(&backend)).map_err(
             |message| CheckErrorEnvelope {
                 manifest: RunManifest {
                     request_id: request.request_id.clone(),
@@ -335,7 +491,40 @@ pub fn orchestrate_source(
 
 pub fn check_source(request: &CheckRequest) -> CheckOutcome {
     if is_bundled_model_ref(&request.source_name) {
-        return check_bundled_model(&request.request_id, &request.source_name).unwrap_or_else(
+        let adapter = match backend_config_from_request(request) {
+            Ok(adapter) => adapter,
+            Err(message) => {
+                return CheckOutcome::Errored(CheckErrorEnvelope {
+                    manifest: RunManifest {
+                        request_id: request.request_id.clone(),
+                        run_id: format!(
+                            "run-{}",
+                            stable_hash_hex(&request.request_id).replace("sha256:", "")
+                        ),
+                        schema_version: "1.0.0".to_string(),
+                        source_hash: stable_hash_hex(&request.source_name),
+                        contract_hash: stable_hash_hex(&request.source_name),
+                        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                        backend_name: crate::engine::BackendKind::Explicit,
+                        backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                        seed: None,
+                    },
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )],
+                })
+            }
+        };
+        return check_bundled_model(
+            &request.request_id,
+            &request.source_name,
+            request.property_id.as_deref(),
+            Some(&adapter),
+        ).unwrap_or_else(
             |message| {
                 CheckOutcome::Errored(CheckErrorEnvelope {
                     manifest: RunManifest {
@@ -505,6 +694,14 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 action.action_id.clone(),
                                 action.reads.clone(),
                                 action.writes.clone(),
+                                crate::modeling::decision_path_tags(
+                                    &[],
+                                    &action.action_id,
+                                    action.reads.iter().map(String::as_str),
+                                    action.writes.iter().map(String::as_str),
+                                    Some(&format!("{:?}", action.guard)),
+                                    Some(&format!("{:?}", action.updates)),
+                                ),
                             )
                         })
                 })
@@ -514,7 +711,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 .map(|model| collect_coverage(model, std::slice::from_ref(&trace)));
             let write_overlap = action_metadata
                 .as_ref()
-                .map(|(_, _, writes)| {
+                .map(|(_, _, writes, _)| {
                     involved_fields
                         .iter()
                         .filter(|field| writes.contains(*field))
@@ -542,7 +739,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 ]
             } else {
                 let mut causes = Vec::new();
-                if let Some((action_id, reads, writes)) = &action_metadata {
+                if let Some((action_id, reads, writes, path_tags)) = &action_metadata {
                     if !write_overlap.is_empty() {
                         causes.push(ExplainCandidateCause {
                             kind: "write_set_overlap".to_string(),
@@ -562,6 +759,15 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                             failure_step.index,
                         ),
                     });
+                    if !path_tags.is_empty() {
+                        causes.push(ExplainCandidateCause {
+                            kind: "decision_path_tags".to_string(),
+                            message: format!(
+                                "action {action_id} participates in path tags [{}]",
+                                path_tags.join(", ")
+                            ),
+                        });
+                    }
                     if let Some(report) = &coverage_report {
                         let execution_count = report
                             .action_execution_counts
@@ -753,7 +959,23 @@ fn build_minimize_response(
 
 pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, CheckErrorEnvelope> {
     if is_bundled_model_ref(&request.source_name) {
-        return testgen_bundled_model(&request.request_id, &request.source_name, &request.strategy).map_err(
+        let bundled_adapter_request = CheckRequest {
+            request_id: request.request_id.clone(),
+            source_name: request.source_name.clone(),
+            source: request.source.clone(),
+            property_id: request.property_id.clone(),
+            backend: request.backend.clone(),
+            solver_executable: request.solver_executable.clone(),
+            solver_args: request.solver_args.clone(),
+        };
+        let bundled_adapter = backend_config_from_request(&bundled_adapter_request).ok();
+        return testgen_bundled_model(
+            &request.request_id,
+            &request.source_name,
+            request.property_id.as_deref(),
+            &request.strategy,
+            bundled_adapter.as_ref(),
+        ).map_err(
             |message| CheckErrorEnvelope {
                 manifest: RunManifest {
                     request_id: request.request_id.clone(),
@@ -783,7 +1005,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         request_id: request.request_id.clone(),
         source_name: request.source_name.clone(),
         source: request.source.clone(),
-        property_id: None,
+        property_id: request.property_id.clone(),
         backend: request.backend.clone(),
         solver_executable: request.solver_executable.clone(),
         solver_args: request.solver_args.clone(),
@@ -813,20 +1035,20 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         CheckOutcome::Errored(error) => return Err(error),
     };
     let traces = result.trace.into_iter().collect::<Vec<_>>();
-    let vectors = if request.strategy == "counterexample" {
+    let target_property_id = request
+        .property_id
+        .as_deref()
+        .or_else(|| model.properties.first().map(|property| property.property_id.as_str()))
+        .unwrap_or("P_SAFE");
+    let mut vectors = if request.strategy == "counterexample" {
         traces
             .iter()
             .filter_map(|trace| build_counterexample_vector(trace).ok())
             .collect::<Vec<_>>()
     } else {
-        let fallback_property_id = model
-            .properties
-            .first()
-            .map(|property| property.property_id.as_str())
-            .unwrap_or("P_SAFE");
         let mut vectors = build_model_test_vectors_for_strategy(
             &model,
-            fallback_property_id,
+            target_property_id,
             &request.strategy,
         )
         .map_err(|message| CheckErrorEnvelope {
@@ -840,10 +1062,15 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             )],
         })?;
         if vectors.is_empty() && matches!(request.strategy.as_str(), "transition" | "witness") {
-            vectors = build_synthetic_witness_vectors(&model, fallback_property_id);
+            vectors = build_synthetic_witness_vectors(&model, target_property_id);
         }
         vectors
     };
+    annotate_model_replay_targets(
+        &request.source_name,
+        target_property_id,
+        &mut vectors,
+    );
     let generated_files = write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
         manifest: result.manifest.clone(),
         status: crate::engine::ErrorStatus::Error,
@@ -866,11 +1093,50 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
     })
 }
 
+fn annotate_model_replay_targets(
+    source_name: &str,
+    property_id: &str,
+    vectors: &mut [crate::testgen::TestVector],
+) {
+    for vector in vectors {
+        let mut args = vec![
+            "replay".to_string(),
+            source_name.to_string(),
+            format!("--property={}", vector.property_id.as_str()),
+        ];
+        if let Some(action_id) = &vector.focus_action_id {
+            args.push(format!("--focus-action={action_id}"));
+        }
+        if !vector.actions.is_empty() {
+            args.push(format!(
+                "--actions={}",
+                vector
+                    .actions
+                    .iter()
+                    .map(|step| step.action_id.clone())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        args.push("--json".to_string());
+        vector.replay_target = Some(ReplayTarget {
+            runner: "valid".to_string(),
+            args,
+        });
+        if vector.property_id.is_empty() {
+            vector.property_id = property_id.to_string();
+        }
+    }
+}
+
 pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     require_non_empty(&request.request_id, "request_id")?;
     require_non_empty(&request.source_name, "source_name")?;
     if !is_bundled_model_ref(&request.source_name) {
         require_non_empty(&request.source, "source")?;
+    }
+    if let Some(property_id) = request.property_id.as_deref() {
+        require_non_empty(property_id, "property_id")?;
     }
     if let Some(backend) = &request.backend {
         require_non_empty(backend, "backend")?;
@@ -891,7 +1157,416 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
     require_schema_version(&response.schema_version)?;
     require_non_empty(&response.request_id, "request_id")?;
     require_non_empty(&response.model_id, "model_id")?;
+    if response.machine_ir_ready != response.capabilities.ir_ready {
+        return Err("machine_ir_ready must match capabilities.ir_ready".to_string());
+    }
+    require_len_match(
+        response.state_fields.len(),
+        response.state_field_details.len(),
+        "state_fields",
+        "state_field_details",
+    )?;
+    require_len_match(
+        response.actions.len(),
+        response.action_details.len(),
+        "actions",
+        "action_details",
+    )?;
+    require_len_match(
+        response.properties.len(),
+        response.property_details.len(),
+        "properties",
+        "property_details",
+    )?;
     Ok(())
+}
+
+pub fn render_inspect_json(response: &InspectResponse) -> String {
+    let mut out = String::from("{");
+    out.push_str(&format!(
+        "\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"machine_ir_ready\":{},\"machine_ir_error\":{}",
+        escape_json(&response.schema_version),
+        escape_json(&response.request_id),
+        escape_json(&response.status),
+        escape_json(&response.model_id),
+        response.machine_ir_ready,
+        response
+            .machine_ir_error
+            .as_ref()
+            .map(|error| format!("\"{}\"", escape_json(error)))
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!(
+        ",\"capabilities\":{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{}}}",
+        response.capabilities.parse_ready,
+        response.capabilities.explicit_ready,
+        response.capabilities.ir_ready,
+        response.capabilities.solver_ready,
+        response.capabilities.coverage_ready,
+        response.capabilities.explain_ready,
+        response.capabilities.testgen_ready,
+        render_string_array(&response.capabilities.reasons),
+    ));
+    out.push_str(",\"state_fields\":[");
+    for (index, field) in response.state_fields.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(field)));
+    }
+    out.push(']');
+    out.push_str(",\"actions\":[");
+    for (index, action) in response.actions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(action)));
+    }
+    out.push(']');
+    out.push_str(",\"properties\":[");
+    for (index, property) in response.properties.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(property)));
+    }
+    out.push(']');
+    out.push_str(",\"state_field_details\":[");
+    for (index, field) in response.state_field_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{}}}",
+            escape_json(&field.name),
+            escape_json(&field.rust_type),
+            field.range
+                .as_ref()
+                .map(|range| format!("\"{}\"", escape_json(range)))
+                .unwrap_or_else(|| "null".to_string())
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"action_details\":[");
+    for (index, action) in response.action_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"action_id\":\"{}\",\"reads\":{},\"writes\":{}}}",
+            escape_json(&action.action_id),
+            render_string_array(&action.reads),
+            render_string_array(&action.writes)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"transition_details\":[");
+    for (index, transition) in response.transition_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"action_id\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{}}}",
+            escape_json(&transition.action_id),
+            transition
+                .guard
+                .as_ref()
+                .map(|guard| format!("\"{}\"", escape_json(guard)))
+                .unwrap_or_else(|| "null".to_string()),
+            transition
+                .effect
+                .as_ref()
+                .map(|effect| format!("\"{}\"", escape_json(effect)))
+                .unwrap_or_else(|| "null".to_string()),
+            render_string_array(&transition.reads),
+            render_string_array(&transition.writes),
+            render_string_array(&transition.path_tags)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"property_details\":[");
+    for (index, property) in response.property_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"property_id\":\"{}\",\"kind\":\"{}\"}}",
+            escape_json(&property.property_id),
+            escape_json(&property.kind)
+        ));
+    }
+    out.push_str("]}");
+    out
+}
+
+pub fn render_inspect_text(response: &InspectResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("model_id: {}\n", response.model_id));
+    out.push_str(&format!("machine_ir_ready: {}\n", response.machine_ir_ready));
+    if let Some(error) = &response.machine_ir_error {
+        out.push_str(&format!("machine_ir_error: {}\n", error));
+    }
+    out.push_str(&format!(
+        "capabilities: parse={} explicit={} ir={} solver={} coverage={} explain={} testgen={}\n",
+        response.capabilities.parse_ready,
+        response.capabilities.explicit_ready,
+        response.capabilities.ir_ready,
+        response.capabilities.solver_ready,
+        response.capabilities.coverage_ready,
+        response.capabilities.explain_ready,
+        response.capabilities.testgen_ready,
+    ));
+    if !response.capabilities.reasons.is_empty() {
+        out.push_str(&format!(
+            "capability_reasons: {}\n",
+            response.capabilities.reasons.join(", ")
+        ));
+    }
+    out.push_str(&format!("state_fields: {}\n", response.state_fields.join(", ")));
+    out.push_str(&format!("actions: {}\n", response.actions.join(", ")));
+    out.push_str(&format!("properties: {}\n", response.properties.join(", ")));
+    if !response.state_field_details.is_empty() {
+        out.push_str("state_field_details:\n");
+        for field in &response.state_field_details {
+            out.push_str(&format!(
+                "- {}: {}{}\n",
+                field.name,
+                field.rust_type,
+                field
+                    .range
+                    .as_ref()
+                    .map(|range| format!(" range={range}"))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    if !response.action_details.is_empty() {
+        out.push_str("action_details:\n");
+        for action in &response.action_details {
+            out.push_str(&format!(
+                "- {} reads=[{}] writes=[{}]\n",
+                action.action_id,
+                action.reads.join(", "),
+                action.writes.join(", ")
+            ));
+        }
+    }
+    if !response.transition_details.is_empty() {
+        out.push_str("transition_details:\n");
+        for transition in &response.transition_details {
+            out.push_str(&format!(
+                "- {} guard={} effect={} path_tags=[{}]\n",
+                transition.action_id,
+                transition.guard.as_deref().unwrap_or("n/a"),
+                transition.effect.as_deref().unwrap_or("n/a"),
+                transition.path_tags.join(", ")
+            ));
+        }
+    }
+    out
+}
+
+pub fn lint_source(request: &InspectRequest) -> Result<LintResponse, Vec<Diagnostic>> {
+    let inspect = inspect_source(request)?;
+    Ok(lint_from_inspect(&inspect))
+}
+
+pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
+    let mut findings = Vec::new();
+    for reason in &inspect.capabilities.reasons {
+        match reason.as_str() {
+            "opaque_step_closure" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "opaque_step_closure".to_string(),
+                message: "model uses a free-form step closure, so solver lowering is not available".to_string(),
+                suggestion: Some(
+                    "rewrite critical actions with declarative transitions { ... }".to_string(),
+                ),
+            }),
+            "missing_declarative_transitions" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "missing_declarative_transitions".to_string(),
+                message: "model does not expose declarative transition descriptors".to_string(),
+                suggestion: Some(
+                    "add transitions { transition ... } so guard/effect metadata becomes first-class".to_string(),
+                ),
+            }),
+            "unsupported_machine_guard_expr" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "unsupported_machine_guard_expr".to_string(),
+                message: "one or more guard expressions are outside the current solver-neutral subset".to_string(),
+                suggestion: Some(
+                    "simplify guards to the current IR subset or extend lowering support".to_string(),
+                ),
+            }),
+            "unsupported_machine_update_expr" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "unsupported_machine_update_expr".to_string(),
+                message: "one or more transition updates are outside the current solver-neutral subset".to_string(),
+                suggestion: Some(
+                    "rewrite updates with supported expressions or extend lowering support".to_string(),
+                ),
+            }),
+            "unsupported_machine_property_expr" => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: "unsupported_machine_property_expr".to_string(),
+                message: "one or more properties cannot be lowered into the current machine IR".to_string(),
+                suggestion: Some(
+                    "keep properties within the supported boolean/arithmetic subset for solver runs".to_string(),
+                ),
+            }),
+            other => findings.push(LintFinding {
+                severity: "warn".to_string(),
+                code: other.to_string(),
+                message: format!("model is not fully analysis-ready: {other}"),
+                suggestion: None,
+            }),
+        }
+    }
+    if inspect
+        .action_details
+        .iter()
+        .any(|action| action.reads.is_empty() && action.writes.is_empty())
+    {
+        findings.push(LintFinding {
+            severity: "info".to_string(),
+            code: "missing_action_metadata".to_string(),
+            message: "some actions do not declare reads/writes metadata".to_string(),
+            suggestion: Some(
+                "add reads=[...] and writes=[...] to improve explain, coverage, and testgen".to_string(),
+            ),
+        });
+    }
+    if inspect
+        .transition_details
+        .iter()
+        .all(|transition| transition.path_tags == ["transition_path".to_string()])
+    {
+        findings.push(LintFinding {
+            severity: "info".to_string(),
+            code: "generic_decision_paths".to_string(),
+            message: "decision/path tags are still generic for all transitions".to_string(),
+            suggestion: Some(
+                "use descriptive action ids and metadata so allow/deny/boundary paths become visible".to_string(),
+            ),
+        });
+    }
+    let status = if findings.iter().any(|finding| finding.severity == "warn" || finding.severity == "error") {
+        "warn"
+    } else {
+        "ok"
+    };
+    LintResponse {
+        schema_version: inspect.schema_version.clone(),
+        request_id: inspect.request_id.clone(),
+        status: status.to_string(),
+        model_id: inspect.model_id.clone(),
+        capabilities: inspect.capabilities.clone(),
+        findings,
+    }
+}
+
+pub fn render_lint_json(response: &LintResponse) -> String {
+    let findings = response
+        .findings
+        .iter()
+        .map(|finding| {
+            format!(
+                "{{\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"suggestion\":{}}}",
+                escape_json(&finding.severity),
+                escape_json(&finding.code),
+                escape_json(&finding.message),
+                finding
+                    .suggestion
+                    .as_ref()
+                    .map(|value| format!("\"{}\"", escape_json(value)))
+                    .unwrap_or_else(|| "null".to_string())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"capabilities\":{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{}}},\"findings\":[{}]}}",
+        escape_json(&response.schema_version),
+        escape_json(&response.request_id),
+        escape_json(&response.status),
+        escape_json(&response.model_id),
+        response.capabilities.parse_ready,
+        response.capabilities.explicit_ready,
+        response.capabilities.ir_ready,
+        response.capabilities.solver_ready,
+        response.capabilities.coverage_ready,
+        response.capabilities.explain_ready,
+        response.capabilities.testgen_ready,
+        render_string_array(&response.capabilities.reasons),
+        findings
+    )
+}
+
+pub fn render_lint_text(response: &LintResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("model_id: {}\n", response.model_id));
+    out.push_str(&format!("status: {}\n", response.status));
+    out.push_str(&format!(
+        "capabilities: parse={} explicit={} ir={} solver={} coverage={} explain={} testgen={}\n",
+        response.capabilities.parse_ready,
+        response.capabilities.explicit_ready,
+        response.capabilities.ir_ready,
+        response.capabilities.solver_ready,
+        response.capabilities.coverage_ready,
+        response.capabilities.explain_ready,
+        response.capabilities.testgen_ready,
+    ));
+    if !response.capabilities.reasons.is_empty() {
+        out.push_str(&format!(
+            "capability_reasons: {}\n",
+            response.capabilities.reasons.join(", ")
+        ));
+    }
+    if response.findings.is_empty() {
+        out.push_str("findings: none\n");
+    } else {
+        out.push_str("findings:\n");
+        for finding in &response.findings {
+            out.push_str(&format!(
+                "- [{}] {}: {}{}\n",
+                finding.severity,
+                finding.code,
+                finding.message,
+                finding
+                    .suggestion
+                    .as_ref()
+                    .map(|suggestion| format!(" suggestion={suggestion}"))
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    out
+}
+
+fn render_string_array(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", escape_json(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn escape_json(input: &str) -> String {
+    input
+        .chars()
+        .flat_map(|ch| match ch {
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            '\r' => "\\r".chars().collect::<Vec<_>>(),
+            '\t' => "\\t".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
 }
 
 pub fn validate_explain_request(request: &CheckRequest) -> Result<(), String> {
@@ -1007,8 +1682,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_capabilities_request,
+        capabilities_response, check_source, explain_source, inspect_source, lint_source,
+        minimize_source, orchestrate_source, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_request,
         validate_explain_response, validate_inspect_request, validate_inspect_response,
         validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
@@ -1034,8 +1709,30 @@ mod tests {
         validate_inspect_request(&request).unwrap();
         let response = inspect_source(&request).unwrap();
         assert_eq!(response.model_id, "A");
+        assert!(response.machine_ir_ready);
+        assert!(response.capabilities.solver_ready);
+        assert!(response.capabilities.reasons.is_empty());
         assert_eq!(response.properties, vec!["P_SAFE"]);
+        assert_eq!(response.state_field_details[0].name, "x");
+        assert_eq!(response.state_field_details[0].range.as_deref(), Some("0..=7"));
+        assert_eq!(response.property_details[0].kind, "Invariant");
+        assert!(response.transition_details.is_empty());
         validate_inspect_response(&response).unwrap();
+    }
+
+    #[test]
+    fn lint_surfaces_step_to_declarative_migration_hints() {
+        let request = InspectRequest {
+            request_id: "req-lint".to_string(),
+            source_name: "rust:counter".to_string(),
+            source: String::new(),
+        };
+        let response = lint_source(&request).unwrap();
+        assert_eq!(response.status, "warn");
+        assert!(response
+            .findings
+            .iter()
+            .any(|finding| finding.code == "opaque_step_closure"));
     }
 
     #[test]
@@ -1120,6 +1817,7 @@ mod tests {
             request_id: "req-testgen".to_string(),
             source_name: "a.valid".to_string(),
             source: source.to_string(),
+            property_id: None,
             strategy: "counterexample".to_string(),
             backend: None,
             solver_executable: None,
@@ -1138,6 +1836,7 @@ mod tests {
             request_id: "req-witness".to_string(),
             source_name: "a.valid".to_string(),
             source: source.to_string(),
+            property_id: None,
             strategy: "witness".to_string(),
             backend: None,
             solver_executable: None,
@@ -1156,6 +1855,7 @@ mod tests {
             request_id: "req-guard".to_string(),
             source_name: "a.valid".to_string(),
             source: source.to_string(),
+            property_id: None,
             strategy: "guard".to_string(),
             backend: None,
             solver_executable: None,
@@ -1219,6 +1919,7 @@ mod tests {
             request_id: "req".to_string(),
             source_name: "a.valid".to_string(),
             source: "model A".to_string(),
+            property_id: None,
             strategy: "weird".to_string(),
             backend: None,
             solver_executable: None,

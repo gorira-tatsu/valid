@@ -84,10 +84,17 @@ action 列、state metadata へ正規化されることを前提とする。
 - explicit BFS により最短反例を返す。
 - 反例は action 列と state 列を含む trace に落とす。
 - `cargo test` で Rust model をそのまま検証できる。
-- 表面 DSL の `step` は任意 Rust を許してよいが、内部では property / action /
-  state metadata を失わない形で保持する。
+- declarative `transitions { transition ... }` を解析の正規経路とする。
+- 表面 DSL の `step` は任意 Rust を許してよいが、explicit-first の補助表現とする。
+- `inspect` は capability matrix を返し、少なくとも
+  `explicit_ready`, `ir_ready`, `solver_ready`, `coverage_ready`,
+  `explain_ready`, `testgen_ready` を示す。
+- `lint` は capability matrix と metadata をもとに migration hint を返す。
+- inspect / coverage / explain / testgen は shared decision/path tag
+  vocabulary を使い、少なくとも `guard_path`, `allow_path`,
+  `deny_path`, `boundary_path`, `write_path` を扱えること。
 - `transitions { transition ... }` を使う場合は action / guard / effect を
-  descriptor として保持する。
+  descriptor として保持し、solver-neutral IR に lower 可能でなければならない。
 - 将来の solver-neutral 化のため、表面 DSL と engine 内部 trait は分離する。
 
 ## 4.1 最小 DSL 例

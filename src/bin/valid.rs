@@ -2,8 +2,9 @@ use std::{env, fs, process};
 
 use valid::{
     api::{
-        capabilities_response, check_source, explain_source, inspect_source, minimize_source,
-        orchestrate_source, testgen_source, validate_capabilities_request,
+        capabilities_response, check_source, explain_source, inspect_source, lint_source,
+        minimize_source, orchestrate_source, render_inspect_json, render_inspect_text,
+        render_lint_json, render_lint_text, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_response,
         validate_inspect_request, validate_inspect_response, validate_minimize_response,
         validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
@@ -23,6 +24,7 @@ use valid::{
     frontend::compile_model,
     reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
+    testgen::render_replay_json,
 };
 
 fn main() {
@@ -32,6 +34,7 @@ fn main() {
     match command.as_str() {
         "check" => cmd_check(args.collect()),
         "inspect" => cmd_inspect(args.collect()),
+        "lint" => cmd_lint(args.collect()),
         "capabilities" => cmd_capabilities(args.collect()),
         "explain" => cmd_explain(args.collect()),
         "minimize" => cmd_minimize(args.collect()),
@@ -39,10 +42,11 @@ fn main() {
         "trace" => cmd_trace(args.collect()),
         "orchestrate" => cmd_orchestrate(args.collect()),
         "testgen" => cmd_testgen(args.collect()),
+        "replay" => cmd_replay(args.collect()),
         "coverage" => cmd_coverage(args.collect()),
         "selfcheck" => cmd_selfcheck(),
         _ => {
-            eprintln!("usage: valid <check|inspect|capabilities|explain|minimize|contract|trace|orchestrate|testgen|coverage|selfcheck> ...");
+            eprintln!("usage: valid <check|inspect|lint|capabilities|explain|minimize|contract|trace|orchestrate|testgen|replay|coverage|selfcheck> ...");
             process::exit(3);
         }
     }
@@ -51,14 +55,14 @@ fn main() {
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     let request = CheckRequest {
         request_id: "req-local-0001".to_string(),
         source_name: parsed.path.clone(),
         source,
-        property_id: None,
+        property_id: parsed.property_id.clone(),
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -93,14 +97,14 @@ fn cmd_check(args: Vec<String>) {
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     match explain_source(&CheckRequest {
         request_id: "req-local-explain".to_string(),
         source_name: parsed.path.clone(),
         source,
-        property_id: None,
+        property_id: parsed.property_id.clone(),
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -149,14 +153,14 @@ fn cmd_explain(args: Vec<String>) {
 fn cmd_minimize(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid minimize <model-file> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid minimize <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     match minimize_source(&MinimizeRequest {
         request_id: "req-local-minimize".to_string(),
         source_name: parsed.path.clone(),
         source,
-        property_id: None,
+        property_id: parsed.property_id.clone(),
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -212,21 +216,46 @@ fn cmd_inspect(args: Vec<String>) {
                 process::exit(3);
             }
             if parsed.json {
-                println!("{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"state_fields\":[{}],\"actions\":[{}],\"properties\":[{}]}}",
-                    response.schema_version,
-                    response.request_id,
-                    response.status,
-                    response.model_id,
-                    response.state_fields.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.actions.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.properties.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(",")
-                );
+                println!("{}", render_inspect_json(&response));
             } else {
-                println!("model_id: {}", response.model_id);
-                println!("state_fields: {}", response.state_fields.join(", "));
-                println!("actions: {}", response.actions.join(", "));
-                println!("properties: {}", response.properties.join(", "));
+                print!("{}", render_inspect_text(&response));
             }
+        }
+        Err(diagnostics) => {
+            if parsed.json {
+                println!("{}", render_diagnostics_json(&diagnostics));
+            } else {
+                print_diagnostics(&diagnostics);
+            }
+            process::exit(3);
+        }
+    }
+}
+
+fn cmd_lint(args: Vec<String>) {
+    let parsed = parse_common_args(args, "usage: valid lint <model-file> [--json]");
+    let source = read_source(&parsed.path);
+    let request = InspectRequest {
+        request_id: "req-local-lint".to_string(),
+        source_name: parsed.path.clone(),
+        source,
+    };
+    if let Err(message) = validate_inspect_request(&request) {
+        eprintln!("{message}");
+        process::exit(3);
+    }
+    match lint_source(&request) {
+        Ok(response) => {
+            if parsed.json {
+                println!("{}", render_lint_json(&response));
+            } else {
+                print!("{}", render_lint_text(&response));
+            }
+            let has_findings = response
+                .findings
+                .iter()
+                .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
+            process::exit(if has_findings { 2 } else { 0 });
         }
         Err(diagnostics) => {
             if parsed.json {
@@ -351,7 +380,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let strategy = parsed
         .extra
@@ -362,6 +391,7 @@ fn cmd_testgen(args: Vec<String>) {
         request_id: "req-local-testgen".to_string(),
         source_name: parsed.path.clone(),
         source: source.clone(),
+        property_id: parsed.property_id.clone(),
         strategy,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -414,7 +444,7 @@ fn cmd_trace(args: Vec<String>) {
     let mut format = "mermaid-state".to_string();
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |arg, options| {
             if let Some(value) = arg.strip_prefix("--format=") {
                 options.extra = Some(value.to_string());
@@ -432,7 +462,7 @@ fn cmd_trace(args: Vec<String>) {
         request_id: "req-local-trace".to_string(),
         source_name: parsed.path.clone(),
         source,
-        property_id: None,
+        property_id: parsed.property_id.clone(),
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -453,6 +483,70 @@ fn cmd_trace(args: Vec<String>) {
         "mermaid-sequence" => println!("{}", render_trace_sequence_mermaid(&trace)),
         _ => println!("{}", render_trace_mermaid(&trace)),
     }
+}
+
+fn cmd_replay(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid replay <model-file> [--json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]",
+        |arg, parsed| {
+            if let Some(value) = arg.strip_prefix("--actions=") {
+                parsed.actions = value
+                    .split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(|item| item.to_string())
+                    .collect();
+                true
+            } else if let Some(value) = arg.strip_prefix("--focus-action=") {
+                parsed.focus_action_id = Some(value.to_string());
+                true
+            } else {
+                false
+            }
+        },
+    );
+    let output = if is_bundled_model_ref(&parsed.path) {
+        valid::bundled_models::replay_bundled_model(
+            &parsed.path,
+            parsed.property_id.as_deref(),
+            &parsed.actions,
+            parsed.focus_action_id.as_deref(),
+        )
+    } else {
+        let source = read_source(&parsed.path);
+        let model = compile_model(&source).unwrap_or_else(|diagnostics| {
+            print_diagnostics(&diagnostics);
+            process::exit(3);
+        });
+        let property_id = parsed
+            .property_id
+            .as_deref()
+            .or_else(|| model.properties.first().map(|property| property.property_id.as_str()))
+            .unwrap_or("P_SAFE");
+        let terminal =
+            valid::kernel::replay::replay_actions(&model, &parsed.actions).unwrap_or_else(|error| {
+                print_diagnostics(&[error]);
+                process::exit(3);
+            });
+        let focus_enabled = parsed.focus_action_id.as_deref().map(|action_id| {
+            valid::kernel::transition::apply_action(&model, &terminal, action_id)
+                .ok()
+                .flatten()
+                .is_some()
+        });
+        Ok(render_replay_json(
+            property_id,
+            &parsed.actions,
+            &terminal.as_named_map(&model),
+            parsed.focus_action_id.as_deref(),
+            focus_enabled,
+        ))
+    }
+    .unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(3);
+    });
+    println!("{output}");
 }
 
 fn cmd_orchestrate(args: Vec<String>) {
@@ -524,7 +618,7 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <model-file> [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     if is_bundled_model_ref(&parsed.path) {
         let report = coverage_bundled_model(&parsed.path).unwrap_or_else(|message| {
@@ -547,7 +641,7 @@ fn cmd_coverage(args: Vec<String>) {
         request_id: "req-local-coverage".to_string(),
         source_name: parsed.path.clone(),
         source,
-        property_id: None,
+        property_id: parsed.property_id.clone(),
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -576,6 +670,9 @@ struct ParsedArgs {
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
+    property_id: Option<String>,
+    actions: Vec<String>,
+    focus_action_id: Option<String>,
     extra: Option<String>,
 }
 
@@ -601,6 +698,8 @@ where
             parsed.json = true;
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--property=") {
+            parsed.property_id = Some(value.to_string());
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(iter.next().unwrap_or_else(|| {
                 eprintln!("{usage}");

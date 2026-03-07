@@ -5,8 +5,9 @@ use std::{
 };
 
 use valid::api::{
-    check_source, explain_source, inspect_source, orchestrate_source, testgen_source, CheckRequest,
-    InspectRequest, OrchestrateRequest, TestgenRequest,
+    check_source, explain_source, inspect_source, lint_source, orchestrate_source,
+    render_inspect_json, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
+    TestgenRequest,
 };
 use valid::engine::CheckOutcome;
 
@@ -86,6 +87,7 @@ fn failing_counter_explains_and_generates_vectors() {
         request_id: "req-test-testgen".to_string(),
         source_name: "failing_counter.valid".to_string(),
         source,
+        property_id: None,
         strategy: "counterexample".to_string(),
         backend: None,
         solver_executable: None,
@@ -93,6 +95,10 @@ fn failing_counter_explains_and_generates_vectors() {
     })
     .expect("testgen should succeed");
     assert!(!testgen.vector_ids.is_empty());
+    for path in &testgen.generated_files {
+        let body = fs::read_to_string(path).expect("generated file must exist");
+        assert!(body.contains("assert_replay_output_json"));
+    }
     cleanup_generated_files(&testgen.generated_files);
 }
 
@@ -110,6 +116,57 @@ fn multi_property_orchestrate_returns_aggregate_coverage() {
     .expect("orchestrate should succeed");
     assert_eq!(response.runs.len(), 2);
     assert!(response.aggregate_coverage.is_some());
+}
+
+#[test]
+fn inspect_includes_metadata_details() {
+    let source = read_fixture("examples/models/safe_counter.valid");
+    let response = inspect_source(&InspectRequest {
+        request_id: "req-test-inspect".to_string(),
+        source_name: "safe_counter.valid".to_string(),
+        source,
+    })
+    .expect("inspect should succeed");
+    let json = render_inspect_json(&response);
+    assert!(response.machine_ir_ready);
+    assert!(response.capabilities.solver_ready);
+    assert!(response.capabilities.reasons.is_empty());
+    assert!(json.contains("\"state_field_details\""));
+    assert!(json.contains("\"capabilities\""));
+    assert!(json.contains("\"action_details\""));
+    assert!(json.contains("\"path_tags\""));
+    assert!(json.contains("\"property_details\""));
+}
+
+#[test]
+fn lint_reports_clean_valid_models() {
+    let source = read_fixture("examples/models/safe_counter.valid");
+    let response = lint_source(&InspectRequest {
+        request_id: "req-test-lint".to_string(),
+        source_name: "safe_counter.valid".to_string(),
+        source,
+    })
+    .expect("lint should succeed");
+    assert_eq!(response.status, "ok");
+    assert!(response.findings.is_empty());
+}
+
+#[test]
+fn multi_property_testgen_can_target_specific_property() {
+    let source = read_fixture("examples/models/multi_property.valid");
+    let response = testgen_source(&TestgenRequest {
+        request_id: "req-testgen-property".to_string(),
+        source_name: "multi_property.valid".to_string(),
+        source,
+        property_id: Some("P_STRICT".to_string()),
+        strategy: "counterexample".to_string(),
+        backend: None,
+        solver_executable: None,
+        solver_args: Vec::new(),
+    })
+    .expect("property-specific testgen should succeed");
+    assert_eq!(response.vector_ids.len(), 1);
+    cleanup_generated_files(&response.generated_files);
 }
 
 #[test]
@@ -269,5 +326,20 @@ fn bundled_rust_models_run_via_main_cli_path() {
         .output()
         .expect("coverage should run");
     assert!(coverage.status.success());
-    assert!(String::from_utf8_lossy(&coverage.stdout).contains("\"model_id\":\"CounterModel\""));
+    let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
+    assert!(coverage_stdout.contains("\"model_id\":\"CounterModel\""));
+    assert!(coverage_stdout.contains("\"path_tags\""));
+}
+
+#[test]
+fn main_cli_lints_bundled_step_model() {
+    let lint = Command::new(binary_path())
+        .arg("lint")
+        .arg("rust:counter")
+        .arg("--json")
+        .output()
+        .expect("lint should run");
+    assert_eq!(lint.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&lint.stdout);
+    assert!(stdout.contains("\"opaque_step_closure\""));
 }

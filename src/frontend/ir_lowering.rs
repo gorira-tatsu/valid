@@ -161,6 +161,13 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = trimmed.split_once("&&") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = trimmed.split_once('+') {
         return Some(ExprIr::Binary {
             op: BinaryOp::Add,
@@ -185,7 +192,7 @@ fn lowering_error(message: String, line: usize) -> Diagnostic {
     )
     .with_span(Span::new(line, 1))
     .with_help("rewrite the expression into the MVP expression subset")
-    .with_best_practice("keep expressions explicit and avoid implicit coercions")
+    .with_best_practice("keep expressions explicit and within the MVP bool/arithmetic subset")
 }
 
 #[cfg(test)]

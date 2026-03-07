@@ -12,6 +12,12 @@ stateful workflow rules. The main path is:
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
 
+The product story is now:
+
+- declarative `transitions { ... }` models are the canonical analysis path
+- free-form `step` models are still supported, but may remain explicit-only
+- `inspect` reports a capability matrix so you can see which path a model can use
+
 ## What It Can Do
 
 - Explore finite state spaces with the explicit backend
@@ -25,8 +31,8 @@ the primary one.
 ## Current Limits
 
 - The Rust DSL is still evolving
-- `valid_state!` / `valid_actions!` / `valid_model!` reduce boilerplate, but
-  derive macros are not implemented yet
+- `#[derive(ValidState)]` / `#[derive(ValidAction)]` work for the current
+  common cases, but the derive surface is still intentionally small
 - Full solver coverage beyond the current bounded invariant subset is not done
 - `testgen` is useful, but still closer to regression asset generation than
   fully intelligent scenario design
@@ -45,6 +51,7 @@ Try the Rust-first path:
 cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-counter --json
+cargo run --bin cargo-valid -- check failing-counter --property=P_FAIL --json
 ```
 
 Try the legacy `.valid` path:
@@ -84,6 +91,8 @@ These commands are the most important ones:
   Show the model names exported by a registry file
 - `inspect <model>`
   Show model structure without running verification
+- `lint <model>`
+  Report capability-based migration findings and analysis-readiness gaps
 - `check <model>`
   Verify one model and return `PASS` / `FAIL` / `UNKNOWN`
 - `explain <model>`
@@ -92,6 +101,8 @@ These commands are the most important ones:
   Show action and guard coverage
 - `testgen <model>`
   Generate Rust tests under `tests/generated/*.rs`
+- `replay <model>`
+  Replay an action sequence and return the terminal state
 - `all`
   Run `check` for every model exported by a registry file
 
@@ -100,9 +111,31 @@ Examples:
 ```sh
 cargo run --bin cargo-valid -- --file examples/valid_models.rs list --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs inspect counter --json
+cargo run --bin cargo-valid -- lint iam-access --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs check counter --json
+cargo run --bin cargo-valid -- check failing-counter --property=P_FAIL --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
 ```
+
+`inspect --json` now includes:
+
+- `machine_ir_ready`
+- `capabilities.parse_ready`
+- `capabilities.explicit_ready`
+- `capabilities.ir_ready`
+- `capabilities.solver_ready`
+- `capabilities.coverage_ready`
+- `capabilities.explain_ready`
+- `capabilities.testgen_ready`
+- `capabilities.reasons`
+
+For example, a `step`-only model can be explicit-ready but solver-not-ready,
+while a declarative transition model can be solver-ready.
+
+`transition_details` and coverage reports also expose inferred `path_tags`
+such as `allow_path`, `deny_path`, `boundary_path`, `guard_path`, and
+`write_path`. These are the shared decision/path vocabulary used by inspect,
+coverage, explain, and test generation.
 
 ## Rust DSL
 
@@ -112,6 +145,35 @@ The current Rust DSL is built from four macros:
 - `valid_actions!`
 - `valid_model!`
 - `valid_models!`
+
+If you already have ordinary Rust types and do not want the macros to define
+the types for you, there is also an attach-spec path:
+
+- `valid_state_spec!`
+- `valid_action_spec!`
+
+For ordinary Rust type declarations, you can also derive directly:
+
+```rust
+use valid::{ValidAction, ValidState};
+
+#[derive(Clone, Debug, PartialEq, Eq, ValidState)]
+struct State {
+    #[valid(range = "0..=3")]
+    x: u8,
+    locked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValidAction)]
+enum Action {
+    #[valid(action_id = "INC", reads = ["x", "locked"], writes = ["x"])]
+    Inc,
+    #[valid(action_id = "LOCK", reads = ["locked"], writes = ["locked"])]
+    Lock,
+    #[valid(action_id = "UNLOCK", reads = ["locked"], writes = ["locked"])]
+    Unlock,
+}
+```
 
 Minimal example:
 
@@ -183,12 +245,12 @@ valid_model! {
         billing_read_allowed: false,
     }];
     transitions {
-        transition AttachBoundary when |state| !state.boundary_attached => [AccessState {
+        transition AttachBoundary [tags = ["boundary_path"]] when |state| !state.boundary_attached => [AccessState {
             boundary_attached: true,
             session_active: state.session_active,
             billing_read_allowed: state.billing_read_allowed,
         }];
-        transition AssumeSession when |state| state.boundary_attached && !state.session_active => [AccessState {
+        transition AssumeSession [tags = ["session_path"]] when |state| state.boundary_attached && !state.session_active => [AccessState {
             boundary_attached: state.boundary_attached,
             session_active: true,
             billing_read_allowed: state.billing_read_allowed,
@@ -203,9 +265,19 @@ valid_model! {
 This mode is better aligned with future solver lowering, stronger explain, and
 metadata-aware test generation.
 
+Use explicit `tags = [...]` when a transition represents a domain-specific
+decision path such as `allow_path`, `deny_path`, `boundary_path`, or
+`session_path`. When tags are omitted, `valid` falls back to heuristics.
+
+If a model uses only `step`, `inspect` will usually report capability reasons
+such as `opaque_step_closure` or `missing_declarative_transitions`. That is the
+intended migration signal toward declarative transitions when the model grows.
+
 ## Test Generation
 
 `testgen` writes generated Rust tests to `tests/generated/*.rs`.
+Generated tests are replay-backed: they call `valid replay` or
+`cargo-valid replay` and assert on the terminal state captured in the vector.
 
 Available strategies:
 
@@ -228,6 +300,8 @@ Examples:
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
 cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
 cargo run --bin valid -- testgen examples/models/safe_counter.valid --strategy=boundary --json
+cargo run --bin valid -- testgen examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample --json
+cargo run --bin cargo-valid -- replay failing-counter --property=P_FAIL --actions=INC,INC --json
 ```
 
 ## Examples In This Repo

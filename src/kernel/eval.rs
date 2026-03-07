@@ -33,6 +33,9 @@ pub fn eval_expr(
                 (BinaryOp::LessThanOrEqual, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::Bool(left <= right))
                 }
+                (BinaryOp::And, Value::Bool(left), Value::Bool(right)) => {
+                    Ok(Value::Bool(left && right))
+                }
                 _ => Err(eval_error("invalid binary operand types".to_string())),
             }
         }
@@ -42,7 +45,7 @@ pub fn eval_expr(
 fn eval_error(message: String) -> Diagnostic {
     Diagnostic::new(ErrorCode::EvalError, DiagnosticSegment::KernelEval, message)
         .with_help("check field names and operand types in the lowered IR")
-        .with_best_practice("keep MVP expressions within bool, u64, !, +, and <=")
+        .with_best_practice("keep MVP expressions within bool, u64, !, &&, +, and <=")
 }
 
 #[cfg(test)]

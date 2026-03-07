@@ -1,3 +1,5 @@
+extern crate self as valid;
+
 pub mod api;
 pub mod bundled_models;
 pub mod contract;
@@ -15,3 +17,5 @@ pub mod selfcheck;
 pub mod solver;
 pub mod support;
 pub mod testgen;
+
+pub use valid_derive::{ValidAction, ValidState};

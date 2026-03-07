@@ -12,13 +12,18 @@ use std::{
 
 use crate::{
     api::{ExplainCandidateCause, ExplainResponse},
+    contract::snapshot_model,
     coverage::CoverageReport,
     engine::{
-        AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult, PropertyResult, RunManifest,
-        RunStatus,
+        AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult, PropertyResult,
+        PropertySelection, RunManifest, RunPlan, RunStatus,
     },
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
-    ir::Value,
+    ir::{
+        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, SourceSpan,
+        StateField, UnaryOp, UpdateIr, Value,
+    },
+    solver::{run_with_adapter, AdapterConfig},
     support::hash::stable_hash_hex,
     testgen::{build_counterexample_vector, TestVector, VectorActionStep},
 };
@@ -120,6 +125,123 @@ pub struct TransitionDescriptor {
     pub effect: &'static str,
     pub reads: &'static [&'static str],
     pub writes: &'static [&'static str],
+    pub path_tags: &'static [&'static str],
+    pub updates: &'static [TransitionUpdateDescriptor],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransitionUpdateDescriptor {
+    pub field: &'static str,
+    pub expr: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineTransitionUpdateIr {
+    pub field: &'static str,
+    pub expr: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineTransitionIr {
+    pub action_variant: &'static str,
+    pub action_id: &'static str,
+    pub guard: Option<&'static str>,
+    pub effect: Option<&'static str>,
+    pub reads: &'static [&'static str],
+    pub writes: &'static [&'static str],
+    pub path_tags: Vec<&'static str>,
+    pub updates: Vec<MachineTransitionUpdateIr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineCapabilityReport {
+    pub parse_ready: bool,
+    pub explicit_ready: bool,
+    pub ir_ready: bool,
+    pub solver_ready: bool,
+    pub coverage_ready: bool,
+    pub explain_ready: bool,
+    pub testgen_ready: bool,
+    pub machine_ir_error: Option<String>,
+    pub reasons: Vec<String>,
+}
+
+pub fn infer_decision_path_tags<'a, RI, WI>(
+    action_id: &str,
+    reads: RI,
+    writes: WI,
+    guard: Option<&str>,
+    effect: Option<&str>,
+) -> Vec<String>
+where
+    RI: IntoIterator<Item = &'a str>,
+    WI: IntoIterator<Item = &'a str>,
+{
+    let reads = reads.into_iter().collect::<Vec<_>>();
+    let writes = writes.into_iter().collect::<Vec<_>>();
+    let mut tags = BTreeSet::new();
+    if guard.is_some() {
+        tags.insert("guard_path".to_string());
+    }
+    if !reads.is_empty() {
+        tags.insert("read_path".to_string());
+    }
+    if !writes.is_empty() {
+        tags.insert("write_path".to_string());
+    }
+    let mut text = action_id.to_ascii_lowercase();
+    for part in &reads {
+        text.push(' ');
+        text.push_str(&part.to_ascii_lowercase());
+    }
+    for part in &writes {
+        text.push(' ');
+        text.push_str(&part.to_ascii_lowercase());
+    }
+    if let Some(guard) = guard {
+        text.push(' ');
+        text.push_str(&guard.to_ascii_lowercase());
+    }
+    if let Some(effect) = effect {
+        text.push(' ');
+        text.push_str(&effect.to_ascii_lowercase());
+    }
+    for (needle, tag) in [
+        ("allow", "allow_path"),
+        ("deny", "deny_path"),
+        ("boundary", "boundary_path"),
+        ("exception", "exception_path"),
+        ("session", "session_path"),
+        ("lock", "state_gate_path"),
+    ] {
+        if text.contains(needle) {
+            tags.insert(tag.to_string());
+        }
+    }
+    if tags.is_empty() {
+        tags.insert("transition_path".to_string());
+    }
+    tags.into_iter().collect()
+}
+
+pub fn decision_path_tags<'a, RI, WI>(
+    explicit_tags: &[&str],
+    action_id: &str,
+    reads: RI,
+    writes: WI,
+    guard: Option<&str>,
+    effect: Option<&str>,
+) -> Vec<String>
+where
+    RI: IntoIterator<Item = &'a str>,
+    WI: IntoIterator<Item = &'a str>,
+{
+    let mut tags = explicit_tags
+        .iter()
+        .map(|tag| tag.to_string())
+        .collect::<BTreeSet<_>>();
+    tags.extend(infer_decision_path_tags(action_id, reads, writes, guard, effect));
+    tags.into_iter().collect()
 }
 
 pub trait StateSpec: ModelingState {
@@ -134,14 +256,24 @@ pub trait ActionSpec: ModelingAction {
 pub struct ModelProperty<S> {
     pub property_id: &'static str,
     pub property_kind: crate::ir::PropertyKind,
+    pub expr: Option<&'static str>,
     pub holds: fn(&S) -> bool,
 }
 
 impl<S> ModelProperty<S> {
     pub fn invariant(property_id: &'static str, holds: fn(&S) -> bool) -> Self {
+        Self::invariant_expr(property_id, None, holds)
+    }
+
+    pub fn invariant_expr(
+        property_id: &'static str,
+        expr: Option<&'static str>,
+        holds: fn(&S) -> bool,
+    ) -> Self {
         Self {
             property_id,
             property_kind: crate::ir::PropertyKind::Invariant,
+            expr,
             holds,
         }
     }
@@ -213,6 +345,123 @@ pub fn transition_descriptors<M: ModelSpec>() -> Vec<TransitionDescriptor> {
     M::transitions()
 }
 
+pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
+    let descriptors = M::transitions();
+    if !descriptors.is_empty() {
+        return descriptors
+            .into_iter()
+            .map(|descriptor| MachineTransitionIr {
+                action_variant: descriptor.action_variant,
+                action_id: descriptor.action_id,
+                guard: Some(descriptor.guard),
+                effect: Some(descriptor.effect),
+                reads: descriptor.reads,
+                writes: descriptor.writes,
+                path_tags: descriptor.path_tags.to_vec(),
+                updates: descriptor
+                    .updates
+                    .iter()
+                    .map(|update| MachineTransitionUpdateIr {
+                        field: update.field,
+                        expr: Some(update.expr),
+                    })
+                    .collect(),
+            })
+            .collect();
+    }
+
+    M::Action::action_descriptors()
+        .into_iter()
+        .map(|descriptor| MachineTransitionIr {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: None,
+            effect: None,
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: Vec::new(),
+            updates: Vec::new(),
+        })
+        .collect()
+}
+
+pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityReport {
+    let machine_ir = lower_machine_model::<M>();
+    match machine_ir {
+        Ok(_) => MachineCapabilityReport {
+            parse_ready: true,
+            explicit_ready: true,
+            ir_ready: true,
+            solver_ready: true,
+            coverage_ready: true,
+            explain_ready: true,
+            testgen_ready: true,
+            machine_ir_error: None,
+            reasons: Vec::new(),
+        },
+        Err(error) => MachineCapabilityReport {
+            parse_ready: true,
+            explicit_ready: true,
+            ir_ready: false,
+            solver_ready: false,
+            coverage_ready: true,
+            explain_ready: true,
+            testgen_ready: true,
+            machine_ir_error: Some(error.clone()),
+            reasons: machine_capability_reasons::<M>(&error),
+        },
+    }
+}
+
+pub fn machine_transition_tags_for_action<M: ModelSpec>(action_id: &str) -> Vec<String> {
+    machine_transition_ir::<M>()
+        .into_iter()
+        .find(|transition| transition.action_id == action_id)
+        .map(|transition| {
+            decision_path_tags(
+                &transition.path_tags,
+                transition.action_id,
+                transition.reads.iter().copied(),
+                transition.writes.iter().copied(),
+                transition.guard,
+                transition.effect,
+            )
+        })
+        .unwrap_or_else(|| vec!["transition_path".to_string()])
+}
+
+fn machine_capability_reasons<M: VerifiedMachine>(error: &str) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if M::transitions().is_empty() {
+        reasons.push("opaque_step_closure".to_string());
+    }
+    if error.contains("requires exactly one init state") {
+        reasons.push("multiple_init_states".to_string());
+    }
+    if error.contains("declarative transitions") {
+        reasons.push("missing_declarative_transitions".to_string());
+    }
+    if error.contains("unsupported machine guard expression") {
+        reasons.push("unsupported_machine_guard_expr".to_string());
+    }
+    if error.contains("unsupported machine update expression") {
+        reasons.push("unsupported_machine_update_expr".to_string());
+    }
+    if error.contains("not representable in the current IR subset") {
+        reasons.push("unsupported_machine_property_expr".to_string());
+    }
+    if error.contains("unsupported rust field type") {
+        reasons.push("unsupported_rust_field_type".to_string());
+    }
+    if error.contains("exceeds supported u8 bounds") {
+        reasons.push("unsupported_field_range".to_string());
+    }
+    if reasons.is_empty() {
+        reasons.push("machine_ir_lowering_failed".to_string());
+    }
+    reasons
+}
+
 #[doc(hidden)]
 pub fn action_descriptor_by_variant<A: ActionSpec>(variant: &str) -> ActionDescriptor {
     A::action_descriptors()
@@ -269,6 +518,42 @@ macro_rules! valid_state {
 }
 
 #[macro_export]
+macro_rules! valid_state_spec {
+    (
+        $state:ty {
+            $($field:ident : $field_ty:ty $( [ range = $range:literal ] )? ),+ $(,)?
+        }
+    ) => {
+        impl $crate::modeling::ModelingState for $state {
+            fn snapshot(&self) -> std::collections::BTreeMap<String, $crate::ir::Value> {
+                std::collections::BTreeMap::from([
+                    $(
+                        (
+                            stringify!($field).to_string(),
+                            $crate::modeling::IntoModelValue::into_model_value(self.$field.clone()),
+                        )
+                    ),+
+                ])
+            }
+        }
+
+        impl $crate::modeling::StateSpec for $state {
+            fn state_fields() -> Vec<$crate::modeling::StateFieldDescriptor> {
+                vec![
+                    $(
+                        $crate::modeling::StateFieldDescriptor {
+                            name: stringify!($field),
+                            rust_type: stringify!($field_ty),
+                            range: $crate::valid_state!(@range $($range)?),
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! valid_actions {
     (
         enum $action:ident {
@@ -321,12 +606,53 @@ macro_rules! valid_actions {
 }
 
 #[macro_export]
+macro_rules! valid_action_spec {
+    (
+        $action:ty {
+            $(
+                $variant:ident => $action_id:literal
+                $( [ reads = [$($read:literal),* $(,)?], writes = [$($write:literal),* $(,)?] ] )?
+            ),+ $(,)?
+        }
+    ) => {
+        impl $crate::modeling::Finite for $action {
+            fn all() -> Vec<Self> {
+                vec![$(<$action>::$variant),+]
+            }
+        }
+
+        impl $crate::modeling::ModelingAction for $action {
+            fn action_id(&self) -> String {
+                match self {
+                    $( <$action>::$variant => $action_id.to_string(), )+
+                }
+            }
+        }
+
+        impl $crate::modeling::ActionSpec for $action {
+            fn action_descriptors() -> Vec<$crate::modeling::ActionDescriptor> {
+                vec![
+                    $(
+                        $crate::modeling::ActionDescriptor {
+                            variant: stringify!($variant),
+                            action_id: $action_id,
+                            reads: $crate::valid_actions!(@reads $($($read),*)?),
+                            writes: $crate::valid_actions!(@writes $($($write),*)?),
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! valid_model {
     (
         model $model:ident;
         init [$($init_state:expr),* $(,)?];
         transitions {
-            $(transition $transition_action:ident when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
+            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];)+
         }
         properties {
             $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
@@ -336,7 +662,7 @@ macro_rules! valid_model {
             model $model<State, Action>;
             init [$($init_state),*];
             transitions {
-                $(transition $transition_action when |$guard_state| $guard_expr => [$($next_state),*];)+
+                $(transition $transition_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$state_ctor { $($field : $update_expr),* }];)+
             }
             properties {
                 $(invariant $property |$holds_state| $holds_expr;)+
@@ -347,7 +673,109 @@ macro_rules! valid_model {
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
-            $(transition $transition_action:ident when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
+            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];)+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        struct $model;
+
+        impl $crate::modeling::ModelSpec for $model {
+            type State = $state_ty;
+            type Action = $action_ty;
+
+            fn model_id() -> &'static str {
+                stringify!($model)
+            }
+
+            fn init_states() -> Vec<Self::State> {
+                vec![$($init_state),*]
+            }
+
+            fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
+                match action {
+                    $(
+                        <$action_ty>::$transition_action => {
+                            let $guard_state = state;
+                            if $guard_expr {
+                                vec![$state_ctor { $($field: $update_expr),* }]
+                            } else {
+                                Vec::new()
+                            }
+                        },
+                    )+
+                }
+            }
+
+            fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
+                vec![
+                    $(
+                        $crate::modeling::ModelProperty::invariant_expr(
+                            stringify!($property),
+                            Some(stringify!($holds_expr)),
+                            |$holds_state: &Self::State| $holds_expr,
+                        )
+                    ),+
+                ]
+            }
+
+            fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
+                vec![
+                    $(
+                        {
+                            let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+                                stringify!($transition_action)
+                            );
+                            $crate::modeling::TransitionDescriptor {
+                                action_variant: descriptor.variant,
+                                action_id: descriptor.action_id,
+                                guard: stringify!($guard_expr),
+                                effect: stringify!($state_ctor { $($field: $update_expr),* }),
+                                reads: descriptor.reads,
+                                writes: descriptor.writes,
+                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+                                updates: &[
+                                    $(
+                                        $crate::modeling::TransitionUpdateDescriptor {
+                                            field: stringify!($field),
+                                            expr: stringify!($update_expr),
+                                        }
+                                    ),*
+                                ],
+                            }
+                        }
+                    ),+
+                ]
+            }
+        }
+    };
+    (
+        model $model:ident;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
+            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        $crate::valid_model! {
+            model $model<State, Action>;
+            init [$($init_state),*];
+            transitions {
+                $(transition $transition_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state),*];)+
+            }
+            properties {
+                $(invariant $property |$holds_state| $holds_expr;)+
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
+            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
         }
         properties {
             $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
@@ -385,8 +813,9 @@ macro_rules! valid_model {
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
                 vec![
                     $(
-                        $crate::modeling::ModelProperty::invariant(
+                        $crate::modeling::ModelProperty::invariant_expr(
                             stringify!($property),
+                            Some(stringify!($holds_expr)),
                             |$holds_state: &Self::State| $holds_expr,
                         )
                     ),+
@@ -407,12 +836,20 @@ macro_rules! valid_model {
                                 effect: stringify!([$($next_state),*]),
                                 reads: descriptor.reads,
                                 writes: descriptor.writes,
+                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+                                updates: &[],
                             }
                         }
                     ),+
                 ]
             }
         }
+    };
+    (@path_tags $($path_tag:literal),*) => {
+        &[$($path_tag),*]
+    };
+    (@path_tags) => {
+        &[]
     };
     (
         model $model:ident;
@@ -458,8 +895,9 @@ macro_rules! valid_model {
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
                 vec![
                     $(
-                        $crate::modeling::ModelProperty::invariant(
+                        $crate::modeling::ModelProperty::invariant_expr(
                             stringify!($property),
+                            Some(stringify!($holds_expr)),
                             |$holds_state: &Self::State| $holds_expr,
                         )
                     ),+
@@ -544,8 +982,10 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
     let mut guard_false_actions = BTreeSet::new();
     let mut guard_true_counts = BTreeMap::new();
     let mut guard_false_counts = BTreeMap::new();
+    let mut path_tag_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut repeated_state_count = 0usize;
+    let transition_ir = machine_transition_ir::<M>();
 
     for node in &exploration.nodes {
         *depth_histogram.entry(node.depth).or_insert(0) += 1;
@@ -565,6 +1005,21 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         let action_id = edge.action.action_id();
         covered_actions.insert(action_id.clone());
         *action_execution_counts.entry(action_id).or_insert(0) += 1;
+        if let Some(transition) = transition_ir
+            .iter()
+            .find(|transition| transition.action_id == edge.action.action_id())
+        {
+            for tag in decision_path_tags(
+                &transition.path_tags,
+                transition.action_id,
+                transition.reads.iter().copied(),
+                transition.writes.iter().copied(),
+                transition.guard,
+                transition.effect,
+            ) {
+                *path_tag_counts.entry(tag).or_insert(0) += 1;
+            }
+        }
         if edge.to_index <= edge.from_index {
             repeated_state_count += 1;
         }
@@ -617,6 +1072,7 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         guard_true_counts,
         guard_false_counts,
         uncovered_guards,
+        path_tag_counts,
         depth_histogram,
         step_count: exploration.edges.len(),
     }
@@ -648,6 +1104,9 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         .collect::<Vec<_>>();
     let coverage = collect_machine_coverage::<M>();
     let action_id = failure_step.action_id.clone().unwrap_or_else(|| "INITIAL".to_string());
+    let transition = machine_transition_ir::<M>()
+        .into_iter()
+        .find(|transition| transition.action_id == action_id);
     let mut candidate_causes = Vec::new();
     if involved_fields.is_empty() {
         candidate_causes.push(ExplainCandidateCause {
@@ -686,6 +1145,25 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             kind: "guard_polarity_gap".to_string(),
             message: format!("guard coverage for action {action_id} is incomplete: {uncovered}"),
         });
+    }
+    if let Some(transition) = transition {
+        let path_tags = decision_path_tags(
+            &transition.path_tags,
+            transition.action_id,
+            transition.reads.iter().copied(),
+            transition.writes.iter().copied(),
+            transition.guard,
+            transition.effect,
+        );
+        if !path_tags.is_empty() {
+            candidate_causes.push(ExplainCandidateCause {
+                kind: "decision_path_tags".to_string(),
+                message: format!(
+                    "action {action_id} participates in path tags [{}]",
+                    path_tags.join(", ")
+                ),
+            });
+        }
     }
     let mut repair_hints = vec![
         "review the action semantics that lead into the violating state".to_string(),
@@ -731,6 +1209,13 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
 
 pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     let property = primary_property::<M>();
+    build_machine_test_vectors_for_property::<M>(property.property_id)
+}
+
+pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
+    property_id: &str,
+) -> Vec<TestVector> {
+    let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
     if let Some(failure_index) = exploration.failure_index {
         let trace = build_evidence_trace::<M>(
@@ -771,7 +1256,11 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
                 focus_action_id: Some(edge.action.action_id()),
                 focus_field: None,
                 expected_guard_enabled: Some(true),
-                notes: Vec::new(),
+                notes: machine_transition_tags_for_action::<M>(&edge.action.action_id())
+                    .into_iter()
+                    .map(|tag| format!("path_tag:{tag}"))
+                    .collect(),
+                replay_target: None,
             });
         }
     }
@@ -779,34 +1268,36 @@ pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
 }
 
 pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
+    property_id: Option<&str>,
     strategy: &str,
 ) -> Vec<TestVector> {
+    let property_id = property_id.unwrap_or_else(|| primary_property::<M>().property_id);
     match strategy {
-        "counterexample" => build_machine_test_vectors::<M>()
+        "counterexample" => build_machine_test_vectors_for_property::<M>(property_id)
             .into_iter()
             .filter(|vector| vector.strategy == "counterexample")
             .collect(),
-        "transition" | "witness" => build_transition_witness_vectors::<M>(),
-        "guard" => build_guard_coverage_vectors::<M>(),
-        "boundary" => build_boundary_focus_vectors::<M>(),
-        "random" => build_randomized_vectors::<M>(5),
-        _ => build_machine_test_vectors::<M>(),
+        "transition" | "witness" => build_transition_witness_vectors::<M>(property_id),
+        "guard" => build_guard_coverage_vectors::<M>(property_id),
+        "boundary" => build_boundary_focus_vectors::<M>(property_id),
+        "random" => build_randomized_vectors::<M>(property_id, 5),
+        _ => build_machine_test_vectors_for_property::<M>(property_id),
     }
 }
 
-fn build_transition_witness_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
-    build_machine_test_vectors::<M>()
+fn build_transition_witness_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
+    build_machine_test_vectors_for_property::<M>(property_id)
         .into_iter()
         .filter(|vector| vector.source_kind == "witness")
         .collect()
 }
 
-fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
-    let property = primary_property::<M>();
+fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
+    let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
-    let descriptors = M::transitions();
-    if descriptors.is_empty() {
-        return build_transition_witness_vectors::<M>();
+    let transition_ir = machine_transition_ir::<M>();
+    if transition_ir.is_empty() || transition_ir.iter().all(|transition| transition.guard.is_none()) {
+        return build_transition_witness_vectors::<M>(property_id);
     }
 
     let actions = M::Action::all()
@@ -816,7 +1307,7 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     let mut vectors = Vec::new();
     let mut seen = BTreeSet::new();
 
-    for descriptor in descriptors {
+    for descriptor in transition_ir {
         if let Some(edge) = exploration
             .edges
             .iter()
@@ -831,7 +1322,15 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
                 Some(descriptor.action_id.to_string()),
                 None,
                 Some(true),
-                vec![format!("guard_true: {}", descriptor.guard)],
+                {
+                    let mut notes = vec![format!("guard_true: {}", descriptor.guard.unwrap_or("unknown"))];
+                    notes.extend(
+                        machine_transition_tags_for_action::<M>(descriptor.action_id)
+                            .into_iter()
+                            .map(|tag| format!("path_tag:{tag}")),
+                    );
+                    notes
+                },
             ) {
                 let signature = (
                     vector.focus_action_id.clone(),
@@ -862,7 +1361,15 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
                 Some(descriptor.action_id.to_string()),
                 None,
                 Some(false),
-                vec![format!("guard_false: {}", descriptor.guard)],
+                {
+                    let mut notes = vec![format!("guard_false: {}", descriptor.guard.unwrap_or("unknown"))];
+                    notes.extend(
+                        machine_transition_tags_for_action::<M>(descriptor.action_id)
+                            .into_iter()
+                            .map(|tag| format!("path_tag:{tag}")),
+                    );
+                    notes
+                },
             ) {
                 let signature = (
                     vector.focus_action_id.clone(),
@@ -879,8 +1386,8 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     vectors
 }
 
-fn build_boundary_focus_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
-    let property = primary_property::<M>();
+fn build_boundary_focus_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
+    let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
     let fields = M::State::state_fields();
     let mut vectors = Vec::new();
@@ -924,8 +1431,8 @@ fn build_boundary_focus_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     vectors
 }
 
-fn build_randomized_vectors<M: VerifiedMachine>(limit: usize) -> Vec<TestVector> {
-    let property = primary_property::<M>();
+fn build_randomized_vectors<M: VerifiedMachine>(property_id: &str, limit: usize) -> Vec<TestVector> {
+    let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
     let mut candidates = exploration
         .nodes
@@ -1026,6 +1533,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         focus_field,
         expected_guard_enabled,
         notes,
+        replay_target: None,
     })
 }
 
@@ -1036,6 +1544,189 @@ fn parse_inclusive_range(range: Option<&'static str>) -> Option<(u64, u64)> {
     let max = max.parse::<u64>().ok()?;
     Some((min, max))
 }
+
+pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
+    let init_states = M::init_states();
+    if init_states.len() != 1 {
+        return Err("machine IR lowering currently requires exactly one init state".to_string());
+    }
+    let init_state = init_states
+        .into_iter()
+        .next()
+        .ok_or_else(|| "machine must define at least one init state".to_string())?;
+    let snapshot = init_state.snapshot();
+
+    let state_fields = M::State::state_fields()
+        .into_iter()
+        .map(|field| {
+            let ty = lower_machine_field_type(&field)?;
+            Ok(StateField {
+                id: field.name.to_string(),
+                name: field.name.to_string(),
+                ty,
+                span: SourceSpan { line: 1, column: 1 },
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let init = state_fields
+        .iter()
+        .map(|field| {
+            let value = snapshot
+                .get(&field.name)
+                .cloned()
+                .ok_or_else(|| format!("missing init value for field `{}`", field.name))?;
+            Ok(InitAssignment {
+                field: field.id.clone(),
+                value,
+                span: SourceSpan { line: 1, column: 1 },
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let transitions = M::transitions();
+    if transitions.is_empty() {
+        return Err(
+            "machine IR lowering currently requires declarative transitions { ... }".to_string(),
+        );
+    }
+
+    let actions = transitions
+        .into_iter()
+        .map(|transition| {
+            let guard = lower_machine_expr(transition.guard).ok_or_else(|| {
+                format!("unsupported machine guard expression `{}`", transition.guard)
+            })?;
+            let updates = transition
+                .updates
+                .iter()
+                .map(|update| {
+                    let value = lower_machine_expr(update.expr).ok_or_else(|| {
+                        format!("unsupported machine update expression `{}`", update.expr)
+                    })?;
+                    Ok(UpdateIr {
+                        field: update.field.to_string(),
+                        value,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(ActionIr {
+                action_id: transition.action_id.to_string(),
+                label: transition.action_id.to_string(),
+                reads: transition.reads.iter().map(|item| item.to_string()).collect(),
+                writes: transition.writes.iter().map(|item| item.to_string()).collect(),
+                guard,
+                updates,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let properties = M::properties()
+        .into_iter()
+        .map(|property| {
+            let expr = property
+                .expr
+                .and_then(lower_machine_expr)
+                .ok_or_else(|| {
+                    format!(
+                        "machine property `{}` is not representable in the current IR subset",
+                        property.property_id
+                    )
+                })?;
+            Ok(PropertyIr {
+                property_id: property.property_id.to_string(),
+                kind: property.property_kind,
+                expr,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    Ok(ModelIr {
+        model_id: M::model_id().to_string(),
+        state_fields,
+        init,
+        actions,
+        properties,
+    })
+}
+
+fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, String> {
+    match field.rust_type {
+        "bool" => Ok(FieldType::Bool),
+        "u8" => {
+            let (min, max) = parse_inclusive_range(field.range)
+                .unwrap_or((0, u8::MAX as u64));
+            if max > u8::MAX as u64 {
+                return Err(format!(
+                    "range `{}` exceeds supported u8 bounds for field `{}`",
+                    field.range.unwrap_or("0..=255"),
+                    field.name
+                ));
+            }
+            Ok(FieldType::BoundedU8 {
+                min: min as u8,
+                max: max as u8,
+            })
+        }
+        other => Err(format!(
+            "unsupported rust field type `{other}` for machine IR lowering"
+        )),
+    }
+}
+
+fn lower_machine_expr(input: &str) -> Option<ExprIr> {
+    let trimmed = input.trim();
+    let normalized = trimmed.strip_prefix("state.").unwrap_or(trimmed).trim();
+    if normalized == "true" {
+        return Some(ExprIr::Literal(Value::Bool(true)));
+    }
+    if normalized == "false" {
+        return Some(ExprIr::Literal(Value::Bool(false)));
+    }
+    if let Ok(value) = normalized.parse::<u64>() {
+        return Some(ExprIr::Literal(Value::UInt(value)));
+    }
+    if let Some(rest) = normalized.strip_prefix('!') {
+        return Some(ExprIr::Unary {
+            op: UnaryOp::Not,
+            expr: Box::new(lower_machine_expr(rest.trim())?),
+        });
+    }
+    if let Some((left, right)) = normalized.split_once("<=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::LessThanOrEqual,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = normalized.split_once('+') {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = normalized.split_once("&&") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    let normalized = normalized
+        .split('.')
+        .next_back()
+        .unwrap_or(normalized)
+        .trim();
+    if normalized
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return Some(ExprIr::FieldRef(normalized.to_string()));
+    }
+    None
+}
+
 
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
     let property = primary_property::<M>();
@@ -1116,6 +1807,92 @@ pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<Expli
             CheckOutcome::Errored(_) => None,
         })
         .collect()
+}
+
+pub fn check_machine_with_adapter<M: VerifiedMachine>(
+    request_id: &str,
+    property_id: Option<&str>,
+    adapter: &AdapterConfig,
+) -> Result<CheckOutcome, String> {
+    if matches!(adapter, AdapterConfig::Explicit) {
+        return Ok(match property_id {
+            Some(property_id) => check_machine_outcome_for_property::<M>(request_id, property_id),
+            None => check_machine_outcome::<M>(request_id),
+        });
+    }
+    let model = lower_machine_model::<M>()?;
+    let snapshot = snapshot_model(&model);
+    let property_id = property_id
+        .map(str::to_string)
+        .or_else(|| model.properties.first().map(|property| property.property_id.clone()))
+        .ok_or_else(|| format!("model `{}` has no properties", M::model_id()))?;
+    let mut plan = RunPlan::default();
+    plan.manifest = RunManifest {
+        request_id: request_id.to_string(),
+        run_id: format!(
+            "run-{}",
+            stable_hash_hex(&(request_id.to_string() + &property_id)).replace("sha256:", "")
+        ),
+        schema_version: "1.0.0".to_string(),
+        source_hash: stable_hash_hex(M::model_id()),
+        contract_hash: snapshot.contract_hash,
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        backend_name: backend_kind_for_adapter(adapter),
+        backend_version: backend_version_for_adapter(adapter),
+        seed: None,
+    };
+    plan.property_selection = PropertySelection::ExactlyOne(property_id);
+    run_with_adapter(&model, &plan, adapter)
+        .map(|normalized| normalized.outcome)
+}
+
+fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
+    match adapter {
+        AdapterConfig::Explicit => BackendKind::Explicit,
+        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => BackendKind::MockBmc,
+        AdapterConfig::SmtCvc5 { .. } => BackendKind::SmtCvc5,
+    }
+}
+
+fn backend_version_for_adapter(adapter: &AdapterConfig) -> String {
+    match adapter {
+        AdapterConfig::Explicit | AdapterConfig::MockBmc => env!("CARGO_PKG_VERSION").to_string(),
+        AdapterConfig::SmtCvc5 { .. } | AdapterConfig::Command { .. } => "external".to_string(),
+    }
+}
+
+pub fn replay_machine_actions<M: VerifiedMachine>(
+    property_id: Option<&str>,
+    action_ids: &[String],
+    focus_action_id: Option<&str>,
+) -> Result<(BTreeMap<String, Value>, &'static str, Option<bool>), String> {
+    let property = property_id
+        .map(find_property::<M>)
+        .unwrap_or_else(primary_property::<M>);
+    let mut states = M::init_states();
+    let mut state = states
+        .drain(..)
+        .next()
+        .ok_or_else(|| "ModelSpec::init_states must return at least one state".to_string())?;
+    for action_id in action_ids {
+        let action = M::Action::all()
+            .into_iter()
+            .find(|candidate| candidate.action_id() == *action_id)
+            .ok_or_else(|| format!("unknown action `{action_id}`"))?;
+        let mut next_states = M::step(&state, &action);
+        state = next_states
+            .drain(..)
+            .next()
+            .ok_or_else(|| format!("action `{action_id}` was not enabled during replay"))?;
+    }
+    let focus_action_enabled = focus_action_id.map(|target| {
+        M::Action::all()
+            .into_iter()
+            .find(|action| action.action_id() == target)
+            .map(|action| !M::step(&state, &action).is_empty())
+            .unwrap_or(false)
+    });
+    Ok((state.snapshot(), property.property_id, focus_action_enabled))
 }
 
 fn build_trace<M: VerifiedMachine>(
@@ -1300,10 +2077,11 @@ fn build_evidence_trace<M: VerifiedMachine>(
 mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
-        check_machine_outcomes, collect_machine_coverage, explain_machine, property_ids,
-        state_field_descriptors, transition_descriptors, ModelingRunStatus,
+        check_machine_outcomes, collect_machine_coverage, explain_machine,
+        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
+        state_field_descriptors, transition_descriptors, ModelingRunStatus, ModelingState,
     };
-    use crate::{engine::CheckOutcome, valid_actions, valid_state};
+    use crate::{engine::CheckOutcome, ir::{BinaryOp, ExprIr}, valid_actions, valid_state};
 
     valid_state! {
         struct State {
@@ -1411,6 +2189,7 @@ mod tests {
         assert!(report.transition_coverage_percent >= 66);
         assert!(report.visited_state_count >= 4);
         assert!(report.guard_true_counts.contains_key("INC"));
+        assert!(report.path_tag_counts.contains_key("state_gate_path"));
     }
 
     #[test]
@@ -1434,6 +2213,70 @@ mod tests {
         assert_eq!(actions[0].writes, &["x"]);
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    struct AttachedState {
+        x: u8,
+        locked: bool,
+    }
+
+    crate::valid_state_spec! {
+        AttachedState {
+            x: u8 [range = "0..=3"],
+            locked: bool,
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    enum AttachedAction {
+        Inc,
+        Lock,
+    }
+
+    crate::valid_action_spec! {
+        AttachedAction {
+            Inc => "INC" [reads = ["x"], writes = ["x"]],
+            Lock => "LOCK" [reads = ["locked"], writes = ["locked"]],
+        }
+    }
+
+    #[test]
+    fn spec_macros_attach_traits_to_existing_types() {
+        let snapshot = AttachedState { x: 2, locked: true }.snapshot();
+        assert_eq!(snapshot.get("x"), Some(&crate::ir::Value::UInt(2)));
+        let fields = state_field_descriptors::<AttachedState>();
+        assert_eq!(fields[0].range, Some("0..=3"));
+        let actions = action_descriptors::<AttachedAction>();
+        assert_eq!(actions[0].action_id, "INC");
+        assert_eq!(actions[1].writes, &["locked"]);
+    }
+
+    #[derive(crate::ValidState, Debug, Clone, PartialEq, Eq, Hash)]
+    struct DerivedState {
+        #[valid(range = "0..=3")]
+        x: u8,
+        locked: bool,
+    }
+
+    #[derive(crate::ValidAction, Debug, Clone, PartialEq, Eq, Hash)]
+    enum DerivedAction {
+        #[valid(action_id = "INC", reads = ["x"], writes = ["x"])]
+        Inc,
+        #[valid(action_id = "LOCK", reads = ["locked"], writes = ["locked"])]
+        Lock,
+    }
+
+    #[test]
+    fn derive_macros_attach_model_traits() {
+        let snapshot = DerivedState { x: 1, locked: false }.snapshot();
+        assert_eq!(snapshot.get("x"), Some(&crate::ir::Value::UInt(1)));
+        let fields = state_field_descriptors::<DerivedState>();
+        assert_eq!(fields[0].range, Some("0..=3"));
+        let actions = action_descriptors::<DerivedAction>();
+        assert_eq!(actions[0].action_id, "INC");
+        assert_eq!(actions[0].reads, &["x"]);
+        assert_eq!(actions[1].writes, &["locked"]);
+    }
+
     valid_state! {
         struct AccessState {
             attached: bool,
@@ -1455,11 +2298,11 @@ mod tests {
             allowed: false,
         }];
         transitions {
-            transition AttachPolicy when |state| !state.attached => [AccessState {
+            transition AttachPolicy [tags = ["boundary_path"]] when |state| !state.attached => [AccessState {
                 attached: true,
                 allowed: state.allowed,
             }];
-            transition EvaluateRead when |state| state.attached => [AccessState {
+            transition EvaluateRead [tags = ["allow_path", "boundary_path"]] when |state| state.attached && !state.allowed => [AccessState {
                 attached: state.attached,
                 allowed: true,
             }];
@@ -1475,8 +2318,64 @@ mod tests {
         assert_eq!(transitions.len(), 2);
         assert_eq!(transitions[0].action_id, "ATTACH_POLICY");
         assert_eq!(transitions[0].reads, &["attached"]);
+        assert_eq!(transitions[0].path_tags, &["boundary_path"]);
         assert_eq!(transitions[1].writes, &["allowed"]);
+        assert_eq!(transitions[1].path_tags, &["allow_path", "boundary_path"]);
         assert!(transitions[1].guard.contains("state.attached"));
+    }
+
+    #[test]
+    fn machine_transition_ir_normalizes_transition_metadata() {
+        let transitions = machine_transition_ir::<AccessModel>();
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].action_id, "ATTACH_POLICY");
+        assert_eq!(transitions[0].guard, Some("!state.attached"));
+        assert_eq!(transitions[0].path_tags, vec!["boundary_path"]);
+        assert_eq!(transitions[0].updates[0].field, "attached");
+        assert_eq!(transitions[0].updates[0].expr, Some("true"));
+        let implicit = machine_transition_ir::<CounterModel>();
+        assert_eq!(implicit.len(), 3);
+        assert!(implicit.iter().all(|transition| transition.guard.is_none()));
+        assert!(implicit.iter().all(|transition| transition.path_tags.is_empty()));
+    }
+
+    #[test]
+    fn declarative_model_can_lower_to_machine_ir() {
+        let model = lower_machine_model::<AccessModel>().expect("machine lowering should work");
+        assert_eq!(model.model_id, "AccessModel");
+        assert_eq!(model.actions.len(), 2);
+        assert_eq!(model.properties.len(), 1);
+        assert!(matches!(model.actions[1].guard, ExprIr::Binary { op: BinaryOp::And, .. }));
+        assert_eq!(model.actions[0].updates[0].field, "attached");
+    }
+
+    #[test]
+    fn opaque_step_model_does_not_lower_to_machine_ir() {
+        let error = lower_machine_model::<CounterModel>().unwrap_err();
+        assert!(error.contains("declarative transitions"));
+    }
+
+    #[test]
+    fn step_models_report_explicit_only_capabilities() {
+        let report = machine_capability_report::<CounterModel>();
+        assert!(report.explicit_ready);
+        assert!(!report.ir_ready);
+        assert!(!report.solver_ready);
+        assert!(report
+            .reasons
+            .contains(&"opaque_step_closure".to_string()));
+        assert!(report
+            .reasons
+            .contains(&"missing_declarative_transitions".to_string()));
+    }
+
+    #[test]
+    fn declarative_models_report_solver_ready_capabilities() {
+        let report = machine_capability_report::<AccessModel>();
+        assert!(report.explicit_ready);
+        assert!(report.ir_ready);
+        assert!(report.solver_ready);
+        assert!(report.reasons.is_empty());
     }
 
     #[test]

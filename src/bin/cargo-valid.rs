@@ -3,8 +3,10 @@ use std::process::Command;
 
 use valid::{
     api::{
-        check_source, explain_source, inspect_source, orchestrate_source, testgen_source,
-        CheckRequest, InspectRequest, OrchestrateRequest, TestgenRequest,
+        check_source, explain_source, inspect_source, lint_source,
+        orchestrate_source, render_inspect_json, render_inspect_text, render_lint_json,
+        render_lint_text, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
+        TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
     coverage::{render_coverage_json, render_coverage_text},
@@ -26,20 +28,28 @@ fn main() {
         json: parsed.json,
         model: parsed.model,
         strategy: parsed.strategy,
+        property_id: parsed.property_id,
+        backend: parsed.backend,
+        solver_executable: parsed.solver_executable,
+        solver_args: parsed.solver_args,
+        actions: parsed.actions,
+        focus_action_id: parsed.focus_action_id,
     };
 
     match parsed.command.as_str() {
         "list" => cmd_list(local_args),
         "inspect" => cmd_inspect(local_args),
+        "lint" => cmd_lint(local_args),
         "check" => cmd_check(local_args),
         "all" => cmd_all(local_args),
         "explain" => cmd_explain(local_args),
         "coverage" => cmd_coverage(local_args),
         "orchestrate" => cmd_orchestrate(local_args),
         "testgen" => cmd_testgen(local_args),
+        "replay" => cmd_replay(local_args),
         _ => {
             eprintln!(
-                "usage: cargo valid <list|inspect|check|all|explain|coverage|orchestrate|testgen> ... [--strategy=<counterexample|transition|witness|guard|boundary|random>]"
+                "usage: cargo valid <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> ... [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"
             );
             process::exit(3);
         }
@@ -70,6 +80,12 @@ fn run_external_all(parsed: CliArgs) -> ! {
             command: "check".to_string(),
             model: Some(model.clone()),
             strategy: None,
+            property_id: None,
+            backend: parsed.backend.clone(),
+            solver_executable: parsed.solver_executable.clone(),
+            solver_args: parsed.solver_args.clone(),
+            actions: Vec::new(),
+            focus_action_id: None,
             json: parsed.json,
             manifest_path: parsed.manifest_path.clone(),
             example: parsed.example.clone(),
@@ -109,6 +125,15 @@ fn build_external_command(parsed: &CliArgs) -> Command {
         command.arg("--manifest-path").arg(manifest_path);
     }
     command.arg(target.kind).arg(target.name);
+    if let Some(manifest_path) = &parsed.manifest_path {
+        command.env("VALID_REGISTRY_MANIFEST_PATH", manifest_path);
+    }
+    if let Some(file) = &parsed.file {
+        command.env("VALID_REGISTRY_FILE", file);
+    }
+    if let Some(model) = &parsed.model {
+        command.env("VALID_REGISTRY_MODEL_NAME", model);
+    }
     command.arg("--");
     command.arg(&parsed.command);
     if let Some(model) = &parsed.model {
@@ -116,6 +141,24 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     }
     if let Some(strategy) = &parsed.strategy {
         command.arg(format!("--strategy={strategy}"));
+    }
+    if let Some(property_id) = &parsed.property_id {
+        command.arg(format!("--property={property_id}"));
+    }
+    if let Some(backend) = &parsed.backend {
+        command.arg(format!("--backend={backend}"));
+    }
+    if let Some(solver_executable) = &parsed.solver_executable {
+        command.arg("--solver-exec").arg(solver_executable);
+    }
+    for solver_arg in &parsed.solver_args {
+        command.arg("--solver-arg").arg(solver_arg);
+    }
+    if let Some(focus_action_id) = &parsed.focus_action_id {
+        command.arg(format!("--focus-action={focus_action_id}"));
+    }
+    if !parsed.actions.is_empty() {
+        command.arg(format!("--actions={}", parsed.actions.join(",")));
     }
     if parsed.json {
         command.arg("--json");
@@ -128,6 +171,12 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         command: "list".to_string(),
         model: None,
         strategy: None,
+        property_id: None,
+        backend: None,
+        solver_executable: None,
+        solver_args: Vec::new(),
+        actions: Vec::new(),
+        focus_action_id: None,
         json: true,
         manifest_path: parsed.manifest_path.clone(),
         example: parsed.example.clone(),
@@ -156,10 +205,10 @@ fn cmd_all(parsed: ParsedArgs) {
             request_id: format!("cargo-valid-check-{model}"),
             source_name: normalized_model_ref(model),
             source: String::new(),
-            property_id: None,
-            backend: None,
-            solver_executable: None,
-            solver_args: Vec::new(),
+            property_id: parsed.property_id.clone(),
+            backend: parsed.backend.clone(),
+            solver_executable: parsed.solver_executable.clone(),
+            solver_args: parsed.solver_args.clone(),
         };
         let outcome = check_source(&request);
         let exit_code = outcome_exit_code(&outcome);
@@ -206,21 +255,9 @@ fn cmd_inspect(parsed: ParsedArgs) {
     match inspect_source(&request) {
         Ok(response) => {
             if parsed.json {
-                println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"state_fields\":[{}],\"actions\":[{}],\"properties\":[{}]}}",
-                    response.schema_version,
-                    response.request_id,
-                    response.status,
-                    response.model_id,
-                    response.state_fields.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.actions.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
-                    response.properties.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(",")
-                );
+                println!("{}", render_inspect_json(&response));
             } else {
-                println!("model_id: {}", response.model_id);
-                println!("state_fields: {}", response.state_fields.join(", "));
-                println!("actions: {}", response.actions.join(", "));
-                println!("properties: {}", response.properties.join(", "));
+                print!("{}", render_inspect_text(&response));
             }
         }
         Err(diagnostics) => {
@@ -236,16 +273,49 @@ fn cmd_inspect(parsed: ParsedArgs) {
     }
 }
 
+fn cmd_lint(parsed: ParsedArgs) {
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid lint <model> [--json]"));
+    let request = InspectRequest {
+        request_id: "cargo-valid-lint".to_string(),
+        source_name: normalized_model_ref(&model),
+        source: String::new(),
+    };
+    match lint_source(&request) {
+        Ok(response) => {
+            if parsed.json {
+                println!("{}", render_lint_json(&response));
+            } else {
+                print!("{}", render_lint_text(&response));
+            }
+            let has_findings = response
+                .findings
+                .iter()
+                .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
+            process::exit(if has_findings { 2 } else { 0 });
+        }
+        Err(diagnostics) => {
+            if parsed.json {
+                println!("{}", render_diagnostics_json(&diagnostics));
+            } else {
+                for diagnostic in diagnostics {
+                    eprintln!("{}", diagnostic.message);
+                }
+            }
+            process::exit(3);
+        }
+    }
+}
+
 fn cmd_check(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let request = CheckRequest {
         request_id: "cargo-valid-check".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
-        property_id: None,
-        backend: None,
-        solver_executable: None,
-        solver_args: Vec::new(),
+        property_id: parsed.property_id.clone(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
     };
     let outcome = check_source(&request);
     if parsed.json {
@@ -269,10 +339,10 @@ fn cmd_explain(parsed: ParsedArgs) {
         request_id: "cargo-valid-explain".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
-        property_id: None,
-        backend: None,
-        solver_executable: None,
-        solver_args: Vec::new(),
+        property_id: parsed.property_id.clone(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
     };
     match explain_source(&request) {
         Ok(response) => {
@@ -325,14 +395,14 @@ fn cmd_coverage(parsed: ParsedArgs) {
 }
 
 fn cmd_orchestrate(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid orchestrate <model> [--json]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid orchestrate <model> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let request = OrchestrateRequest {
         request_id: "cargo-valid-orchestrate".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
-        backend: None,
-        solver_executable: None,
-        solver_args: Vec::new(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
     };
     match orchestrate_source(&request) {
         Ok(response) => {
@@ -382,13 +452,14 @@ fn cmd_testgen(parsed: ParsedArgs) {
         request_id: "cargo-valid-testgen".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
+        property_id: parsed.property_id.clone(),
         strategy: parsed
             .strategy
             .clone()
             .unwrap_or_else(|| "counterexample".to_string()),
-        backend: None,
-        solver_executable: None,
-        solver_args: Vec::new(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
     };
     match testgen_source(&request) {
         Ok(response) => {
@@ -418,11 +489,34 @@ fn cmd_testgen(parsed: ParsedArgs) {
     }
 }
 
+fn cmd_replay(parsed: ParsedArgs) {
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid replay <model> [--json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]"));
+    let output = valid::bundled_models::replay_bundled_model(
+        &normalized_model_ref(&model),
+        parsed.property_id.as_deref(),
+        &parsed.actions,
+        parsed.focus_action_id.as_deref(),
+    )
+    .unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(3);
+    });
+    println!("{output}");
+}
+
 #[derive(Default)]
 struct ParsedArgs {
     json: bool,
     model: Option<String>,
     strategy: Option<String>,
+    property_id: Option<String>,
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
+    actions: Vec<String>,
+    focus_action_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -434,6 +528,12 @@ struct CliArgs {
     command: String,
     model: Option<String>,
     strategy: Option<String>,
+    property_id: Option<String>,
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
+    actions: Vec<String>,
+    focus_action_id: Option<String>,
     json: bool,
 }
 
@@ -446,17 +546,36 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             "--example" => parsed.example = Some(next_arg(&mut iter, "--example")),
             "--bin" => parsed.bin = Some(next_arg(&mut iter, "--bin")),
             "--file" => parsed.file = Some(next_arg(&mut iter, "--file")),
+            "--solver-exec" => parsed.solver_executable = Some(next_arg(&mut iter, "--solver-exec")),
+            "--solver-arg" => parsed.solver_args.push(next_arg(&mut iter, "--solver-arg")),
             "--json" => parsed.json = true,
             _ if arg.starts_with("--strategy=") => {
                 parsed.strategy = Some(arg.trim_start_matches("--strategy=").to_string())
             }
+            _ if arg.starts_with("--property=") => {
+                parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())
+            }
+            _ if arg.starts_with("--backend=") => {
+                parsed.backend = Some(arg.trim_start_matches("--backend=").to_string())
+            }
+            _ if arg.starts_with("--actions=") => {
+                parsed.actions = arg
+                    .trim_start_matches("--actions=")
+                    .split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(|item| item.to_string())
+                    .collect()
+            }
+            _ if arg.starts_with("--focus-action=") => {
+                parsed.focus_action_id = Some(arg.trim_start_matches("--focus-action=").to_string())
+            }
             _ if parsed.command.is_empty() => parsed.command = arg,
             _ if parsed.model.is_none() => parsed.model = Some(arg),
-            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"),
+            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"),
         }
     }
     if parsed.command.is_empty() {
-        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|check|all|explain|coverage|orchestrate|testgen> [model] [--json] [--strategy=<counterexample|transition|witness|guard|boundary|random>]");
+        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]");
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");
