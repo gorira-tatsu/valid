@@ -615,11 +615,17 @@ cargo valid benchmark --json
 cargo valid benchmark --baseline=record
 cargo valid benchmark --baseline=compare --threshold-percent=25
 cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --json
+./scripts/benchmark-suite.sh compare
+./scripts/benchmark-suite.sh record
 ```
 
 Benchmark baselines are meant to live in-repo under `benchmarks/baselines/` so
 CI can compare deterministic state-space metrics and elapsed time against a
-tracked reference set.
+tracked reference set. The standard CI job now runs the shared suite from
+`.github/workflows/ci.yml` on pushes, pull requests, manual dispatch, and the
+nightly schedule at `18:00 UTC`, emitting warnings when a comparison is
+missing/invalid and failing the benchmark job when the default 25% regression
+threshold is exceeded.
 
 ## Repository Layout
 

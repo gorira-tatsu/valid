@@ -3,6 +3,9 @@ name: ci-standard
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
 
 jobs:
   lint:
@@ -39,3 +42,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Run test suite with embedded SAT backend
         run: cargo test --features varisat-backend
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Compare benchmark baselines
+        run: ./scripts/benchmark-suite.sh compare
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: artifacts/benchmarks
