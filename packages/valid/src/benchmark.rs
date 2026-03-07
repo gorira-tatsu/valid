@@ -513,8 +513,8 @@ fn escape_json(input: &str) -> String {
 mod tests {
     use crate::{
         engine::{
-            AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult, PropertyResult,
-            RunManifest, RunStatus,
+            build_run_manifest, AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult,
+            PropertyResult, RunStatus,
         },
         evidence::EvidenceTrace,
     };
@@ -535,17 +535,15 @@ mod tests {
             2,
             |_| {
                 CheckOutcome::Completed(ExplicitRunResult {
-                    manifest: RunManifest {
-                        request_id: "req".to_string(),
-                        run_id: "run".to_string(),
-                        schema_version: "1.0.0".to_string(),
-                        source_hash: "sha256:src".to_string(),
-                        contract_hash: "sha256:contract".to_string(),
-                        engine_version: "0.1.0".to_string(),
-                        backend_name: BackendKind::Explicit,
-                        backend_version: "0.1.0".to_string(),
-                        seed: None,
-                    },
+                    manifest: build_run_manifest(
+                        "req".to_string(),
+                        "run".to_string(),
+                        "sha256:src".to_string(),
+                        "sha256:contract".to_string(),
+                        BackendKind::Explicit,
+                        "0.1.0".to_string(),
+                        Some(7),
+                    ),
                     status: RunStatus::Pass,
                     assurance_level: AssuranceLevel::Complete,
                     explored_states: 3,
@@ -638,17 +636,15 @@ mod tests {
         explored_transitions: usize,
     ) -> CheckOutcome {
         CheckOutcome::Completed(ExplicitRunResult {
-            manifest: RunManifest {
-                request_id: "req".to_string(),
-                run_id: run_id.to_string(),
-                schema_version: "1.0.0".to_string(),
-                source_hash: "sha256:src".to_string(),
-                contract_hash: "sha256:contract".to_string(),
-                engine_version: "0.1.0".to_string(),
-                backend_name: BackendKind::Explicit,
-                backend_version: "0.1.0".to_string(),
-                seed: None,
-            },
+            manifest: build_run_manifest(
+                "req".to_string(),
+                run_id.to_string(),
+                "sha256:src".to_string(),
+                "sha256:contract".to_string(),
+                BackendKind::Explicit,
+                "0.1.0".to_string(),
+                Some(7),
+            ),
             status,
             assurance_level: AssuranceLevel::Complete,
             explored_states,

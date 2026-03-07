@@ -166,6 +166,20 @@ pub fn capabilities_for_config(config: &AdapterConfig) -> CapabilityMatrix {
     }
 }
 
+pub fn backend_version_for_config(config: &AdapterConfig) -> String {
+    match config {
+        AdapterConfig::Explicit | AdapterConfig::MockBmc | AdapterConfig::SatVarisat => {
+            env!("CARGO_PKG_VERSION").to_string()
+        }
+        AdapterConfig::SmtCvc5 { executable, .. } => {
+            detect_external_backend_version(executable, &["--version", "-V"])
+        }
+        AdapterConfig::Command { executable, .. } => {
+            detect_external_backend_version(executable, &["--version", "-V", "version"])
+        }
+    }
+}
+
 pub fn run_with_adapter(
     model: &ModelIr,
     run_plan: &RunPlan,
@@ -214,6 +228,32 @@ pub fn run_with_adapter(
             adapter.normalize(model, run_plan, raw)
         }
     }
+}
+
+fn detect_external_backend_version(executable: &str, version_args: &[&str]) -> String {
+    for arg in version_args {
+        let Ok(output) = Command::new(executable).arg(arg).output() else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(version) = normalize_backend_version_output(&stdout, &stderr) {
+            return version;
+        }
+    }
+    "external:unknown".to_string()
+}
+
+fn normalize_backend_version_output(stdout: &str, stderr: &str) -> Option<String> {
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 impl SolverAdapter for ExplicitAdapter {
@@ -277,7 +317,7 @@ impl SolverAdapter for ExplicitAdapter {
                             run_plan,
                             result.manifest.run_id.clone(),
                             BackendKind::Explicit,
-                            env!("CARGO_PKG_VERSION").to_string(),
+                            run_plan.manifest.backend_version.clone(),
                         );
                         CheckOutcome::Completed(result)
                     }
@@ -286,7 +326,7 @@ impl SolverAdapter for ExplicitAdapter {
                             run_plan,
                             error.manifest.run_id.clone(),
                             BackendKind::Explicit,
-                            env!("CARGO_PKG_VERSION").to_string(),
+                            run_plan.manifest.backend_version.clone(),
                         );
                         CheckOutcome::Errored(error)
                     }
@@ -369,7 +409,7 @@ impl SolverAdapter for MockBmcAdapter {
                             run_plan,
                             result.manifest.run_id.clone(),
                             BackendKind::MockBmc,
-                            env!("CARGO_PKG_VERSION").to_string(),
+                            run_plan.manifest.backend_version.clone(),
                         );
                         CheckOutcome::Completed(result)
                     }
@@ -378,7 +418,7 @@ impl SolverAdapter for MockBmcAdapter {
                             run_plan,
                             error.manifest.run_id.clone(),
                             BackendKind::MockBmc,
-                            env!("CARGO_PKG_VERSION").to_string(),
+                            run_plan.manifest.backend_version.clone(),
                         );
                         CheckOutcome::Errored(error)
                     }
@@ -493,7 +533,7 @@ impl SolverAdapter for Cvc5Adapter {
                     &mut normalized.outcome,
                     run_plan,
                     BackendKind::SmtCvc5,
-                    "external".to_string(),
+                    run_plan.manifest.backend_version.clone(),
                 );
                 Ok(normalized)
             }
@@ -595,7 +635,7 @@ impl SolverAdapter for VarisatAdapter {
                     &mut normalized.outcome,
                     run_plan,
                     BackendKind::SatVarisat,
-                    "embedded".to_string(),
+                    run_plan.manifest.backend_version.clone(),
                 );
                 Ok(normalized)
             }
@@ -979,15 +1019,41 @@ fn parse_protocol_actions(body: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use crate::{
         engine::{PropertySelection, RunPlan, UnknownReason},
         frontend::compile_model,
     };
 
     use super::{
-        render_capability_matrix_json, validate_capability_matrix, CommandSolverAdapter,
-        Cvc5Adapter, ExplicitAdapter, MockBmcAdapter, SolverAdapter,
+        backend_version_for_config, render_capability_matrix_json, validate_capability_matrix,
+        AdapterConfig, CommandSolverAdapter, Cvc5Adapter, ExplicitAdapter, MockBmcAdapter,
+        SolverAdapter,
     };
+
+    #[cfg(unix)]
+    fn write_version_script(body: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "valid-solver-version-{}.sh",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::write(&path, body).expect("script written");
+        let mut permissions = fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).expect("permissions updated");
+        path
+    }
 
     #[test]
     fn explicit_adapter_normalizes_completed_outcome() {
@@ -1084,5 +1150,20 @@ mod tests {
             Some("CVC5_COUNTEREXAMPLE")
         );
         assert!(normalized.trace.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn command_backend_version_is_detected() {
+        let script = write_version_script(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  printf 'fake-solver 9.9.9\\n'\nelse\n  printf 'STATUS=PASS\\n'\nfi\n",
+        );
+        let version = backend_version_for_config(&AdapterConfig::Command {
+            backend_name: "cmd".to_string(),
+            executable: script.display().to_string(),
+            args: vec![],
+        });
+        let _ = fs::remove_file(&script);
+        assert_eq!(version, "fake-solver 9.9.9");
     }
 }

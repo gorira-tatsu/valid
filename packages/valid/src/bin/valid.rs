@@ -87,6 +87,7 @@ fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid check <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("check", parsed.progress_json);
     progress.start(None);
@@ -96,6 +97,7 @@ fn cmd_check(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -124,6 +126,7 @@ fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid explain <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("explain", parsed.progress_json);
     progress.start(None);
@@ -133,6 +136,7 @@ fn cmd_explain(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -158,6 +162,7 @@ fn cmd_minimize(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid minimize <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid minimize <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("minimize", parsed.progress_json);
     progress.start(None);
@@ -167,6 +172,7 @@ fn cmd_minimize(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -465,6 +471,7 @@ fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
@@ -479,6 +486,7 @@ fn cmd_testgen(args: Vec<String>) {
         source: source.clone(),
         property_id: parsed.property_id.clone(),
         strategy,
+        seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -551,6 +559,7 @@ fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
         "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
+"usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |arg, options| {
             let _ = (arg, options);
             false
@@ -569,6 +578,7 @@ fn cmd_trace(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -682,6 +692,7 @@ fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid orchestrate <model-file> [--json] [--progress=json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid orchestrate <model-file> [--json] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
     progress.start(None);
@@ -690,6 +701,7 @@ fn cmd_orchestrate(args: Vec<String>) {
         request_id: "req-local-orchestrate".to_string(),
         source_name: parsed.path.clone(),
         source,
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -744,6 +756,7 @@ fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
         "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+"usage: valid coverage <model-file> [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("coverage", parsed.progress_json);
     progress.start(None);
@@ -767,6 +780,7 @@ fn cmd_coverage(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -793,6 +807,7 @@ struct ParsedArgs {
     json: bool,
     progress_json: bool,
     path: String,
+    seed: Option<u64>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -841,8 +856,18 @@ where
             parsed.view = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--seed=") {
+            parsed.seed = Some(parse_seed_arg(value, usage));
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
+        } else if arg == "--seed" {
+            parsed.seed = Some(parse_seed_arg(
+                &iter.next().unwrap_or_else(|| {
+                    eprintln!("{usage}");
+                    process::exit(3);
+                }),
+                usage,
+            ));
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(
                 iter.next()
@@ -869,6 +894,12 @@ where
 
 fn cmd_selfcheck(args: Vec<String>) {
     let json = detect_json_flag(&args);
+fn parse_seed_arg(value: &str, usage: &str) -> u64 {
+    value.parse().unwrap_or_else(|_| {
+        eprintln!("{usage}");
+        process::exit(3);
+    })
+}
     let report = run_smoke_selfcheck();
     let _ = write_selfcheck_artifact(&report);
     if json {

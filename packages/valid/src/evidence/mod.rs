@@ -164,6 +164,14 @@ fn validate_manifest(manifest: &crate::engine::RunManifest) -> Result<(), String
     require_non_empty(&manifest.contract_hash, "manifest.contract_hash")?;
     require_non_empty(&manifest.engine_version, "manifest.engine_version")?;
     require_non_empty(&manifest.backend_version, "manifest.backend_version")?;
+    require_non_empty(
+        &manifest.platform_metadata.os,
+        "manifest.platform_metadata.os",
+    )?;
+    require_non_empty(
+        &manifest.platform_metadata.arch,
+        "manifest.platform_metadata.arch",
+    )?;
     Ok(())
 }
 
@@ -335,6 +343,15 @@ pub fn validate_rendered_outcome_json(body: &str) -> Result<(), String> {
     require_string_field(manifest, "engine_version")?;
     require_string_field(manifest, "backend_name")?;
     require_string_field(manifest, "backend_version")?;
+    require_number_field(manifest, "seed")?;
+    let platform_metadata = require_object(
+        manifest
+            .get("platform_metadata")
+            .ok_or_else(|| "platform_metadata must be present".to_string())?,
+        "platform_metadata",
+    )?;
+    require_string_field(platform_metadata, "os")?;
+    require_string_field(platform_metadata, "arch")?;
     require_string_field(object, "assurance_level")?;
     Ok(())
 }
@@ -686,11 +703,17 @@ fn append_manifest(out: &mut String, manifest: &crate::engine::RunManifest) {
         ",\"backend_version\":\"{}\"",
         escape_json(&manifest.backend_version)
     ));
-    if let Some(seed) = manifest.seed {
-        out.push_str(&format!(",\"seed\":{}", seed));
-    } else {
-        out.push_str(",\"seed\":null");
-    }
+    out.push_str(&format!(",\"seed\":{}", manifest.seed));
+    out.push_str(",\"platform_metadata\":{");
+    out.push_str(&format!(
+        "\"os\":\"{}\"",
+        escape_json(&manifest.platform_metadata.os)
+    ));
+    out.push_str(&format!(
+        ",\"arch\":\"{}\"",
+        escape_json(&manifest.platform_metadata.arch)
+    ));
+    out.push('}');
     out.push('}');
 }
 
@@ -780,8 +803,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::engine::{
+        build_run_manifest,
         explicit::{CheckOutcome, ExplicitRunResult, PropertyResult},
-        AssuranceLevel, BackendKind, RunManifest, RunStatus,
+        AssuranceLevel, BackendKind, RunStatus,
     };
 
     use super::{
@@ -794,17 +818,15 @@ mod tests {
     #[test]
     fn renders_completed_outcome_json() {
         let result = ExplicitRunResult {
-            manifest: RunManifest {
-                request_id: "req-1".to_string(),
-                run_id: "run-1".to_string(),
-                schema_version: "1.0.0".to_string(),
-                source_hash: "sha256:a".to_string(),
-                contract_hash: "sha256:b".to_string(),
-                engine_version: "0.1.0".to_string(),
-                backend_name: BackendKind::Explicit,
-                backend_version: "0.1.0".to_string(),
-                seed: None,
-            },
+            manifest: build_run_manifest(
+                "req-1".to_string(),
+                "run-1".to_string(),
+                "sha256:a".to_string(),
+                "sha256:b".to_string(),
+                BackendKind::Explicit,
+                "0.1.0".to_string(),
+                Some(11),
+            ),
             status: RunStatus::Fail,
             assurance_level: AssuranceLevel::Complete,
             property_result: PropertyResult {
@@ -846,6 +868,8 @@ mod tests {
         let json = render_outcome_json("Counter", &outcome);
         assert!(json.contains("\"kind\":\"completed\""));
         assert!(json.contains("\"request_id\":\"req-1\""));
+        assert!(json.contains("\"seed\":11"));
+        assert!(json.contains("\"platform_metadata\""));
         assert!(json.contains("\"status\":\"FAIL\""));
         assert!(json.contains("\"ci\":{\"exit_code\":2"));
         assert!(json.contains("\"review_summary\""));
@@ -855,17 +879,15 @@ mod tests {
     #[test]
     fn writes_artifacts_for_completed_outcome() {
         let result = ExplicitRunResult {
-            manifest: RunManifest {
-                request_id: "req-1".to_string(),
-                run_id: "run-artifact-test".to_string(),
-                schema_version: "1.0.0".to_string(),
-                source_hash: "sha256:a".to_string(),
-                contract_hash: "sha256:b".to_string(),
-                engine_version: "0.1.0".to_string(),
-                backend_name: BackendKind::Explicit,
-                backend_version: "0.1.0".to_string(),
-                seed: None,
-            },
+            manifest: build_run_manifest(
+                "req-1".to_string(),
+                "run-artifact-test".to_string(),
+                "sha256:a".to_string(),
+                "sha256:b".to_string(),
+                BackendKind::Explicit,
+                "0.1.0".to_string(),
+                Some(13),
+            ),
             status: RunStatus::Fail,
             assurance_level: AssuranceLevel::Complete,
             property_result: PropertyResult {
