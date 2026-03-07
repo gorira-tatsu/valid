@@ -10,6 +10,7 @@ Related documents:
 
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
+- [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
 
 ## What the DSL is
 
@@ -27,7 +28,7 @@ That means:
 
 - Rust registry authoring requires a Rust toolchain
 - the DSL is designed to feel natural in `rust-analyzer`
-- procedural-macro diagnostics and `cargo valid readiness` are part of the
+- macro/derive diagnostics and `cargo valid readiness` are part of the
   authoring experience, not just the runtime experience
 
 ## Canonical Modeling Path
@@ -186,8 +187,10 @@ Current guidance for a smoother IDE experience:
   ambiguous
 - keep examples and registries small enough that transition intent is obvious
 
-`valid_model!` uses a procedural-macro front-end specifically to improve
-diagnostics and keep parser errors closer to the DSL surface.
+`valid_model!` is currently implemented as a `macro_rules!` frontend. The
+active plan is to simplify that grammar for better `rust-analyzer`
+compatibility; if A1 cannot meet its acceptance criteria, the fallback is to
+restore a function-like proc-macro frontend as described in ADR-0001.
 
 ## Model Definition
 
