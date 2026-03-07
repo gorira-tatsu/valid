@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn cargo_valid_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cargo-valid"))
@@ -37,6 +38,14 @@ fn extract_generated_files(stdout: &str) -> Vec<String> {
         .filter(|entry| entry.starts_with("tests/generated/") && entry.ends_with(".rs"))
         .map(|entry| entry.to_string())
         .collect()
+}
+
+fn unique_temp_project_dir(prefix: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be monotonic enough")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 
 #[test]
@@ -225,6 +234,26 @@ fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
 }
 
 #[test]
+fn cargo_valid_testgen_path_generates_tagged_files() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("testgen")
+        .arg("iam-access")
+        .arg("--strategy=path")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid path testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"generated_files\":["));
+    for path in extract_generated_files(&stdout) {
+        let body = fs::read_to_string(&path).expect("generated file must exist");
+        assert!(body.contains("path_tag:"));
+    }
+    cleanup_generated_files(&stdout);
+}
+
+#[test]
 fn cargo_valid_check_can_target_specific_property() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
@@ -301,6 +330,90 @@ fn cargo_valid_lints_declarative_model_cleanly() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"ok\""));
     assert!(stdout.contains("\"findings\":[]"));
+}
+
+#[test]
+fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(manifest_path())
+        .arg("--file")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("iam_enterprise_registry.rs"))
+        .arg("inspect")
+        .arg("iam-enterprise")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect for enterprise registry should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"machine_ir_ready\":true"));
+    assert!(stdout.contains("\"allow_path\""));
+    assert!(stdout.contains("\"session_path\""));
+}
+
+#[test]
+fn cargo_valid_auto_discovers_external_registry_from_project_root() {
+    let _guard = cargo_lock().lock().unwrap();
+    let project_dir = unique_temp_project_dir("valid-autodiscover");
+    fs::create_dir_all(project_dir.join("examples")).expect("temp examples dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"valid-autodiscover-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?} }}\n",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )
+    .expect("temp Cargo.toml");
+    fs::write(
+        project_dir.join("examples").join("valid_models.rs"),
+        r#"use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
+
+valid_state! {
+    struct State {
+        ready: bool,
+    }
+}
+
+valid_actions! {
+    enum Action {
+        Enable => "ENABLE" [reads = ["ready"], writes = ["ready"]],
+    }
+}
+
+valid_model! {
+    model AutoDiscoverModel<State, Action>;
+    init [State { ready: false }];
+    transitions {
+        transition Enable [tags = ["allow_path"]] when |state| state.ready == false => [State { ready: true }];
+    }
+    properties {
+        invariant P_READY_EVENTUAL |state| state.ready == false || state.ready == true;
+    }
+}
+
+fn main() {
+    run_registry_cli(valid_models![
+        "auto-discover" => AutoDiscoverModel,
+    ]);
+}
+"#,
+    )
+    .expect("temp valid_models example");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&project_dir)
+        .arg("inspect")
+        .arg("auto-discover")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid autodiscovery should run");
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"model_id\":\"AutoDiscoverModel\""));
+    assert!(stdout.contains("\"allow_path\""));
+
+    let _ = fs::remove_dir_all(project_dir);
 }
 
 #[test]

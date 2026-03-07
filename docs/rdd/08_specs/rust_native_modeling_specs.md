@@ -93,6 +93,9 @@ action 列、state metadata へ正規化されることを前提とする。
 - inspect / coverage / explain / testgen は shared decision/path tag
   vocabulary を使い、少なくとも `guard_path`, `allow_path`,
   `deny_path`, `boundary_path`, `write_path` を扱えること。
+- declarative transition で与えた `tags = [...]` は lower 後の shared IR
+  に保持され、inspect / coverage / explain / testgen / solver adapter が
+  同じ path taxonomy を参照できること。
 - `transitions { transition ... }` を使う場合は action / guard / effect を
   descriptor として保持し、solver-neutral IR に lower 可能でなければならない。
 - 将来の solver-neutral 化のため、表面 DSL と engine 内部 trait は分離する。
@@ -183,12 +186,12 @@ valid_model! {
         billing_read_allowed: false,
     }];
     transitions {
-        transition AttachBoundary when |state| !state.boundary_attached => [AccessState {
+        transition AttachBoundary [tags = ["boundary_path"]] when |state| !state.boundary_attached => [AccessState {
             boundary_attached: true,
             session_active: state.session_active,
             billing_read_allowed: state.billing_read_allowed,
         }];
-        transition EvaluateBillingRead when |state| state.boundary_attached && state.session_active => [AccessState {
+        transition EvaluateBillingRead [tags = ["allow_path", "boundary_path", "session_path"]] when |state| state.boundary_attached && state.session_active => [AccessState {
             boundary_attached: state.boundary_attached,
             session_active: state.session_active,
             billing_read_allowed: true,
@@ -200,8 +203,8 @@ valid_model! {
 }
 ```
 
-この形式では `guard` と `effect` を文字列表現として保持できるため、将来の
-solver lowering, explain, coverage の強化に使える。
+この形式では `guard`, `effect`, `tags` を shared IR に保持できるため、将来の
+solver lowering, explain, coverage, testgen の強化に使える。
 
 ## 7. 受け入れ条件
 

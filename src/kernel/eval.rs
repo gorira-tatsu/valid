@@ -33,8 +33,12 @@ pub fn eval_expr(
                 (BinaryOp::LessThanOrEqual, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::Bool(left <= right))
                 }
+                (BinaryOp::Equal, left, right) => Ok(Value::Bool(left == right)),
                 (BinaryOp::And, Value::Bool(left), Value::Bool(right)) => {
                     Ok(Value::Bool(left && right))
+                }
+                (BinaryOp::Or, Value::Bool(left), Value::Bool(right)) => {
+                    Ok(Value::Bool(left || right))
                 }
                 _ => Err(eval_error("invalid binary operand types".to_string())),
             }
@@ -92,6 +96,26 @@ mod tests {
                 right: Box::new(ExprIr::Literal(Value::UInt(1))),
             }),
             right: Box::new(ExprIr::Literal(Value::UInt(4))),
+        };
+        assert_eq!(eval_expr(&model, &state, &expr).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn evaluates_or_and_equality_expr() {
+        let model = model();
+        let state = MachineState::new(vec![Value::UInt(3), Value::Bool(false)]);
+        let expr = ExprIr::Binary {
+            op: BinaryOp::Or,
+            left: Box::new(ExprIr::Binary {
+                op: BinaryOp::Equal,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(2))),
+            }),
+            right: Box::new(ExprIr::Binary {
+                op: BinaryOp::Equal,
+                left: Box::new(ExprIr::FieldRef("locked".to_string())),
+                right: Box::new(ExprIr::Literal(Value::Bool(false))),
+            }),
         };
         assert_eq!(eval_expr(&model, &state, &expr).unwrap(), Value::Bool(true));
     }

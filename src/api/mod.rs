@@ -293,14 +293,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 effect: Some(format!("{:?}", action.updates)),
                 reads: action.reads.clone(),
                 writes: action.writes.clone(),
-                path_tags: crate::modeling::decision_path_tags(
-                    &[],
-                    &action.action_id,
-                    action.reads.iter().map(String::as_str),
-                    action.writes.iter().map(String::as_str),
-                    Some(&format!("{:?}", action.guard)),
-                    Some(&format!("{:?}", action.updates)),
-                ),
+                path_tags: action.path_tags.clone(),
             })
             .collect(),
         property_details: model
@@ -694,14 +687,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 action.action_id.clone(),
                                 action.reads.clone(),
                                 action.writes.clone(),
-                                crate::modeling::decision_path_tags(
-                                    &[],
-                                    &action.action_id,
-                                    action.reads.iter().map(String::as_str),
-                                    action.writes.iter().map(String::as_str),
-                                    Some(&format!("{:?}", action.guard)),
-                                    Some(&format!("{:?}", action.updates)),
-                                ),
+                                action.path_tags.clone(),
                             )
                         })
                 })
@@ -1436,6 +1422,29 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 "add reads=[...] and writes=[...] to improve explain, coverage, and testgen".to_string(),
             ),
         });
+    }
+    if inspect
+        .capabilities
+        .reasons
+        .iter()
+        .any(|reason| reason == "opaque_step_closure")
+    {
+        for action in &inspect.action_details {
+            findings.push(LintFinding {
+                severity: "info".to_string(),
+                code: "transition_candidate".to_string(),
+                message: format!(
+                    "action {} is a candidate for declarative transition extraction",
+                    action.action_id
+                ),
+                suggestion: Some(format!(
+                    "start with `transition {} when |state| <guard> => [NextState {{ ... }}];` and carry reads=[{}], writes=[{}]",
+                    action.action_id,
+                    action.reads.join(", "),
+                    action.writes.join(", ")
+                )),
+            });
+        }
     }
     if inspect
         .transition_details

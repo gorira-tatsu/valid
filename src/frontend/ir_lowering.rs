@@ -83,6 +83,21 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
             label: action.name.clone(),
             reads,
             writes,
+            path_tags: crate::modeling::decision_path_tags(
+                &[],
+                &action.name,
+                action.posts.iter().map(|post| post.field.as_str()),
+                action.posts.iter().map(|post| post.field.as_str()),
+                action.pre.as_deref(),
+                Some(
+                    &action
+                        .posts
+                        .iter()
+                        .map(|post| format!("{}={}", post.field, post.expr))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            ),
             guard,
             updates,
         });
@@ -144,7 +159,7 @@ fn lower_value(input: &str) -> Option<Value> {
 }
 
 fn lower_expr(input: &str) -> Option<ExprIr> {
-    let trimmed = input.trim();
+    let trimmed = strip_wrapping_parens(input.trim());
     if let Some(value) = lower_value(trimmed) {
         return Some(ExprIr::Literal(value));
     }
@@ -154,21 +169,35 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
             expr: Box::new(lower_expr(rest.trim())?),
         });
     }
-    if let Some((left, right)) = trimmed.split_once("<=") {
+    if let Some((left, right)) = split_top_level(trimmed, "||") {
         return Some(ExprIr::Binary {
-            op: BinaryOp::LessThanOrEqual,
+            op: BinaryOp::Or,
             left: Box::new(lower_expr(left.trim())?),
             right: Box::new(lower_expr(right.trim())?),
         });
     }
-    if let Some((left, right)) = trimmed.split_once("&&") {
+    if let Some((left, right)) = split_top_level(trimmed, "&&") {
         return Some(ExprIr::Binary {
             op: BinaryOp::And,
             left: Box::new(lower_expr(left.trim())?),
             right: Box::new(lower_expr(right.trim())?),
         });
     }
-    if let Some((left, right)) = trimmed.split_once('+') {
+    if let Some((left, right)) = split_top_level(trimmed, "<=") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::LessThanOrEqual,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level(trimmed, "==") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Equal,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level(trimmed, "+") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Add,
             left: Box::new(lower_expr(left.trim())?),
@@ -180,6 +209,56 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     {
         return Some(ExprIr::FieldRef(trimmed.to_string()));
+    }
+    None
+}
+
+fn strip_wrapping_parens(input: &str) -> &str {
+    let mut current = input.trim();
+    loop {
+        if !(current.starts_with('(') && current.ends_with(')')) {
+            return current;
+        }
+        let mut depth = 0usize;
+        let mut wraps = true;
+        for (index, ch) in current.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && index != current.len() - 1 {
+                        wraps = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if wraps {
+            current = current[1..current.len() - 1].trim();
+        } else {
+            return current;
+        }
+    }
+}
+
+fn split_top_level<'a>(input: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    let mut depth = 0usize;
+    let bytes = input.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut index = 0usize;
+    while index + needle_bytes.len() <= bytes.len() {
+        match bytes[index] as char {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth == 0 && bytes[index..].starts_with(needle_bytes) {
+            let left = &input[..index];
+            let right = &input[index + needle.len()..];
+            return Some((left, right));
+        }
+        index += 1;
     }
     None
 }

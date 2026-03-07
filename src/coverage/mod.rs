@@ -92,15 +92,8 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                     .entry(action_id.clone())
                     .or_insert(0) += 1;
                 if let Some(action) = model.actions.iter().find(|action| &action.action_id == action_id) {
-                    for tag in crate::modeling::decision_path_tags(
-                        &[],
-                        &action.action_id,
-                        action.reads.iter().map(String::as_str),
-                        action.writes.iter().map(String::as_str),
-                        Some(&format!("{:?}", action.guard)),
-                        Some(&format!("{:?}", action.updates)),
-                    ) {
-                        *path_tag_counts.entry(tag).or_insert(0) += 1;
+                    for tag in &action.path_tags {
+                        *path_tag_counts.entry(tag.clone()).or_insert(0) += 1;
                     }
                 }
             }

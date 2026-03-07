@@ -380,7 +380,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let strategy = parsed
         .extra

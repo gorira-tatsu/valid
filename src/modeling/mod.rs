@@ -1278,6 +1278,7 @@ pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
             .filter(|vector| vector.strategy == "counterexample")
             .collect(),
         "transition" | "witness" => build_transition_witness_vectors::<M>(property_id),
+        "path" => build_path_tag_vectors::<M>(property_id),
         "guard" => build_guard_coverage_vectors::<M>(property_id),
         "boundary" => build_boundary_focus_vectors::<M>(property_id),
         "random" => build_randomized_vectors::<M>(property_id, 5),
@@ -1290,6 +1291,48 @@ fn build_transition_witness_vectors<M: VerifiedMachine>(property_id: &str) -> Ve
         .into_iter()
         .filter(|vector| vector.source_kind == "witness")
         .collect()
+}
+
+fn build_path_tag_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
+    let property = find_property::<M>(property_id);
+    let exploration = explore_machine::<M>(property.holds);
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for descriptor in machine_transition_ir::<M>() {
+        let tags = machine_transition_tags_for_action::<M>(descriptor.action_id);
+        let Some(edge) = exploration
+            .edges
+            .iter()
+            .find(|edge| edge.action.action_id() == descriptor.action_id)
+        else {
+            continue;
+        };
+        for tag in tags {
+            if let Some(vector) = build_machine_vector_for_node::<M>(
+                &exploration.nodes,
+                edge.to_index,
+                property.property_id,
+                "path",
+                "path",
+                Some(descriptor.action_id.to_string()),
+                None,
+                Some(true),
+                vec![format!("path_tag:{tag}")],
+            ) {
+                let signature = (
+                    tag,
+                    vector.focus_action_id.clone(),
+                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+        }
+    }
+
+    vectors
 }
 
 fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
@@ -1615,6 +1658,14 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
                 label: transition.action_id.to_string(),
                 reads: transition.reads.iter().map(|item| item.to_string()).collect(),
                 writes: transition.writes.iter().map(|item| item.to_string()).collect(),
+                path_tags: decision_path_tags(
+                    transition.path_tags,
+                    transition.action_id,
+                    transition.reads.iter().copied(),
+                    transition.writes.iter().copied(),
+                    Some(transition.guard),
+                    Some(transition.effect),
+                ),
                 guard,
                 updates,
             })
@@ -1675,7 +1726,7 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
 }
 
 fn lower_machine_expr(input: &str) -> Option<ExprIr> {
-    let trimmed = input.trim();
+    let trimmed = strip_wrapping_machine_parens(input.trim());
     let normalized = trimmed.strip_prefix("state.").unwrap_or(trimmed).trim();
     if normalized == "true" {
         return Some(ExprIr::Literal(Value::Bool(true)));
@@ -1692,23 +1743,37 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
             expr: Box::new(lower_machine_expr(rest.trim())?),
         });
     }
-    if let Some((left, right)) = normalized.split_once("<=") {
+    if let Some((left, right)) = split_top_level_machine(normalized, "||") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Or,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level_machine(normalized, "&&") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(lower_machine_expr(left.trim())?),
+            right: Box::new(lower_machine_expr(right.trim())?),
+        });
+    }
+    if let Some((left, right)) = split_top_level_machine(normalized, "<=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThanOrEqual,
             left: Box::new(lower_machine_expr(left.trim())?),
             right: Box::new(lower_machine_expr(right.trim())?),
         });
     }
-    if let Some((left, right)) = normalized.split_once('+') {
+    if let Some((left, right)) = split_top_level_machine(normalized, "==") {
         return Some(ExprIr::Binary {
-            op: BinaryOp::Add,
+            op: BinaryOp::Equal,
             left: Box::new(lower_machine_expr(left.trim())?),
             right: Box::new(lower_machine_expr(right.trim())?),
         });
     }
-    if let Some((left, right)) = normalized.split_once("&&") {
+    if let Some((left, right)) = split_top_level_machine(normalized, "+") {
         return Some(ExprIr::Binary {
-            op: BinaryOp::And,
+            op: BinaryOp::Add,
             left: Box::new(lower_machine_expr(left.trim())?),
             right: Box::new(lower_machine_expr(right.trim())?),
         });
@@ -1723,6 +1788,56 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     {
         return Some(ExprIr::FieldRef(normalized.to_string()));
+    }
+    None
+}
+
+fn strip_wrapping_machine_parens(input: &str) -> &str {
+    let mut current = input.trim();
+    loop {
+        if !(current.starts_with('(') && current.ends_with(')')) {
+            return current;
+        }
+        let mut depth = 0usize;
+        let mut wraps = true;
+        for (index, ch) in current.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && index != current.len() - 1 {
+                        wraps = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if wraps {
+            current = current[1..current.len() - 1].trim();
+        } else {
+            return current;
+        }
+    }
+}
+
+fn split_top_level_machine<'a>(input: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
+    let mut depth = 0usize;
+    let bytes = input.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut index = 0usize;
+    while index + needle_bytes.len() <= bytes.len() {
+        match bytes[index] as char {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth == 0 && bytes[index..].starts_with(needle_bytes) {
+            let left = &input[..index];
+            let right = &input[index + needle.len()..];
+            return Some((left, right));
+        }
+        index += 1;
     }
     None
 }

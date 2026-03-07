@@ -291,6 +291,9 @@ Available strategies:
   Generate vectors for enabled and disabled guard cases
 - `boundary`
   Try to hit min/max bounded values
+- `path`
+  Generate vectors keyed to shared decision/path tags such as `allow_path`
+  and `boundary_path`
 - `random`
   Generate deterministic sampled paths
 
@@ -299,6 +302,7 @@ Examples:
 ```sh
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
 cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
+cargo run --bin cargo-valid -- testgen iam-access --strategy=path --json
 cargo run --bin valid -- testgen examples/models/safe_counter.valid --strategy=boundary --json
 cargo run --bin valid -- testgen examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample --json
 cargo run --bin cargo-valid -- replay failing-counter --property=P_FAIL --actions=INC,INC --json
@@ -310,6 +314,7 @@ Rust-first examples:
 
 - [valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs)
 - [iam_transition_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_transition_registry.rs)
+- [iam_enterprise_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_enterprise_registry.rs)
 - [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
 
 Domain-oriented examples:
@@ -348,6 +353,24 @@ cargo run --bin valid -- check examples/models/failing_counter.valid \
   --solver-exec sh \
   --solver-arg examples/solvers/mock_command_solver.sh \
   --json
+```
+
+Declarative Rust models can use the same adapter path:
+
+```sh
+cargo run --bin cargo-valid -- check iam-access \
+  --backend=command \
+  --solver-exec sh \
+  --solver-arg examples/solvers/mock_command_solver.sh \
+  --json
+```
+
+From another crate root, `cargo valid` also auto-discovers
+`examples/valid_models.rs` or `src/bin/valid_models.rs` when present, so the
+common case can be as short as:
+
+```sh
+cargo valid inspect my-model --json
 ```
 
 ## Recommended Workflow

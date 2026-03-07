@@ -217,6 +217,7 @@ fn selfcheck_model() -> ModelIr {
             label: "Jump".to_string(),
             reads: vec!["x".to_string()],
             writes: vec!["x".to_string()],
+            path_tags: vec!["write_path".to_string()],
             guard: ExprIr::Literal(Value::Bool(true)),
             updates: vec![UpdateIr {
                 field: "x".to_string(),

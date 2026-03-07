@@ -143,6 +143,7 @@ mod tests {
                 label: "Swap".to_string(),
                 reads: vec!["x".to_string(), "y".to_string()],
                 writes: vec!["x".to_string(), "y".to_string()],
+                path_tags: vec!["read_path".to_string(), "write_path".to_string()],
                 guard: ExprIr::Literal(Value::Bool(true)),
                 updates: vec![
                     UpdateIr {

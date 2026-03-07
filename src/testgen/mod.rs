@@ -241,6 +241,7 @@ pub fn build_model_test_vectors_for_strategy(
                 Ok(vectors)
             }
         }
+        "path" => build_model_path_vectors(model, property_id),
         "guard" => build_model_guard_vectors(model, property_id),
         "boundary" => build_model_boundary_vectors(model, property_id),
         "random" => build_model_random_vectors(model, property_id, 5),
@@ -253,16 +254,7 @@ fn model_transition_tags(model: &ModelIr, action_id: &str) -> Vec<String> {
         .actions
         .iter()
         .find(|action| action.action_id == action_id)
-        .map(|action| {
-            crate::modeling::decision_path_tags(
-                &[],
-                &action.action_id,
-                action.reads.iter().map(String::as_str),
-                action.writes.iter().map(String::as_str),
-                Some(&format!("{:?}", action.guard)),
-                Some(&format!("{:?}", action.updates)),
-            )
-        })
+        .map(|action| action.path_tags.clone())
         .unwrap_or_else(|| vec!["transition_path".to_string()])
 }
 
@@ -458,6 +450,10 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     for state in &vector.expected_states {
         out.push_str(&format!("    expected_states.push({state:?});\n"));
     }
+    out.push_str("    let mut notes = Vec::new();\n");
+    for note in &vector.notes {
+        out.push_str(&format!("    notes.push({note:?});\n"));
+    }
     if let Some(target) = &vector.replay_target {
         out.push_str(&format!("    let replay_runner = {:?};\n", target.runner));
         out.push_str("    let mut replay_args = Vec::new();\n");
@@ -481,6 +477,7 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    assert!(!property_id.is_empty());\n");
     out.push_str("    assert!(!source_kind.is_empty());\n");
     out.push_str("    assert!(!strategy.is_empty());\n");
+    out.push_str("    let _ = &notes;\n");
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
     out
@@ -718,6 +715,53 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
                 let signature = (
                     vector.focus_action_id.clone(),
                     vector.expected_guard_enabled,
+                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                );
+                if seen.insert(signature) {
+                    vectors.push(vector);
+                }
+            }
+        }
+    }
+
+    Ok(vectors)
+}
+
+fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<TestVector>, String> {
+    let exploration = explore_model(model)?;
+    let mut vectors = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for action in &model.actions {
+        let tags = model_transition_tags(model, &action.action_id);
+        let Some((_, edge)) = exploration
+            .edges_by_node
+            .iter()
+            .enumerate()
+            .find_map(|(node_index, edges)| {
+                edges.iter()
+                    .find(|edge| edge.action_id == action.action_id)
+                    .map(|edge| (node_index, edge))
+            })
+        else {
+            continue;
+        };
+        for tag in tags {
+            if let Some(vector) = build_model_vector_for_node(
+                model,
+                &exploration.nodes,
+                edge.to_index,
+                property_id,
+                "path",
+                "path",
+                Some(action.action_id.clone()),
+                None,
+                Some(true),
+                vec![format!("path_tag:{tag}")],
+            ) {
+                let signature = (
+                    tag,
+                    vector.focus_action_id.clone(),
                     vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
@@ -993,6 +1037,7 @@ mod tests {
                     label: "Inc".to_string(),
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
+                    path_tags: vec!["write_path".to_string()],
                     guard: ExprIr::Literal(Value::Bool(true)),
                     updates: vec![UpdateIr {
                         field: "x".to_string(),
@@ -1008,6 +1053,7 @@ mod tests {
                     label: "Jump".to_string(),
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
+                    path_tags: vec!["write_path".to_string()],
                     guard: ExprIr::Literal(Value::Bool(true)),
                     updates: vec![UpdateIr {
                         field: "x".to_string(),

@@ -6,6 +6,7 @@ pub struct ActionIr {
     pub label: String,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
+    pub path_tags: Vec<String>,
     pub guard: ExprIr,
     pub updates: Vec<UpdateIr>,
 }

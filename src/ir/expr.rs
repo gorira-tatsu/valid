@@ -24,5 +24,7 @@ pub enum UnaryOp {
 pub enum BinaryOp {
     Add,
     LessThanOrEqual,
+    Equal,
     And,
+    Or,
 }

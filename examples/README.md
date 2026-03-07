@@ -52,6 +52,7 @@ cargo run --bin cargo-valid -- --file examples/valid_models.rs check failing-cou
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=witness --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs testgen counter --strategy=boundary --json
 cargo run --bin cargo-valid -- --file examples/iam_transition_registry.rs testgen iam-access --strategy=guard --json
+cargo run --bin cargo-valid -- testgen iam-access --strategy=path --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC --json
 cargo run --bin cargo-valid -- --file examples/valid_models.rs all --json
 ```
@@ -94,6 +95,10 @@ valid_model! {
 
 `tags = [...]` is optional, but it is the preferred way to make
 allow/deny/boundary/session paths explicit instead of relying on heuristics.
+
+`iam_enterprise_registry.rs` is the heavier variant intended to pressure the
+current lowering path. It uses explicit tags plus richer boolean expressions
+such as `==`, `||`, and parenthesized guards / properties.
 
 ## Rust model examples
 
@@ -173,6 +178,11 @@ cargo valid inspect counter --json
 cargo valid check failing-counter --json
 cargo valid --file examples/valid_models.rs all --json
 ```
+
+From another crate root, `cargo valid` also auto-discovers
+`examples/valid_models.rs` or `src/bin/valid_models.rs` when present, so
+`cargo valid inspect <model>` works without an explicit `--file` in the common
+case.
 
 ## Current capability boundary
 

@@ -1,4 +1,4 @@
-use std::{env, path::Path, process};
+use std::{env, path::{Path, PathBuf}, process};
 use std::process::Command;
 
 use valid::{
@@ -15,7 +15,7 @@ use valid::{
 };
 
 fn main() {
-    let parsed = parse_cli(env::args().skip(1).collect());
+    let parsed = maybe_auto_discover_external(parse_cli(env::args().skip(1).collect()));
     if parsed.manifest_path.is_some()
         || parsed.example.is_some()
         || parsed.bin.is_some()
@@ -49,7 +49,7 @@ fn main() {
         "replay" => cmd_replay(local_args),
         _ => {
             eprintln!(
-                "usage: cargo valid <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> ... [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"
+                "usage: cargo valid <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> ... [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"
             );
             process::exit(3);
         }
@@ -447,7 +447,7 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
 }
 
 fn cmd_testgen(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"));
     let request = TestgenRequest {
         request_id: "cargo-valid-testgen".to_string(),
         source_name: normalized_model_ref(&model),
@@ -571,11 +571,11 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             _ if parsed.command.is_empty() => parsed.command = arg,
             _ if parsed.model.is_none() => parsed.model = Some(arg),
-            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]"),
+            _ => usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"),
         }
     }
     if parsed.command.is_empty() {
-        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]");
+        usage_exit("usage: cargo valid [--manifest-path <path>] [--file <path>|--example <name>|--bin <name>] <list|inspect|lint|check|all|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");
@@ -599,6 +599,37 @@ struct ExternalTarget {
     manifest_path: Option<String>,
     kind: &'static str,
     name: String,
+}
+
+fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
+    if parsed.manifest_path.is_some()
+        || parsed.file.is_some()
+        || parsed.example.is_some()
+        || parsed.bin.is_some()
+    {
+        return parsed;
+    }
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(_) => return parsed,
+    };
+    let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if current_dir == built_in_manifest_dir {
+        return parsed;
+    }
+    let cargo_toml = current_dir.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return parsed;
+    }
+    let candidates = [
+        current_dir.join("examples").join("valid_models.rs"),
+        current_dir.join("src").join("bin").join("valid_models.rs"),
+    ];
+    if let Some(file) = candidates.into_iter().find(|path| path.exists()) {
+        parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
+        parsed.file = Some(file.to_string_lossy().to_string());
+    }
+    parsed
 }
 
 fn resolve_external_target(parsed: &CliArgs) -> ExternalTarget {

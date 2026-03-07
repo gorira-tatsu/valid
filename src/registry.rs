@@ -607,6 +607,6 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <list|inspect|lint|check|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|random>]");
+    eprintln!("usage: <registry-bin> <list|inspect|lint|check|explain|coverage|orchestrate|testgen|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
     process::exit(3);
 }

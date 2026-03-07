@@ -342,7 +342,9 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             match op {
                 BinaryOp::Add => Ok(format!("(+ {left} {right})")),
                 BinaryOp::LessThanOrEqual => Ok(format!("(<= {left} {right})")),
+                BinaryOp::Equal => Ok(format!("(= {left} {right})")),
                 BinaryOp::And => Ok(format!("(and {left} {right})")),
+                BinaryOp::Or => Ok(format!("(or {left} {right})")),
             }
         }
     }
@@ -364,6 +366,17 @@ mod tests {
         assert!(query.check_smtlib.contains("(declare-fun action_1 () Int)"));
         assert!(query.check_smtlib.contains("(assert (not (<= x_2 1)))"));
         assert!(query.model_smtlib.contains("(get-value (action_0))"));
+    }
+
+    #[test]
+    fn render_expr_supports_or_and_equality() {
+        let model = compile_model(
+            "model A\nstate:\n  x: u8[0..7]\n  enabled: bool\ninit:\n  x = 0\n  enabled = false\naction Inc:\n  pre: enabled == false || x <= 1\n  post:\n    enabled = true\nproperty P_SAFE:\n  invariant: enabled == true || x <= 7\n",
+        )
+        .unwrap();
+        let query = build_invariant_bmc_query(&model, &["P_SAFE".to_string()], 1).unwrap();
+        assert!(query.check_smtlib.contains("(or (= enabled_0 false) (<= x_0 1))"));
+        assert!(query.check_smtlib.contains("(not (or (= enabled_1 true) (<= x_1 7)))"));
     }
 
     #[test]
