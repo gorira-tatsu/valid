@@ -5,7 +5,8 @@ pub mod smt;
 use crate::{
     engine::{
         check_explicit, AssuranceLevel, BackendKind, CheckErrorEnvelope, CheckOutcome, ErrorStatus,
-        ExplicitRunResult, PropertyResult, RunPlan, RunStatus, UnknownReason,
+        ExplicitRunResult, PropertyResult, ResourceLimits, RunPlan, RunStatus, SearchStrategy,
+        UnknownReason,
     },
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::ModelIr,
@@ -63,6 +64,9 @@ pub struct SolverRunPlan {
     pub target_property_ids: Vec<String>,
     pub horizon: Option<u32>,
     pub encoded_model_hash: String,
+    pub strategy: SearchStrategy,
+    pub resource_limits: ResourceLimits,
+    pub detect_deadlocks: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +230,9 @@ impl SolverAdapter for ExplicitAdapter {
             target_property_ids,
             horizon: run_plan.search_bounds.max_depth.map(|value| value as u32),
             encoded_model_hash: format!("encoded:{}", run_plan.manifest.source_hash),
+            strategy: run_plan.strategy,
+            resource_limits: run_plan.resource_limits.clone(),
+            detect_deadlocks: run_plan.detect_deadlocks,
         })
     }
 
@@ -236,7 +243,10 @@ impl SolverAdapter for ExplicitAdapter {
             run_plan.property_selection =
                 crate::engine::PropertySelection::ExactlyOne(property_id.clone());
         }
+        run_plan.strategy = plan.strategy;
         run_plan.search_bounds.max_depth = plan.horizon.map(|value| value as usize);
+        run_plan.resource_limits = plan.resource_limits.clone();
+        run_plan.detect_deadlocks = plan.detect_deadlocks;
         Ok(RawSolverResult::Explicit(check_explicit(model, &run_plan)))
     }
 
@@ -312,6 +322,9 @@ impl SolverAdapter for MockBmcAdapter {
                 .map(|value| value as u32)
                 .or(Some(8)),
             encoded_model_hash: format!("bmc:{}", run_plan.manifest.source_hash),
+            strategy: run_plan.strategy,
+            resource_limits: run_plan.resource_limits.clone(),
+            detect_deadlocks: run_plan.detect_deadlocks,
         })
     }
 
@@ -322,7 +335,10 @@ impl SolverAdapter for MockBmcAdapter {
             run_plan.property_selection =
                 crate::engine::PropertySelection::ExactlyOne(property_id.clone());
         }
+        run_plan.strategy = plan.strategy;
         run_plan.search_bounds.max_depth = plan.horizon.map(|value| value as usize);
+        run_plan.resource_limits = plan.resource_limits.clone();
+        run_plan.detect_deadlocks = plan.detect_deadlocks;
         Ok(RawSolverResult::Explicit(check_explicit(model, &run_plan)))
     }
 
@@ -398,6 +414,9 @@ impl SolverAdapter for Cvc5Adapter {
                 .map(|value| value as u32)
                 .or(Some(16)),
             encoded_model_hash: format!("cvc5:{}", run_plan.manifest.source_hash),
+            strategy: run_plan.strategy,
+            resource_limits: run_plan.resource_limits.clone(),
+            detect_deadlocks: run_plan.detect_deadlocks,
         })
     }
 
@@ -499,6 +518,9 @@ impl SolverAdapter for CommandSolverAdapter {
             target_property_ids,
             horizon: run_plan.search_bounds.max_depth.map(|value| value as u32),
             encoded_model_hash: format!("cmd:{}", run_plan.manifest.source_hash),
+            strategy: run_plan.strategy,
+            resource_limits: run_plan.resource_limits.clone(),
+            detect_deadlocks: run_plan.detect_deadlocks,
         })
     }
 

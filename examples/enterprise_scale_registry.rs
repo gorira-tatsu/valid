@@ -1,4 +1,6 @@
-use valid::{registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidEnum, ValidState};
+use valid::{
+    registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidEnum, ValidState,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValidEnum)]
 enum ReviewStage {

@@ -7,7 +7,9 @@ use crate::{
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::{ModelIr, PropertyIr, PropertyKind, Value},
     kernel::{
-        eval::eval_expr, transition::apply_action, transition::build_initial_state, MachineState,
+        eval::eval_expr,
+        transition::{apply_action_transition, build_initial_state},
+        MachineState,
     },
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
@@ -127,7 +129,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         let mut enabled = 0usize;
         for action in &model.actions {
             explored_transitions += 1;
-            match apply_action(model, &node.state, &action.action_id)? {
+            match apply_action_transition(model, &node.state, action)? {
                 Some(next_state) => {
                     enabled += 1;
                     if hit_depth_bound(&plan.search_bounds, node.depth) {

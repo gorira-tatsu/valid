@@ -305,7 +305,8 @@ fn smt_sort(ty: &FieldType) -> &'static str {
         FieldType::BoundedU8 { .. }
         | FieldType::BoundedU16 { .. }
         | FieldType::BoundedU32 { .. }
-        | FieldType::Enum { .. } => "Int",
+        | FieldType::Enum { .. }
+        | FieldType::EnumSet { .. } => "Int",
     }
 }
 
@@ -315,10 +316,16 @@ fn integer_bounds(ty: &FieldType) -> Option<(u64, u64)> {
         FieldType::BoundedU8 { min, max } => Some((*min as u64, *max as u64)),
         FieldType::BoundedU16 { min, max } => Some((*min as u64, *max as u64)),
         FieldType::BoundedU32 { min, max } => Some((*min as u64, *max as u64)),
-        FieldType::Enum { variants } => variants
-            .len()
-            .checked_sub(1)
-            .map(|max| (0, max as u64)),
+        FieldType::Enum { variants } => variants.len().checked_sub(1).map(|max| (0, max as u64)),
+        FieldType::EnumSet { variants } => {
+            if variants.len() > 64 {
+                None
+            } else if variants.len() == 64 {
+                Some((0, u64::MAX))
+            } else {
+                Some((0, (1u64 << variants.len()) - 1))
+            }
+        }
     }
 }
 
@@ -352,6 +359,7 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
         }
         ExprIr::Unary { op, expr } => match op {
             UnaryOp::Not => Ok(format!("(not {})", render_expr(model, expr, step)?)),
+            UnaryOp::SetIsEmpty => Ok(format!("(= {} 0)", render_expr(model, expr, step)?)),
         },
         ExprIr::Binary { op, left, right } => {
             let left = render_expr(model, left, step)?;
@@ -359,6 +367,26 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             match op {
                 BinaryOp::Add => Ok(format!("(+ {left} {right})")),
                 BinaryOp::Sub => Ok(format!("(- {left} {right})")),
+                BinaryOp::Mod => Ok(format!("(mod {left} {right})")),
+                BinaryOp::SetContains => {
+                    let index = extract_enum_index(right.as_str(), expr)?;
+                    Ok(format!(
+                        "(= (mod (div {left} {}) 2) 1)",
+                        enum_variant_mask(index)
+                    ))
+                }
+                BinaryOp::SetInsert => {
+                    let index = extract_enum_index(right.as_str(), expr)?;
+                    let mask = enum_variant_mask(index);
+                    Ok(format!(
+                        "(+ {left} (* (- 1 (mod (div {left} {mask}) 2)) {mask}))"
+                    ))
+                }
+                BinaryOp::SetRemove => {
+                    let index = extract_enum_index(right.as_str(), expr)?;
+                    let mask = enum_variant_mask(index);
+                    Ok(format!("(- {left} (* (mod (div {left} {mask}) 2) {mask}))"))
+                }
                 BinaryOp::LessThan => Ok(format!("(< {left} {right})")),
                 BinaryOp::LessThanOrEqual => Ok(format!("(<= {left} {right})")),
                 BinaryOp::GreaterThan => Ok(format!("(> {left} {right})")),
@@ -370,6 +398,22 @@ fn render_expr(model: &ModelIr, expr: &ExprIr, step: usize) -> Result<String, St
             }
         }
     }
+}
+
+fn extract_enum_index(rendered_right: &str, expr: &ExprIr) -> Result<u64, String> {
+    match expr {
+        ExprIr::Binary { right, .. } => match &**right {
+            ExprIr::Literal(Value::EnumVariant { index, .. }) => Ok(*index),
+            other => Err(format!(
+                "set operation requires a finite enum literal on the right-hand side, got `{other:?}` / `{rendered_right}`"
+            )),
+        },
+        _ => Err("internal error extracting enum index for set operation".to_string()),
+    }
+}
+
+fn enum_variant_mask(index: u64) -> u64 {
+    1u64.checked_shl(index as u32).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -417,6 +461,17 @@ mod tests {
         assert!(query.check_smtlib.contains("(>= x_0 1)"));
         assert!(query.check_smtlib.contains("(< x_0 7)"));
         assert!(query.check_smtlib.contains("(not (= enabled_0 true))"));
+    }
+
+    #[test]
+    fn render_expr_supports_modulo() {
+        let model = compile_model(
+            "model A\nstate:\n  x: u8[0..15]\ninit:\n  x = 0\naction Inc:\n  pre: x % 3 != 2\n  post:\n    x = x + 1\nproperty P_SAFE:\n  invariant: x % 3 != 2\n",
+        )
+        .unwrap();
+        let query = build_invariant_bmc_query(&model, &["P_SAFE".to_string()], 1).unwrap();
+        assert!(query.check_smtlib.contains("(mod x_0 3)"));
+        assert!(query.check_smtlib.contains("(mod x_1 3)"));
     }
 
     #[test]

@@ -276,6 +276,16 @@ pub fn testgen_bundled_model(
             .iter()
             .map(|vector| vector.vector_id.clone())
             .collect(),
+        vectors: vectors
+            .iter()
+            .map(|vector| crate::api::TestgenVectorSummary {
+                vector_id: vector.vector_id.clone(),
+                strictness: vector.strictness.clone(),
+                derivation: vector.derivation.clone(),
+                source_kind: vector.source_kind.clone(),
+                strategy: vector.strategy.clone(),
+            })
+            .collect(),
         generated_files,
     })
 }
@@ -454,6 +464,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
+            is_set: field.is_set,
         })
         .collect::<Vec<_>>();
     let action_details = M::Action::action_descriptors()

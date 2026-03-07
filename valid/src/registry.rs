@@ -2,9 +2,9 @@ use std::{env, fs, process};
 
 use crate::{
     benchmark::{
-        benchmark_check_outcomes, compare_benchmark_to_baseline,
-        parse_benchmark_summary_json, render_benchmark_comparison_json,
-        render_benchmark_comparison_text, render_benchmark_json, render_benchmark_text,
+        benchmark_check_outcomes, compare_benchmark_to_baseline, parse_benchmark_summary_json,
+        render_benchmark_comparison_json, render_benchmark_comparison_text, render_benchmark_json,
+        render_benchmark_text,
     },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
     engine::CheckOutcome,
@@ -22,9 +22,9 @@ use crate::{
 };
 
 use crate::api::{
-    lint_from_inspect, migration_from_inspect, render_explain_json, render_explain_text,
-    render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
-    render_migration_json, render_migration_text, ExplainResponse, InspectAction,
+    explicit_analysis_warning, lint_from_inspect, migration_from_inspect, render_explain_json,
+    render_explain_text, render_inspect_json, render_inspect_text, render_lint_json,
+    render_lint_text, render_migration_json, render_migration_text, ExplainResponse, InspectAction,
     InspectCapabilities, InspectProperty, InspectResponse, InspectStateField, InspectTransition,
     InspectTransitionUpdate, OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
 };
@@ -201,12 +201,13 @@ fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
         ))
         .replace("sha256:", "")
     );
-    let (comparison_json, comparison_text, regression_detected) = registry_benchmark_baseline_outputs(
-        &summary_json,
-        &baseline_id,
-        parsed.baseline_mode.as_deref().unwrap_or("compare"),
-        parsed.threshold_percent.unwrap_or(25),
-    );
+    let (comparison_json, comparison_text, regression_detected) =
+        registry_benchmark_baseline_outputs(
+            &summary_json,
+            &baseline_id,
+            parsed.baseline_mode.as_deref().unwrap_or("compare"),
+            parsed.threshold_percent.unwrap_or(25),
+        );
     if parsed.json {
         println!(
             "{{\"summary\":{},\"baseline\":{}}}",
@@ -289,10 +290,16 @@ fn cmd_migrate(models: &[RegisteredModel], args: Vec<String>) {
 fn cmd_check(models: &[RegisteredModel], args: Vec<String>) {
     let parsed = parse_args(args);
     let model = find_model(models, parsed.model.as_deref());
+    let inspect = (model.inspect)("registry-check-preflight");
     let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
         eprintln!("{message}");
         process::exit(3);
     });
+    if matches!(adapter, Some(AdapterConfig::Explicit) | None) {
+        if let Some(warning) = explicit_analysis_warning(&inspect) {
+            eprintln!("{warning}");
+        }
+    }
     let outcome = (model.check)(
         "registry-check",
         parsed.property_id.as_deref(),
@@ -406,15 +413,41 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
     );
     if parsed.json {
         println!(
-            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
+            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
             response.schema_version,
             response.request_id,
             response.status,
             response.vector_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+            response
+                .vectors
+                .iter()
+                .map(|vector| format!(
+                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                    vector.vector_id,
+                    vector.strictness,
+                    vector.derivation,
+                    vector.source_kind,
+                    vector.strategy
+                ))
+                .collect::<Vec<_>>()
+                .join(","),
             response.generated_files.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(",")
         );
     } else {
         println!("vector_ids: {}", response.vector_ids.join(", "));
+        if !response.vectors.is_empty() {
+            println!("vectors:");
+            for vector in &response.vectors {
+                println!(
+                    "- {} strictness={} derivation={} source={} strategy={}",
+                    vector.vector_id,
+                    vector.strictness,
+                    vector.derivation,
+                    vector.source_kind,
+                    vector.strategy
+                );
+            }
+        }
     }
 }
 
@@ -446,6 +479,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
+            is_set: field.is_set,
         })
         .collect::<Vec<_>>();
     let action_details = M::Action::action_descriptors()
@@ -639,6 +673,16 @@ fn testgen_machine<M: VerifiedMachine>(
         vector_ids: vectors
             .iter()
             .map(|vector| vector.vector_id.clone())
+            .collect(),
+        vectors: vectors
+            .iter()
+            .map(|vector| crate::api::TestgenVectorSummary {
+                vector_id: vector.vector_id.clone(),
+                strictness: vector.strictness.clone(),
+                derivation: vector.derivation.clone(),
+                source_kind: vector.source_kind.clone(),
+                strategy: vector.strategy.clone(),
+            })
             .collect(),
         generated_files,
     }

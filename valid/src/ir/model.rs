@@ -40,4 +40,5 @@ pub enum FieldType {
     BoundedU16 { min: u16, max: u16 },
     BoundedU32 { min: u32, max: u32 },
     Enum { variants: Vec<String> },
+    EnumSet { variants: Vec<String> },
 }

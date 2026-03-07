@@ -8,7 +8,7 @@ use crate::{
     kernel::{
         eval::eval_expr,
         replay::replay_actions,
-        transition::{apply_action, build_initial_state},
+        transition::{apply_action_transition, build_initial_state},
         MachineState,
     },
     support::{artifact::generated_test_path, hash::stable_hash_hex, io::write_text_file},
@@ -25,6 +25,8 @@ pub struct TestVector {
     pub schema_version: String,
     pub vector_id: String,
     pub source_kind: String,
+    pub strictness: String,
+    pub derivation: String,
     pub evidence_id: Option<String>,
     pub strategy: String,
     pub generator_version: String,
@@ -55,6 +57,20 @@ pub struct MinimizeResult {
     pub vector: TestVector,
 }
 
+fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'static str) {
+    match (source_kind, strategy) {
+        ("counterexample", _) => ("strict", "counterexample_trace"),
+        ("witness", "transition_coverage") => ("strict", "witness_trace"),
+        ("witness", _) => ("strict", "witness_trace"),
+        (_, "transition") => ("heuristic", "transition_search"),
+        (_, "guard") => ("heuristic", "guard_search"),
+        (_, "boundary") => ("heuristic", "boundary_search"),
+        (_, "path") => ("heuristic", "path_tag_search"),
+        (_, "random") => ("heuristic", "deterministic_random_search"),
+        _ => ("heuristic", "model_exploration"),
+    }
+}
+
 pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, String> {
     if trace.steps.is_empty() {
         return Err("cannot build a counterexample vector from an empty trace".to_string());
@@ -82,6 +98,8 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         schema_version: "1.0.0".to_string(),
         vector_id: trace.evidence_id.replace("ev-", "vec-"),
         source_kind: "counterexample".to_string(),
+        strictness: "strict".to_string(),
+        derivation: "counterexample_trace".to_string(),
         evidence_id: Some(trace.evidence_id.clone()),
         strategy: "counterexample".to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -138,6 +156,8 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
     }
     let mut vector = build_counterexample_vector(trace)?;
     vector.source_kind = "witness".to_string();
+    vector.strictness = "strict".to_string();
+    vector.derivation = "witness_trace".to_string();
     vector.strategy = "transition_coverage".to_string();
     vector.minimized = false;
     Ok(vector)
@@ -152,7 +172,7 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
     let mut seen_sequences = BTreeSet::new();
 
     for first_action in &model.actions {
-        let Some(first_state) = apply_action(model, &initial, &first_action.action_id)
+        let Some(first_state) = apply_action_transition(model, &initial, first_action)
             .ok()
             .flatten()
         else {
@@ -173,6 +193,9 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
             .as_ref()
             .and_then(|trace| build_witness_vector(trace).ok())
         {
+            let mut vector = vector;
+            vector.strictness = "synthetic".to_string();
+            vector.derivation = "synthetic_witness".to_string();
             let signature = vector
                 .actions
                 .iter()
@@ -184,7 +207,7 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
         }
 
         for second_action in &model.actions {
-            let Some(second_state) = apply_action(model, &first_state, &second_action.action_id)
+            let Some(second_state) = apply_action_transition(model, &first_state, second_action)
                 .ok()
                 .flatten()
             else {
@@ -213,6 +236,9 @@ pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Ve
             let Ok(vector) = build_witness_vector(&trace) else {
                 continue;
             };
+            let mut vector = vector;
+            vector.strictness = "synthetic".to_string();
+            vector.derivation = "synthetic_witness".to_string();
             let signature = vector
                 .actions
                 .iter()
@@ -247,15 +273,6 @@ pub fn build_model_test_vectors_for_strategy(
         "random" => build_model_random_vectors(model, property_id, 5),
         _ => Ok(Vec::new()),
     }
-}
-
-fn model_transition_tags(model: &ModelIr, action_id: &str) -> Vec<String> {
-    model
-        .actions
-        .iter()
-        .find(|action| action.action_id == action_id)
-        .map(|action| action.path_tags.clone())
-        .unwrap_or_else(|| vec!["transition_path".to_string()])
 }
 
 fn synthetic_trace_from_states(
@@ -424,6 +441,14 @@ pub fn render_rust_test(vector: &TestVector) -> String {
         "    let source_kind = \"{}\";\n",
         vector.source_kind
     ));
+    out.push_str(&format!(
+        "    let strictness = \"{}\";\n",
+        vector.strictness
+    ));
+    out.push_str(&format!(
+        "    let derivation = \"{}\";\n",
+        vector.derivation
+    ));
     out.push_str(&format!("    let strategy = \"{}\";\n", vector.strategy));
     if let Some(action_id) = &vector.focus_action_id {
         out.push_str(&format!(
@@ -479,6 +504,8 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    assert!(!vector_id.is_empty());\n");
     out.push_str("    assert!(!property_id.is_empty());\n");
     out.push_str("    assert!(!source_kind.is_empty());\n");
+    out.push_str("    assert!(!strictness.is_empty());\n");
+    out.push_str("    assert!(!derivation.is_empty());\n");
     out.push_str("    assert!(!strategy.is_empty());\n");
     out.push_str("    let _ = &notes;\n");
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
@@ -583,7 +610,7 @@ struct ModelNode {
 
 #[derive(Debug, Clone)]
 struct ModelEdge {
-    action_id: String,
+    action_index: usize,
     to_index: usize,
 }
 
@@ -607,8 +634,8 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
 
     while let Some(node_index) = frontier.pop_front() {
         let state = nodes[node_index].state.clone();
-        for action in &model.actions {
-            let next = apply_action(model, &state, &action.action_id)
+        for (action_index, action) in model.actions.iter().enumerate() {
+            let next = apply_action_transition(model, &state, action)
                 .map_err(|diagnostic| diagnostic.message.clone())?;
             let Some(next_state) = next else {
                 continue;
@@ -631,7 +658,7 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
                     .expect("visited state must be present")
             };
             edges_by_node[node_index].push(ModelEdge {
-                action_id: action.action_id.clone(),
+                action_index,
                 to_index,
             });
         }
@@ -651,7 +678,7 @@ fn build_model_guard_vectors(
     let mut vectors = Vec::new();
     let mut seen = BTreeSet::new();
 
-    for action in &model.actions {
+    for (action_index, action) in model.actions.iter().enumerate() {
         if let Some((node_index, edge)) =
             exploration
                 .edges_by_node
@@ -660,7 +687,7 @@ fn build_model_guard_vectors(
                 .find_map(|(node_index, edges)| {
                     edges
                         .iter()
-                        .find(|edge| edge.action_id == action.action_id)
+                        .find(|edge| edge.action_index == action_index)
                         .map(|edge| (node_index, edge))
                 })
         {
@@ -677,7 +704,9 @@ fn build_model_guard_vectors(
                 {
                     let mut notes = vec![format!("guard_true:{:?}", action.guard)];
                     notes.extend(
-                        model_transition_tags(model, &action.action_id)
+                        action
+                            .path_tags
+                            .clone()
                             .into_iter()
                             .map(|tag| format!("path_tag:{tag}")),
                     );
@@ -701,7 +730,7 @@ fn build_model_guard_vectors(
         }
 
         if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
-            apply_action(model, &node.state, &action.action_id)
+            apply_action_transition(model, &node.state, action)
                 .ok()
                 .flatten()
                 .is_none()
@@ -719,7 +748,9 @@ fn build_model_guard_vectors(
                 {
                     let mut notes = vec![format!("guard_false:{:?}", action.guard)];
                     notes.extend(
-                        model_transition_tags(model, &action.action_id)
+                        action
+                            .path_tags
+                            .clone()
                             .into_iter()
                             .map(|tag| format!("path_tag:{tag}")),
                     );
@@ -750,8 +781,12 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
     let mut vectors = Vec::new();
     let mut seen = BTreeSet::new();
 
-    for action in &model.actions {
-        let tags = model_transition_tags(model, &action.action_id);
+    for (action_index, action) in model.actions.iter().enumerate() {
+        let tags = if action.path_tags.is_empty() {
+            vec!["transition_path".to_string()]
+        } else {
+            action.path_tags.clone()
+        };
         let Some((_, edge)) =
             exploration
                 .edges_by_node
@@ -760,7 +795,7 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
                 .find_map(|(node_index, edges)| {
                     edges
                         .iter()
-                        .find(|edge| edge.action_id == action.action_id)
+                        .find(|edge| edge.action_index == action_index)
                         .map(|edge| (node_index, edge))
                 })
         else {
@@ -812,7 +847,7 @@ fn build_model_boundary_vectors(
             crate::ir::FieldType::BoundedU16 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::BoundedU32 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::Bool => continue,
-            crate::ir::FieldType::Enum { .. } => continue,
+            crate::ir::FieldType::Enum { .. } | crate::ir::FieldType::EnumSet { .. } => continue,
         };
         for target in [min, max] {
             if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
@@ -934,6 +969,7 @@ fn build_model_vector_for_node(
         .map(|step| step.action_id.clone())
         .collect::<Vec<_>>()
         .join(",");
+    let (strictness, derivation) = vector_provenance(source_kind, strategy);
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -951,6 +987,8 @@ fn build_model_vector_for_node(
             .replace("sha256:", "")
         ),
         source_kind: source_kind.to_string(),
+        strictness: strictness.to_string(),
+        derivation: derivation.to_string(),
         evidence_id: None,
         strategy: strategy.to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),

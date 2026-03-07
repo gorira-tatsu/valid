@@ -13,6 +13,9 @@ stateful workflow rules. The main path is:
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
 
+User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
+especially [docs/dsl/README.md](./docs/dsl/README.md).
+
 The product story is now:
 
 - declarative `transitions { ... }` models are the canonical analysis path
@@ -28,6 +31,7 @@ The product story is now:
 - Generate Rust test files from counterexamples and witnesses
 - Run Rust-defined models through `cargo-valid`
 - Run a bounded `smt-cvc5` path for the current MVP subset
+- Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
 
 ## Current Limits
 
@@ -88,6 +92,14 @@ cargo valid verify breakglass-access-regression
 cargo valid benchmark
 cargo valid benchmark --baseline=compare
 cargo valid suite
+```
+
+Arithmetic-heavy declarative registries also work:
+
+```sh
+cargo valid --registry examples/fizzbuzz.rs inspect fizzbuzz
+cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
+cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
 ```
 
 Use `--json` for CI, scripts, or AI integrations:
@@ -155,7 +167,9 @@ Primary commands:
 - `coverage <model>`
   Show action and guard coverage
 - `generate-tests <model>`
-  Generate Rust tests under `tests/generated/*.rs`
+  Generate Rust tests under `tests/generated/*.rs`. JSON output includes
+  `strictness` and `derivation` so CI can distinguish strict trace-backed
+  vectors from heuristic or synthetic ones.
 - `replay <model>`
   Replay an action sequence and return the terminal state
 - `suite`
@@ -264,6 +278,8 @@ struct State {
     x: u8,
     #[valid(enum)]
     review_stage: Option<ReviewStage>,
+    #[valid(set)]
+    approvals: valid::FiniteEnumSet<ReviewStage>,
     locked: bool,
 }
 
@@ -282,6 +298,7 @@ Minimal example:
 
 ```rust
 use valid::{
+    FiniteEnumSet,
     registry::run_registry_cli,
     valid_actions, valid_model, valid_models, valid_state, ValidEnum,
 };
@@ -295,7 +312,8 @@ enum ReviewStage {
 valid_state! {
     struct State {
         x: u8 [range = "0..=3"],
-        review_stage: ReviewStage,
+        review_stage: Option<ReviewStage> [enum],
+        approvals: FiniteEnumSet<ReviewStage> [set],
         locked: bool,
     }
 }

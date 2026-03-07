@@ -1,5 +1,5 @@
 use crate::{
-    ir::{FieldType, ModelIr, Value},
+    ir::{ActionIr, FieldType, ModelIr, Value},
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
 };
 
@@ -32,23 +32,34 @@ pub fn apply_action(
     state: &MachineState,
     action_id: &str,
 ) -> Result<Option<MachineState>, Diagnostic> {
-    let action = model
-        .actions
-        .iter()
-        .find(|item| item.action_id == action_id)
-        .ok_or_else(|| {
-            Diagnostic::new(
-                ErrorCode::InvalidTransitionUpdate,
-                DiagnosticSegment::KernelTransition,
-                format!("unknown action `{action_id}`"),
-            )
-            .with_help("select an action id that exists in the model")
-        })?;
+    let candidates = apply_action_variants(model, state, action_id)?;
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(candidates.into_iter().next()),
+        _ => Err(Diagnostic::new(
+            ErrorCode::InvalidTransitionUpdate,
+            DiagnosticSegment::KernelTransition,
+            format!(
+                "action `{action_id}` is ambiguous during replay because multiple guarded transitions are enabled"
+            ),
+        )
+        .with_help(
+            "use mutually exclusive guards for duplicate declarative transitions or replay with a more specific branch identifier",
+        )
+        .with_best_practice(
+            "treat repeated action ids as branch families whose guards should be disjoint in executable traces",
+        )),
+    }
+}
 
+pub fn apply_action_transition(
+    model: &ModelIr,
+    state: &MachineState,
+    action: &ActionIr,
+) -> Result<Option<MachineState>, Diagnostic> {
     if !evaluate_guard(model, state, action)? {
         return Ok(None);
     }
-
     let mut next_values = state.values.clone();
     for update in &action.updates {
         let index = model
@@ -69,6 +80,36 @@ pub fn apply_action(
     }
 
     Ok(Some(MachineState::new(next_values)))
+}
+
+pub fn apply_action_variants(
+    model: &ModelIr,
+    state: &MachineState,
+    action_id: &str,
+) -> Result<Vec<MachineState>, Diagnostic> {
+    let matching = model
+        .actions
+        .iter()
+        .filter(|item| item.action_id == action_id)
+        .collect::<Vec<_>>();
+    if matching.is_empty() {
+        return Err(Diagnostic::new(
+            ErrorCode::InvalidTransitionUpdate,
+            DiagnosticSegment::KernelTransition,
+            format!("unknown action `{action_id}`"),
+        )
+        .with_help("select an action id that exists in the model"));
+    }
+
+    let mut candidates = Vec::new();
+    for action in matching {
+        if let Some(next_state) = apply_action_transition(model, state, action)? {
+            if !candidates.iter().any(|existing| existing == &next_state) {
+                candidates.push(next_state);
+            }
+        }
+    }
+    Ok(candidates)
 }
 
 fn validate_value_for_type(
@@ -101,6 +142,11 @@ fn validate_value_for_type(
         {
             Ok(())
         }
+        (FieldType::EnumSet { variants }, Value::UInt(value))
+            if within_enum_set_bounds(variants, *value) =>
+        {
+            Ok(())
+        }
         (FieldType::BoundedU8 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -129,6 +175,13 @@ fn validate_value_for_type(
         )
         .with_help("keep enum updates within the derived finite variant set")
         .with_best_practice("prefer unit enums with stable variant sets for symbolic state")),
+        (FieldType::EnumSet { .. }, Value::UInt(_)) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` exceeds the declared finite-set bounds"),
+        )
+        .with_help("keep finite-set updates within the declared enum universe")
+        .with_best_practice("model set membership with FiniteEnumSet<T> and finite enum variants")),
         _ => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -139,6 +192,16 @@ fn validate_value_for_type(
             "prefer bool for predicates and bounded unsigned integers for counters in the MVP",
         )),
     }
+}
+
+fn within_enum_set_bounds(variants: &[String], value: u64) -> bool {
+    if variants.len() > 64 {
+        return false;
+    }
+    if variants.len() == 64 {
+        return true;
+    }
+    value <= ((1u64 << variants.len()) - 1)
 }
 
 #[cfg(test)]

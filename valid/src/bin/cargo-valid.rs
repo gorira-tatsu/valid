@@ -7,16 +7,16 @@ use std::{
 
 use valid::{
     api::{
-        check_source, explain_source, inspect_source, lint_source, migration_from_inspect,
-        orchestrate_source, render_explain_json, render_explain_text, render_inspect_json,
-        render_inspect_text, render_lint_json, render_lint_text, render_migration_json,
-        render_migration_text, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
-        TestgenRequest,
+        check_source, explain_source, explicit_analysis_warning, inspect_source, lint_source,
+        migration_from_inspect, orchestrate_source, render_explain_json, render_explain_text,
+        render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
+        render_migration_json, render_migration_text, testgen_source, CheckRequest, InspectRequest,
+        OrchestrateRequest, TestgenRequest,
     },
     benchmark::{
-        benchmark_check_outcomes, compare_benchmark_to_baseline,
-        parse_benchmark_summary_json, render_benchmark_comparison_json,
-        render_benchmark_comparison_text, render_benchmark_json, render_benchmark_text,
+        benchmark_check_outcomes, compare_benchmark_to_baseline, parse_benchmark_summary_json,
+        render_benchmark_comparison_json, render_benchmark_comparison_text, render_benchmark_json,
+        render_benchmark_text,
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
     coverage::{render_coverage_json, render_coverage_text},
@@ -563,16 +563,10 @@ fn cmd_benchmark(parsed: ParsedArgs) {
         ))
         .replace("sha256:", "")
     );
-    let baseline_id = benchmark_baseline_report_id(
-        &model,
-        &backend_label,
-        parsed.property_id.as_deref(),
-    );
+    let baseline_id =
+        benchmark_baseline_report_id(&model, &backend_label, parsed.property_id.as_deref());
     let artifact_path = write_benchmark_artifact(&artifact_id, &json);
-    let baseline_mode = parsed
-        .baseline_mode
-        .as_deref()
-        .unwrap_or("compare");
+    let baseline_mode = parsed.baseline_mode.as_deref().unwrap_or("compare");
     let threshold_percent = parsed.threshold_percent.unwrap_or(25);
     let (comparison_json, comparison_text, regression_detected) =
         benchmark_baseline_outputs(&json, &baseline_id, baseline_mode, threshold_percent);
@@ -623,9 +617,9 @@ fn cmd_benchmark(parsed: ParsedArgs) {
 }
 
 fn cmd_migrate(parsed: ParsedArgs) {
-    let model = parsed
-        .model
-        .unwrap_or_else(|| usage_exit("usage: cargo valid migrate <model> [--json] [--write[=<path>]] [--check]"));
+    let model = parsed.model.unwrap_or_else(|| {
+        usage_exit("usage: cargo valid migrate <model> [--json] [--write[=<path>]] [--check]")
+    });
     let request = InspectRequest {
         request_id: "cargo-valid-migrate".to_string(),
         source_name: normalized_model_ref(&model),
@@ -687,6 +681,18 @@ fn cmd_migrate(parsed: ParsedArgs) {
 
 fn cmd_check(parsed: ParsedArgs) {
     let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
+    let inspect_request = InspectRequest {
+        request_id: "cargo-valid-check-preflight".to_string(),
+        source_name: normalized_model_ref(&model),
+        source: String::new(),
+    };
+    if matches!(parsed.backend.as_deref(), None | Some("explicit")) {
+        if let Ok(inspect) = inspect_source(&inspect_request) {
+            if let Some(warning) = explicit_analysis_warning(&inspect) {
+                eprintln!("{warning}");
+            }
+        }
+    }
     let request = CheckRequest {
         request_id: "cargo-valid-check".to_string(),
         source_name: normalized_model_ref(&model),
@@ -832,15 +838,41 @@ fn cmd_testgen(parsed: ParsedArgs) {
         Ok(response) => {
             if parsed.json {
                 println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
                     response.schema_version,
                     response.request_id,
                     response.status,
                     response.vector_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                    response
+                        .vectors
+                        .iter()
+                        .map(|vector| format!(
+                            "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            vector.vector_id,
+                            vector.strictness,
+                            vector.derivation,
+                            vector.source_kind,
+                            vector.strategy
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
                     response.generated_files.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(",")
                 );
             } else {
                 println!("vector_ids: {}", response.vector_ids.join(", "));
+                if !response.vectors.is_empty() {
+                    println!("vectors:");
+                    for vector in &response.vectors {
+                        println!(
+                            "- {} strictness={} derivation={} source={} strategy={}",
+                            vector.vector_id,
+                            vector.strictness,
+                            vector.derivation,
+                            vector.source_kind,
+                            vector.strategy
+                        );
+                    }
+                }
             }
         }
         Err(error) => {
@@ -1412,11 +1444,7 @@ fn migration_output_path(model: &str, requested: &str) -> String {
     )
 }
 
-fn benchmark_baseline_report_id(
-    model: &str,
-    backend: &str,
-    property_id: Option<&str>,
-) -> String {
+fn benchmark_baseline_report_id(model: &str, backend: &str, property_id: Option<&str>) -> String {
     format!(
         "baseline-{}",
         stable_hash_hex(&format!(

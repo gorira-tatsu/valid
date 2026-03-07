@@ -91,13 +91,17 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 *action_execution_counts
                     .entry(action_id.clone())
                     .or_insert(0) += 1;
-                if let Some(action) = model
-                    .actions
-                    .iter()
-                    .find(|action| &action.action_id == action_id)
-                {
-                    for tag in &action.path_tags {
-                        *path_tag_counts.entry(tag.clone()).or_insert(0) += 1;
+                if let Some(state) = machine_state_from_snapshot(model, &step.state_before) {
+                    for action in model
+                        .actions
+                        .iter()
+                        .filter(|action| &action.action_id == action_id)
+                    {
+                        if matches!(evaluate_guard(model, &state, action), Ok(true)) {
+                            for tag in &action.path_tags {
+                                *path_tag_counts.entry(tag.clone()).or_insert(0) += 1;
+                            }
+                        }
                     }
                 }
             }
@@ -434,7 +438,7 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn machine_state_from_snapshot(
+pub(crate) fn machine_state_from_snapshot(
     model: &ModelIr,
     snapshot: &BTreeMap<String, crate::ir::Value>,
 ) -> Option<MachineState> {

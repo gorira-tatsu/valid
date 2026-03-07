@@ -612,6 +612,7 @@ mod tests {
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
+                is_set: false,
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -671,6 +672,7 @@ mod tests {
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
+                is_set: false,
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -733,6 +735,7 @@ mod tests {
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
+                is_set: false,
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),

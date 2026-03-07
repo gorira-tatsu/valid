@@ -289,9 +289,7 @@ pub fn render_benchmark_comparison_text(comparison: &BenchmarkComparison) -> Str
         out.push_str(&format!("baseline_average_explored_states: {value}\n"));
     }
     if let Some(value) = comparison.baseline_average_explored_transitions {
-        out.push_str(&format!(
-            "baseline_average_explored_transitions: {value}\n"
-        ));
+        out.push_str(&format!("baseline_average_explored_transitions: {value}\n"));
     }
     if comparison.regressions.is_empty() {
         out.push_str("baseline_regressions: none\n");
@@ -445,7 +443,8 @@ fn parse_iteration_json(value: &JsonValue) -> Result<BenchmarkIteration, String>
         elapsed_ms: number_field(object, "elapsed_ms")? as u128,
         status: string_field(object, "status")?.to_string(),
         exit_code: number_field(object, "exit_code")? as i32,
-        explored_states: optional_number_field(object, "explored_states")?.map(|value| value as usize),
+        explored_states: optional_number_field(object, "explored_states")?
+            .map(|value| value as usize),
         explored_transitions: optional_number_field(object, "explored_transitions")?
             .map(|value| value as usize),
         trace_steps: optional_number_field(object, "trace_steps")?.map(|value| value as usize),
@@ -591,8 +590,12 @@ mod tests {
             |_| completed_benchmark_outcome("run-current", RunStatus::Pass, 6, 12),
         );
         let parsed = parse_benchmark_summary_json(&render_benchmark_json(&baseline)).unwrap();
-        let comparison =
-            compare_benchmark_to_baseline(&current, "artifacts/benchmarks/counter.json", &parsed, 0);
+        let comparison = compare_benchmark_to_baseline(
+            &current,
+            "artifacts/benchmarks/counter.json",
+            &parsed,
+            0,
+        );
         assert_eq!(comparison.status, "regressed");
         assert!(comparison
             .regressions
@@ -618,8 +621,12 @@ mod tests {
         current.max_elapsed_ms = 50;
         current.average_elapsed_ms = 50;
         current.iterations[0].elapsed_ms = 50;
-        let comparison =
-            compare_benchmark_to_baseline(&current, "benchmarks/baselines/counter.json", &baseline, 25);
+        let comparison = compare_benchmark_to_baseline(
+            &current,
+            "benchmarks/baselines/counter.json",
+            &baseline,
+            25,
+        );
         assert_eq!(comparison.status, "ok");
         assert!(comparison.regressions.is_empty());
     }

@@ -181,6 +181,63 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
     if let Some(value) = lower_value(trimmed) {
         return Some(ExprIr::Literal(value));
     }
+    if let Some([left, right]) = function_args(trimmed, "implies") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Or,
+            left: Box::new(ExprIr::Unary {
+                op: crate::ir::UnaryOp::Not,
+                expr: Box::new(lower_expr(left.trim())?),
+            }),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
+    if let Some([left, right]) = function_args(trimmed, "iff") {
+        let left_expr = lower_expr(left.trim())?;
+        let right_expr = lower_expr(right.trim())?;
+        let both = ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(left_expr.clone()),
+            right: Box::new(right_expr.clone()),
+        };
+        let neither = ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(ExprIr::Unary {
+                op: crate::ir::UnaryOp::Not,
+                expr: Box::new(left_expr),
+            }),
+            right: Box::new(ExprIr::Unary {
+                op: crate::ir::UnaryOp::Not,
+                expr: Box::new(right_expr),
+            }),
+        };
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Or,
+            left: Box::new(both),
+            right: Box::new(neither),
+        });
+    }
+    if let Some([left, right]) = function_args(trimmed, "xor") {
+        let left_expr = lower_expr(left.trim())?;
+        let right_expr = lower_expr(right.trim())?;
+        let either = ExprIr::Binary {
+            op: BinaryOp::Or,
+            left: Box::new(left_expr.clone()),
+            right: Box::new(right_expr.clone()),
+        };
+        let both = ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(left_expr),
+            right: Box::new(right_expr),
+        };
+        return Some(ExprIr::Binary {
+            op: BinaryOp::And,
+            left: Box::new(either),
+            right: Box::new(ExprIr::Unary {
+                op: crate::ir::UnaryOp::Not,
+                expr: Box::new(both),
+            }),
+        });
+    }
     if let Some(rest) = trimmed.strip_prefix('!') {
         return Some(ExprIr::Unary {
             op: crate::ir::UnaryOp::Not,
@@ -250,6 +307,13 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
             right: Box::new(lower_expr(right.trim())?),
         });
     }
+    if let Some((left, right)) = split_top_level(trimmed, "%") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::Mod,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
+        });
+    }
     if let Some((left, right)) = split_top_level(trimmed, "+") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Add,
@@ -264,6 +328,18 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
         return Some(ExprIr::FieldRef(trimmed.to_string()));
     }
     None
+}
+
+fn function_args<'a, const N: usize>(input: &'a str, name: &str) -> Option<[&'a str; N]> {
+    let call = input
+        .strip_prefix(name)
+        .and_then(|rest| rest.strip_prefix('('))
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let parts = split_top_level_args(call);
+    if parts.len() != N {
+        return None;
+    }
+    Some(std::array::from_fn(|index| parts[index].trim()))
 }
 
 fn strip_wrapping_parens(input: &str) -> &str {
@@ -316,6 +392,25 @@ fn split_top_level<'a>(input: &'a str, needle: &str) -> Option<(&'a str, &'a str
     None
 }
 
+fn split_top_level_args(input: &str) -> Vec<&str> {
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut parts = Vec::new();
+    for (index, ch) in input.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(input[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(input[start..].trim());
+    parts
+}
+
 fn lowering_error(message: String, line: usize) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::UnsupportedExpr,
@@ -356,6 +451,27 @@ property P_SAFE:
         assert_eq!(model.state_fields.len(), 2);
         assert_eq!(model.actions.len(), 1);
         assert_eq!(model.properties.len(), 1);
+    }
+
+    #[test]
+    fn lowers_modulo_expr_in_property() {
+        let source = r#"
+model Fizz
+state:
+  x: u8[0..15]
+init:
+  x = 0
+action Step:
+  pre: x < 15
+  post:
+    x = x + 1
+property P_MOD:
+  invariant: x % 3 != 1
+"#;
+
+        let model = compile_model(source).expect("compile");
+        let debug = format!("{:?}", model.properties[0].expr);
+        assert!(debug.contains("Mod"));
     }
 
     #[test]

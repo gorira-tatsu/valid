@@ -4,6 +4,7 @@ This directory contains runnable examples that show the current implementation
 boundary.
 
 The intended primary modeling path is Rust-defined models, not a project-specific DSL.
+For the language itself, see [../docs/dsl/README.md](../docs/dsl/README.md).
 
 ## Registry example
 
@@ -65,6 +66,14 @@ cargo valid suite
 cargo valid clean all
 ```
 
+Arithmetic-heavy declarative example:
+
+```sh
+cargo valid --registry examples/fizzbuzz.rs inspect fizzbuzz
+cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
+cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
+```
+
 For a new project, `cargo valid init` now creates `valid.toml`, scaffolds
 `examples/valid_models.rs`, and creates `tests/generated/.gitkeep`.
 
@@ -95,10 +104,13 @@ Command meanings:
 - declarative graphs now show guard conditions, concrete field updates, and path tags directly
 - `transition_details.path_tags` and `coverage.path_tags` expose the shared decision/path vocabulary
 - `access-review-scale` also exercises finite enum state via `ReviewStage`
+- `fizzbuzz` exercises `%`, duplicate guarded transitions for one action, and
+  path-based generated tests
 
 If you prefer ordinary Rust type declarations instead of `valid_state!` and
 `valid_actions!`, the crate also supports `#[derive(ValidState)]` and
-`#[derive(ValidAction)]` for the current common cases.
+`#[derive(ValidAction)]` for the current common cases. `valid_state!` also
+supports `[enum]` fields for finite enums and `Option<FiniteEnum>`.
 
 `iam_transition_registry.rs` shows the declarative transition mode, where
 action/guard/effect structure is written as:

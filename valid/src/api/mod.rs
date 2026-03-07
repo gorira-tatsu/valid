@@ -1,12 +1,15 @@
 //! Machine-readable API layer for AI and CLI integration.
 
+use crate::kernel::guard::evaluate_guard;
 use crate::{
     bundled_models::{
         check_bundled_model, explain_bundled_model, inspect_bundled_model, is_bundled_model_ref,
         orchestrate_bundled_model, testgen_bundled_model,
     },
     contract::snapshot_model,
-    coverage::{collect_coverage, validate_coverage_report, CoverageReport},
+    coverage::{
+        collect_coverage, machine_state_from_snapshot, validate_coverage_report, CoverageReport,
+    },
     engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
     frontend,
     ir::ModelIr,
@@ -60,6 +63,7 @@ pub struct InspectStateField {
     pub rust_type: String,
     pub range: Option<String>,
     pub variants: Vec<String>,
+    pub is_set: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,7 +229,17 @@ pub struct TestgenResponse {
     pub request_id: String,
     pub status: String,
     pub vector_ids: Vec<String>,
+    pub vectors: Vec<TestgenVectorSummary>,
     pub generated_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestgenVectorSummary {
+    pub vector_id: String,
+    pub strictness: String,
+    pub derivation: String,
+    pub source_kind: String,
+    pub strategy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,6 +332,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                     crate::ir::FieldType::BoundedU16 { .. } => "u16".to_string(),
                     crate::ir::FieldType::BoundedU32 { .. } => "u32".to_string(),
                     crate::ir::FieldType::Enum { .. } => "enum".to_string(),
+                    crate::ir::FieldType::EnumSet { .. } => "enum_set".to_string(),
                 },
                 range: match field.ty {
                     crate::ir::FieldType::Bool => None,
@@ -325,11 +340,14 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                     crate::ir::FieldType::BoundedU16 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::BoundedU32 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::Enum { .. } => None,
+                    crate::ir::FieldType::EnumSet { .. } => None,
                 },
                 variants: match &field.ty {
-                    crate::ir::FieldType::Enum { variants } => variants.clone(),
+                    crate::ir::FieldType::Enum { variants }
+                    | crate::ir::FieldType::EnumSet { variants } => variants.clone(),
                     _ => Vec::new(),
                 },
+                is_set: matches!(field.ty, crate::ir::FieldType::EnumSet { .. }),
             })
             .collect(),
         action_details: model
@@ -743,19 +761,28 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 })
                 .collect::<Vec<_>>();
             let action_metadata = compiled_model.as_ref().and_then(|model| {
-                failure_step.action_id.as_ref().and_then(|action_id| {
-                    model
+                let state = machine_state_from_snapshot(model, &failure_step.state_before)?;
+                failure_step.action_id.as_ref().map(|action_id| {
+                    let mut reads = std::collections::BTreeSet::new();
+                    let mut writes = std::collections::BTreeSet::new();
+                    let mut path_tags = std::collections::BTreeSet::new();
+                    for action in model
                         .actions
                         .iter()
-                        .find(|action| &action.action_id == action_id)
-                        .map(|action| {
-                            (
-                                action.action_id.clone(),
-                                action.reads.clone(),
-                                action.writes.clone(),
-                                action.path_tags.clone(),
-                            )
-                        })
+                        .filter(|action| &action.action_id == action_id)
+                    {
+                        if matches!(evaluate_guard(model, &state, action), Ok(true)) {
+                            reads.extend(action.reads.iter().cloned());
+                            writes.extend(action.writes.iter().cloned());
+                            path_tags.extend(action.path_tags.iter().cloned());
+                        }
+                    }
+                    (
+                        action_id.clone(),
+                        reads.into_iter().collect::<Vec<_>>(),
+                        writes.into_iter().collect::<Vec<_>>(),
+                        path_tags.into_iter().collect::<Vec<_>>(),
+                    )
                 })
             });
             let coverage_report = compiled_model
@@ -1159,6 +1186,16 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .map(|vector| vector.vector_id.clone())
             .collect(),
+        vectors: vectors
+            .iter()
+            .map(|vector| TestgenVectorSummary {
+                vector_id: vector.vector_id.clone(),
+                strictness: vector.strictness.clone(),
+                derivation: vector.derivation.clone(),
+                source_kind: vector.source_kind.clone(),
+                strategy: vector.strategy.clone(),
+            })
+            .collect(),
         generated_files,
     })
 }
@@ -1307,7 +1344,7 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{},\"variants\":{}}}",
+            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{},\"variants\":{},\"is_set\":{}}}",
             escape_json(&field.name),
             escape_json(&field.rust_type),
             field
@@ -1315,7 +1352,8 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
                 .as_ref()
                 .map(|range| format!("\"{}\"", escape_json(range)))
                 .unwrap_or_else(|| "null".to_string()),
-            render_string_array(&field.variants)
+            render_string_array(&field.variants),
+            field.is_set
         ));
     }
     out.push(']');
@@ -1421,10 +1459,12 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             } else {
                 format!(" variants=[{}]", field.variants.join(", "))
             };
+            let set_marker = if field.is_set { " set" } else { "" };
             out.push_str(&format!(
-                "- {}: {}{}{}\n",
+                "- {}: {}{}{}{}\n",
                 field.name,
                 field.rust_type,
+                set_marker,
                 field
                     .range
                     .as_ref()
@@ -1583,27 +1623,55 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
         crate::ir::ExprIr::FieldRef(field) => field.clone(),
         crate::ir::ExprIr::Unary { op, expr } => match op {
             crate::ir::UnaryOp::Not => format!("!({})", render_expr_ir(expr)),
+            crate::ir::UnaryOp::SetIsEmpty => format!("is_empty({})", render_expr_ir(expr)),
         },
-        crate::ir::ExprIr::Binary { op, left, right } => {
-            let operator = match op {
-                crate::ir::BinaryOp::Add => "+",
-                crate::ir::BinaryOp::Sub => "-",
-                crate::ir::BinaryOp::LessThan => "<",
-                crate::ir::BinaryOp::LessThanOrEqual => "<=",
-                crate::ir::BinaryOp::GreaterThan => ">",
-                crate::ir::BinaryOp::GreaterThanOrEqual => ">=",
-                crate::ir::BinaryOp::Equal => "==",
-                crate::ir::BinaryOp::NotEqual => "!=",
-                crate::ir::BinaryOp::And => "&&",
-                crate::ir::BinaryOp::Or => "||",
-            };
-            format!(
-                "({} {} {})",
-                render_expr_ir(left),
-                operator,
-                render_expr_ir(right)
-            )
-        }
+        crate::ir::ExprIr::Binary { op, left, right } => match op {
+            crate::ir::BinaryOp::SetContains => {
+                format!(
+                    "contains({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::SetInsert => {
+                format!(
+                    "insert({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            crate::ir::BinaryOp::SetRemove => {
+                format!(
+                    "remove({}, {})",
+                    render_expr_ir(left),
+                    render_expr_ir(right)
+                )
+            }
+            _ => {
+                let operator = match op {
+                    crate::ir::BinaryOp::Add => "+",
+                    crate::ir::BinaryOp::Sub => "-",
+                    crate::ir::BinaryOp::Mod => "%",
+                    crate::ir::BinaryOp::LessThan => "<",
+                    crate::ir::BinaryOp::LessThanOrEqual => "<=",
+                    crate::ir::BinaryOp::GreaterThan => ">",
+                    crate::ir::BinaryOp::GreaterThanOrEqual => ">=",
+                    crate::ir::BinaryOp::Equal => "==",
+                    crate::ir::BinaryOp::NotEqual => "!=",
+                    crate::ir::BinaryOp::And => "&&",
+                    crate::ir::BinaryOp::Or => "||",
+                    crate::ir::BinaryOp::SetContains
+                    | crate::ir::BinaryOp::SetInsert
+                    | crate::ir::BinaryOp::SetRemove => unreachable!(),
+                };
+                format!(
+                    "({} {} {})",
+                    render_expr_ir(left),
+                    operator,
+                    render_expr_ir(right)
+                )
+            }
+        },
     }
 }
 
@@ -1625,6 +1693,10 @@ pub fn lint_source(request: &InspectRequest) -> Result<LintResponse, Vec<Diagnos
 
 pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
     let mut findings = Vec::new();
+    let declarative_model = inspect
+        .transition_details
+        .iter()
+        .any(|transition| transition.guard.is_some() || !transition.updates.is_empty());
     for reason in &inspect.capabilities.reasons {
         match reason.as_str() {
             "opaque_step_closure" => findings.push(LintFinding {
@@ -1646,7 +1718,11 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 snippet: None,
             }),
             "unsupported_machine_guard_expr" => findings.push(LintFinding {
-                severity: "warn".to_string(),
+                severity: if declarative_model {
+                    "error".to_string()
+                } else {
+                    "warn".to_string()
+                },
                 code: "unsupported_machine_guard_expr".to_string(),
                 message: "one or more guard expressions are outside the current solver-neutral subset".to_string(),
                 suggestion: Some(
@@ -1655,7 +1731,11 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 snippet: None,
             }),
             "unsupported_machine_update_expr" => findings.push(LintFinding {
-                severity: "warn".to_string(),
+                severity: if declarative_model {
+                    "error".to_string()
+                } else {
+                    "warn".to_string()
+                },
                 code: "unsupported_machine_update_expr".to_string(),
                 message: "one or more transition updates are outside the current solver-neutral subset".to_string(),
                 suggestion: Some(
@@ -1664,7 +1744,11 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 snippet: None,
             }),
             "unsupported_machine_property_expr" => findings.push(LintFinding {
-                severity: "warn".to_string(),
+                severity: if declarative_model {
+                    "error".to_string()
+                } else {
+                    "warn".to_string()
+                },
                 code: "unsupported_machine_property_expr".to_string(),
                 message: "one or more properties cannot be lowered into the current machine IR".to_string(),
                 suggestion: Some(
@@ -1751,6 +1835,40 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         model_id: inspect.model_id.clone(),
         capabilities: inspect.capabilities.clone(),
         findings,
+    }
+}
+
+pub fn explicit_analysis_warning(inspect: &InspectResponse) -> Option<String> {
+    let blocking_reasons = inspect
+        .capabilities
+        .reasons
+        .iter()
+        .filter(|reason| {
+            matches!(
+                reason.as_str(),
+                "unsupported_machine_guard_expr"
+                    | "unsupported_machine_update_expr"
+                    | "unsupported_machine_property_expr"
+                    | "unsupported_rust_field_type"
+                    | "unsupported_field_range"
+                    | "machine_ir_lowering_failed"
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let declarative_model = inspect
+        .transition_details
+        .iter()
+        .any(|transition| transition.guard.is_some() || !transition.updates.is_empty());
+    if declarative_model && !blocking_reasons.is_empty() {
+        Some(format!(
+            "warning: declarative model `{}` cannot fully lower to machine IR; explicit verification still ran, but solver/graph/testgen fidelity is reduced. reasons: {}. run `cargo valid readiness {}` for migration guidance.",
+            inspect.model_id,
+            blocking_reasons.join(", "),
+            inspect.model_id
+        ))
+    } else {
+        None
     }
 }
 
@@ -2145,6 +2263,13 @@ pub fn validate_minimize_response(response: &MinimizeResponse) -> Result<(), Str
 pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), String> {
     require_schema_version(&response.schema_version)?;
     require_non_empty(&response.request_id, "request_id")?;
+    require_non_empty(&response.status, "status")?;
+    require_len_match(
+        response.vector_ids.len(),
+        response.vectors.len(),
+        "vector_ids",
+        "vectors",
+    )?;
     require_len_match(
         response.vector_ids.len(),
         response.generated_files.len(),
@@ -2185,9 +2310,10 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
         require_non_empty(&request.source, "source")?;
     }
     match request.strategy.as_str() {
-        "counterexample" | "transition" | "witness" | "guard" | "boundary" | "random" => Ok(()),
+        "counterexample" | "transition" | "witness" | "guard" | "boundary" | "path"
+        | "random" => Ok(()),
         other => Err(format!(
-            "strategy must be one of counterexample, transition, witness, guard, boundary, random, got `{other}`"
+            "strategy must be one of counterexample, transition, witness, guard, boundary, path, random, got `{other}`"
         )),
     }
 }
@@ -2221,13 +2347,15 @@ mod tests {
     use std::fs;
 
     use super::{
-        capabilities_response, check_source, explain_source, inspect_source, lint_source,
-        minimize_source, orchestrate_source, testgen_source, validate_capabilities_request,
-        validate_capabilities_response, validate_check_request, validate_explain_request,
-        validate_explain_response, validate_inspect_request, validate_inspect_response,
-        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
-        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
-        InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        capabilities_response, check_source, explain_source, explicit_analysis_warning,
+        inspect_source, lint_from_inspect, lint_source, minimize_source, orchestrate_source,
+        testgen_source, validate_capabilities_request, validate_capabilities_response,
+        validate_check_request, validate_explain_request, validate_explain_response,
+        validate_inspect_request, validate_inspect_response, validate_minimize_request,
+        validate_minimize_response, validate_orchestrate_response, validate_testgen_request,
+        validate_testgen_response, CapabilitiesRequest, CheckRequest, InspectCapabilities,
+        InspectRequest, InspectResponse, InspectTransition, InspectTransitionUpdate,
+        MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
 
     fn cleanup_generated_files(paths: &[String]) {
@@ -2275,6 +2403,56 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == "opaque_step_closure"));
+    }
+
+    #[test]
+    fn lint_treats_unsupported_declarative_lowering_as_error() {
+        let inspect = InspectResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req".to_string(),
+            status: "ok".to_string(),
+            model_id: "FizzLike".to_string(),
+            machine_ir_ready: false,
+            machine_ir_error: Some(
+                "unsupported machine guard expression `state.i % 3 == 0`".to_string(),
+            ),
+            capabilities: InspectCapabilities {
+                parse_ready: true,
+                explicit_ready: true,
+                ir_ready: false,
+                solver_ready: false,
+                coverage_ready: true,
+                explain_ready: true,
+                testgen_ready: true,
+                reasons: vec!["unsupported_machine_guard_expr".to_string()],
+            },
+            state_fields: vec!["i".to_string()],
+            actions: vec!["STEP".to_string()],
+            properties: vec!["P_MOD".to_string()],
+            state_field_details: vec![],
+            action_details: vec![],
+            transition_details: vec![InspectTransition {
+                action_id: "STEP".to_string(),
+                guard: Some("(i % 3 == 0)".to_string()),
+                effect: Some("[]".to_string()),
+                reads: vec!["i".to_string()],
+                writes: vec!["i".to_string()],
+                path_tags: vec![],
+                updates: vec![InspectTransitionUpdate {
+                    field: "i".to_string(),
+                    expr: "(i + 1)".to_string(),
+                }],
+            }],
+            property_details: vec![],
+        };
+        let lint = lint_from_inspect(&inspect);
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.code == "unsupported_machine_guard_expr"
+                && finding.severity == "error"));
+        let warning = explicit_analysis_warning(&inspect).expect("warning");
+        assert!(warning.contains("cannot fully lower to machine IR"));
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub fn eval_expr(
             let value = eval_expr(model, state, expr)?;
             match (op, value) {
                 (UnaryOp::Not, Value::Bool(inner)) => Ok(Value::Bool(!inner)),
+                (UnaryOp::SetIsEmpty, Value::UInt(bits)) => Ok(Value::Bool(bits == 0)),
                 _ => Err(eval_error("invalid unary operand type".to_string())),
             }
         }
@@ -32,6 +33,22 @@ pub fn eval_expr(
                 }
                 (BinaryOp::Sub, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::UInt(left.saturating_sub(right)))
+                }
+                (BinaryOp::Mod, Value::UInt(left), Value::UInt(right)) => {
+                    if right == 0 {
+                        Err(eval_error("modulo by zero".to_string()))
+                    } else {
+                        Ok(Value::UInt(left % right))
+                    }
+                }
+                (BinaryOp::SetContains, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
+                    Ok(Value::Bool(bits & enum_variant_mask(index) != 0))
+                }
+                (BinaryOp::SetInsert, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
+                    Ok(Value::UInt(bits | enum_variant_mask(index)))
+                }
+                (BinaryOp::SetRemove, Value::UInt(bits), Value::EnumVariant { index, .. }) => {
+                    Ok(Value::UInt(bits & !enum_variant_mask(index)))
                 }
                 (BinaryOp::LessThan, Value::UInt(left), Value::UInt(right)) => {
                     Ok(Value::Bool(left < right))
@@ -59,11 +76,15 @@ pub fn eval_expr(
     }
 }
 
+fn enum_variant_mask(index: u64) -> u64 {
+    1u64.checked_shl(index as u32).unwrap_or(0)
+}
+
 fn eval_error(message: String) -> Diagnostic {
     Diagnostic::new(ErrorCode::EvalError, DiagnosticSegment::KernelEval, message)
         .with_help("check field names and operand types in the lowered IR")
         .with_best_practice(
-            "keep MVP expressions within bool, u64, !, &&, ||, +, -, and numeric comparisons",
+            "keep MVP expressions within bool, finite sets, u64, !, &&, ||, +, -, %, membership, and numeric comparisons",
         )
 }
 
@@ -155,6 +176,22 @@ mod tests {
                 left: Box::new(ExprIr::FieldRef("locked".to_string())),
                 right: Box::new(ExprIr::Literal(Value::Bool(true))),
             }),
+        };
+        assert_eq!(eval_expr(&model, &state, &expr).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn evaluates_modulo_expr() {
+        let model = model();
+        let state = MachineState::new(vec![Value::UInt(7), Value::Bool(false)]);
+        let expr = ExprIr::Binary {
+            op: BinaryOp::Equal,
+            left: Box::new(ExprIr::Binary {
+                op: BinaryOp::Mod,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(3))),
+            }),
+            right: Box::new(ExprIr::Literal(Value::UInt(1))),
         };
         assert_eq!(eval_expr(&model, &state, &expr).unwrap(), Value::Bool(true));
     }

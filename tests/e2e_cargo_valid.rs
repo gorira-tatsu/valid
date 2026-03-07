@@ -23,6 +23,12 @@ fn example_registry_file() -> PathBuf {
         .join("valid_models.rs")
 }
 
+fn fizzbuzz_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("fizzbuzz.rs")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
@@ -170,6 +176,25 @@ fn cargo_valid_inspects_registered_model() {
 }
 
 #[test]
+fn cargo_valid_inspects_fizzbuzz_as_solver_ready() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(fizzbuzz_registry_file())
+        .arg("inspect")
+        .arg("fizzbuzz")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect fizzbuzz should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"machine_ir_ready\":true"));
+    assert!(stdout.contains("\"solver_ready\":true"));
+    assert!(stdout.contains("\"P_FIZZBUZZ_DIVISIBLE_BY_BOTH\""));
+    assert!(stdout.contains("\"guard\":\"state.i < 15 && (state.i + 1) % 15 == 0\""));
+}
+
+#[test]
 fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
@@ -251,6 +276,64 @@ fn cargo_valid_checks_registered_model() {
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
     assert!(stdout.contains("\"ci\":{\"exit_code\":2"));
     assert!(stdout.contains("\"review_summary\""));
+}
+
+#[test]
+fn cargo_valid_verifies_fizzbuzz_declaratively() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(fizzbuzz_registry_file())
+        .arg("verify")
+        .arg("fizzbuzz")
+        .arg("--property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid verify fizzbuzz should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"PASS\""));
+    assert!(stdout.contains("\"property_id\":\"P_FIZZBUZZ_DIVISIBLE_BY_BOTH\""));
+    assert!(stdout.contains("\"explored_states\":16"));
+}
+
+#[test]
+fn cargo_valid_reports_fizzbuzz_coverage_and_generates_strictness_metadata() {
+    let _guard = cargo_lock().lock().unwrap();
+    let coverage = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(fizzbuzz_registry_file())
+        .arg("coverage")
+        .arg("fizzbuzz")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid coverage fizzbuzz should run");
+    assert!(coverage.status.success());
+    let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
+    assert!(coverage_stdout.contains("\"transition_coverage_percent\":100"));
+    assert!(coverage_stdout.contains("\"guard_full_coverage_percent\":100"));
+    assert!(coverage_stdout.contains("\"visited_state_count\":16"));
+
+    let testgen = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(fizzbuzz_registry_file())
+        .arg("generate-tests")
+        .arg("fizzbuzz")
+        .arg("--strategy=path")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid path testgen for fizzbuzz should run");
+    assert!(testgen.status.success());
+    let stdout = String::from_utf8_lossy(&testgen.stdout);
+    assert!(stdout.contains("\"strictness\":\"heuristic\""));
+    assert!(stdout.contains("\"derivation\":\"path_tag_search\""));
+    assert!(stdout.contains("\"source_kind\":\"path\""));
+    for path in extract_generated_files(&stdout) {
+        let body = fs::read_to_string(&path).expect("generated file must exist");
+        assert!(body.contains("let strictness = \"heuristic\";"));
+        assert!(body.contains("let derivation = \"path_tag_search\";"));
+    }
+    cleanup_generated_files(&stdout);
 }
 
 #[test]

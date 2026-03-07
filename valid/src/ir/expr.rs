@@ -18,12 +18,17 @@ pub enum ExprIr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Not,
+    SetIsEmpty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Sub,
+    Mod,
+    SetContains,
+    SetInsert,
+    SetRemove,
     LessThan,
     LessThanOrEqual,
     GreaterThan,

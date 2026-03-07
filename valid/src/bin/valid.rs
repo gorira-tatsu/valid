@@ -448,7 +448,7 @@ fn cmd_testgen(args: Vec<String>) {
             }
             if parsed.json {
                 println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"generated_files\":[{}]}}",
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
                     response.schema_version,
                     response.request_id,
                     response.status,
@@ -456,6 +456,19 @@ fn cmd_testgen(args: Vec<String>) {
                         .vector_ids
                         .iter()
                         .map(|s| format!("\"{}\"", s))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    response
+                        .vectors
+                        .iter()
+                        .map(|vector| format!(
+                            "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            vector.vector_id,
+                            vector.strictness,
+                            vector.derivation,
+                            vector.source_kind,
+                            vector.strategy
+                        ))
                         .collect::<Vec<_>>()
                         .join(","),
                     response
@@ -467,6 +480,16 @@ fn cmd_testgen(args: Vec<String>) {
                 );
             } else {
                 println!("generated {} vector(s)", response.vector_ids.len());
+                for vector in &response.vectors {
+                    println!(
+                        "  {} strictness={} derivation={} source={} strategy={}",
+                        vector.vector_id,
+                        vector.strictness,
+                        vector.derivation,
+                        vector.source_kind,
+                        vector.strategy
+                    );
+                }
                 for path in &response.generated_files {
                     println!("  {path}");
                 }

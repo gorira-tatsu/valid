@@ -34,16 +34,25 @@ pub fn derive_valid_state(input: TokenStream) -> TokenStream {
             .map(|value| format!("Some({value:?})"))
             .unwrap_or_else(|| "None".to_string());
         let variants = if field.is_enum {
-            format!("Some(<{} as ::valid::modeling::FiniteValueSpec>::variant_labels().to_vec())", field.ty)
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteValueSpec>::variant_labels().to_vec())",
+                field.ty
+            )
+        } else if field.is_set {
+            format!(
+                "Some(<{} as ::valid::modeling::FiniteSetSpec>::variant_labels().to_vec())",
+                field.ty
+            )
         } else {
             "None".to_string()
         };
         descriptors.push_str(&format!(
-            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range}, variants: {variants} }}",
+            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range}, variants: {variants}, is_set: {is_set} }}",
             name = field.name,
             ty = field.ty,
             range = range,
-            variants = variants
+            variants = variants,
+            is_set = field.is_set
         ));
     }
     format!(
@@ -197,6 +206,7 @@ struct ParsedField {
     ty: String,
     range: Option<String>,
     is_enum: bool,
+    is_set: bool,
 }
 
 struct ParsedEnum {
@@ -426,6 +436,7 @@ fn parse_struct_field(tokens: Vec<TokenTree>) -> ParsedField {
         ty,
         range: attrs.get("range").cloned(),
         is_enum: attrs.contains_key("enum"),
+        is_set: attrs.contains_key("set"),
     }
 }
 
