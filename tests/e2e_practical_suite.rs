@@ -126,7 +126,7 @@ fn practical_suite_regression_model_fails_with_explainable_path() {
         .arg("--json")
         .output()
         .expect("check should run for regression model");
-    assert_eq!(check.status.code(), Some(2));
+    assert_eq!(check.status.code(), Some(1));
     let check_stdout = String::from_utf8_lossy(&check.stdout);
     assert!(check_stdout.contains("\"status\":\"FAIL\""));
     assert!(check_stdout.contains("\"property_id\":\"P_ACCESS_REQUIRES_INCIDENT\""));

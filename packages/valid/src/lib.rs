@@ -4,6 +4,7 @@ pub mod api;
 pub mod benchmark;
 #[doc(hidden)]
 pub mod bundled_models;
+pub mod cli;
 pub mod contract;
 pub mod coverage;
 pub mod engine;

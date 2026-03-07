@@ -1,10 +1,11 @@
-use std::process::Command;
 use std::{
     env, fs,
+    io::{self, Read},
     path::{Path, PathBuf},
-    process,
+    process::{self, Command},
 };
 
+use serde_json::{json, Value};
 use valid::{
     api::{
         check_source, explain_source, explicit_analysis_warning, inspect_source, lint_source,
@@ -19,9 +20,14 @@ use valid::{
         render_benchmark_text,
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
+    cli::{
+        child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
+        parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
+        render_commands_text, render_schema_json, usage_diagnostic, BatchResult, ExitCode,
+        ProgressReporter, Surface,
+    },
     coverage::{render_coverage_json, render_coverage_text},
-    engine::CheckOutcome,
-    evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
+    evidence::{render_outcome_json, render_outcome_text},
     project::{
         load_project_config, render_project_config_template, render_registry_source_template,
         ProjectConfig,
@@ -38,7 +44,15 @@ use valid::{
 };
 
 fn main() {
-    let parsed = maybe_auto_discover_external(parse_cli(env::args().skip(1).collect()));
+    let raw_args = env::args().skip(1).collect::<Vec<_>>();
+    let parsed = parse_cli(raw_args.clone());
+    match parsed.command.as_str() {
+        "commands" => cmd_commands(parsed.json),
+        "schema" => cmd_schema(&parsed),
+        "batch" => cmd_batch(&parsed),
+        _ => {}
+    }
+    let parsed = maybe_auto_discover_external(parsed);
     if parsed.command == "init" {
         cmd_init(&parsed);
     }
@@ -60,6 +74,7 @@ fn main() {
 
     let local_args = ParsedArgs {
         json: parsed.json,
+        progress_json: parsed.progress_json,
         model: parsed.model,
         repeat: parsed.repeat,
         baseline_mode: parsed.baseline_mode,
@@ -101,7 +116,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -122,13 +137,18 @@ fn run_external_registry(parsed: CliArgs) -> ! {
     let status = build_external_command(&parsed)
         .status()
         .unwrap_or_else(|err| {
-            eprintln!("failed to execute target registry: {err}");
-            process::exit(3);
+            message_exit(
+                &parsed.command,
+                parsed.json,
+                &format!("failed to execute target registry: {err}"),
+                None,
+            );
         });
-    process::exit(status.code().unwrap_or(1));
+    process::exit(to_exit_code(status.code().unwrap_or(ExitCode::Error.code())).code());
 }
 
 fn run_external_benchmark(parsed: CliArgs) -> ! {
+    let progress = ProgressReporter::new("benchmark", parsed.progress_json);
     let models = if parsed.benchmark_models.is_empty() {
         if parsed.suite_models.is_empty() {
             fetch_external_models(&parsed)
@@ -138,10 +158,13 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
     } else {
         parsed.benchmark_models.clone()
     };
-    let mut aggregate_status = 0;
+    let total = models.len();
+    let mut aggregate_status = ExitCode::Success;
     let mut json_runs = Vec::new();
+    progress.start(Some(total));
 
-    for model in models {
+    for (index, model) in models.into_iter().enumerate() {
+        progress.item_start(index, total, &model);
         let output = build_external_command(&CliArgs {
             command: "benchmark".to_string(),
             model: Some(model.clone()),
@@ -158,6 +181,7 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             actions: Vec::new(),
             focus_action_id: None,
             json: parsed.json,
+            progress_json: false,
             manifest_path: parsed.manifest_path.clone(),
             example: parsed.example.clone(),
             bin: parsed.bin.clone(),
@@ -169,13 +193,17 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
         })
         .output()
         .unwrap_or_else(|err| {
-            eprintln!("failed to execute target registry: {err}");
-            process::exit(3);
+            message_exit(
+                "benchmark",
+                parsed.json,
+                &format!("failed to execute target registry: {err}"),
+                None,
+            );
         });
-        let code = output.status.code().unwrap_or(1);
-        aggregate_status = aggregate_exit_code(aggregate_status, code);
+        let code = to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code()));
+        aggregate_status = aggregate_status.aggregate(code);
         if parsed.json {
-            json_runs.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
+            json_runs.push(preferred_child_json(&output));
         } else {
             println!("== {model} ==");
             print!("{}", String::from_utf8_lossy(&output.stdout));
@@ -184,33 +212,38 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
                 eprint!("{stderr}");
             }
         }
+        progress.item_complete(index, total, &model, code.code());
     }
 
     if parsed.json {
-        let body = format!("{{\"runs\":[{}]}}", json_runs.join(","));
-        if let Some(path) = write_benchmark_artifact("project-benchmark-suite", &body) {
-            println!(
-                "{{\"artifact_path\":\"{}\",\"runs\":[{}]}}",
-                path.replace('\\', "\\\\"),
-                json_runs.join(",")
-            );
-        } else {
-            println!("{body}");
+        let mut body = json!({ "runs": json_runs });
+        let body_string = serde_json::to_string(&body).expect("benchmark suite json");
+        if let Some(path) = write_benchmark_artifact("project-benchmark-suite", &body_string) {
+            body["artifact_path"] = Value::String(path);
         }
+        println!(
+            "{}",
+            serde_json::to_string(&body).expect("benchmark suite output")
+        );
     }
-    process::exit(aggregate_status);
+    progress.finish(aggregate_status);
+    process::exit(aggregate_status.code());
 }
 
 fn run_external_all(parsed: CliArgs) -> ! {
+    let progress = ProgressReporter::new("all", parsed.progress_json);
     let models = if parsed.suite_models.is_empty() {
         fetch_external_models(&parsed)
     } else {
         parsed.suite_models.clone()
     };
-    let mut aggregate_status = 0;
+    let total = models.len();
+    let mut aggregate_status = ExitCode::Success;
     let mut json_runs = Vec::new();
+    progress.start(Some(total));
 
-    for model in models {
+    for (index, model) in models.into_iter().enumerate() {
+        progress.item_start(index, total, &model);
         let mut command = build_external_command(&CliArgs {
             command: "check".to_string(),
             model: Some(model.clone()),
@@ -220,13 +253,14 @@ fn run_external_all(parsed: CliArgs) -> ! {
             strategy: None,
             format: parsed.format.clone(),
             view: parsed.view.clone(),
-            property_id: None,
+            property_id: parsed.property_id.clone(),
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
             solver_args: parsed.solver_args.clone(),
             actions: Vec::new(),
             focus_action_id: None,
             json: parsed.json,
+            progress_json: false,
             manifest_path: parsed.manifest_path.clone(),
             example: parsed.example.clone(),
             bin: parsed.bin.clone(),
@@ -237,14 +271,17 @@ fn run_external_all(parsed: CliArgs) -> ! {
             check: false,
         });
         let output = command.output().unwrap_or_else(|err| {
-            eprintln!("failed to execute target registry: {err}");
-            process::exit(3);
+            message_exit(
+                "all",
+                parsed.json,
+                &format!("failed to execute target registry: {err}"),
+                None,
+            );
         });
-        let code = output.status.code().unwrap_or(1);
-        aggregate_status = aggregate_exit_code(aggregate_status, code);
+        let code = to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code()));
+        aggregate_status = aggregate_status.aggregate(code);
         if parsed.json {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            json_runs.push(stdout);
+            json_runs.push(preferred_child_json(&output));
         } else {
             println!("== {model} ==");
             print!("{}", String::from_utf8_lossy(&output.stdout));
@@ -253,12 +290,17 @@ fn run_external_all(parsed: CliArgs) -> ! {
                 eprint!("{stderr}");
             }
         }
+        progress.item_complete(index, total, &model, code.code());
     }
 
     if parsed.json {
-        println!("{{\"runs\":[{}]}}", json_runs.join(","));
+        println!(
+            "{}",
+            serde_json::to_string(&json!({ "runs": json_runs })).expect("suite json")
+        );
     }
-    process::exit(aggregate_status);
+    progress.finish(aggregate_status);
+    process::exit(aggregate_status.code());
 }
 
 fn build_external_command(parsed: &CliArgs) -> Command {
@@ -337,6 +379,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if parsed.json {
         command.arg("--json");
     }
+    if parsed.progress_json {
+        command.arg("--progress=json");
+    }
     command
 }
 
@@ -357,6 +402,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         actions: Vec::new(),
         focus_action_id: None,
         json: true,
+        progress_json: false,
         manifest_path: parsed.manifest_path.clone(),
         example: parsed.example.clone(),
         bin: parsed.bin.clone(),
@@ -368,17 +414,22 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
     })
     .output()
     .unwrap_or_else(|err| {
-        eprintln!("failed to execute target registry: {err}");
-        process::exit(3);
+        message_exit(
+            "list",
+            true,
+            &format!("failed to execute target registry: {err}"),
+            None,
+        );
     });
     if !output.status.success() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
-        process::exit(output.status.code().unwrap_or(3));
+        process::exit(to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code())).code());
     }
     parse_models_json(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn cmd_all(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("all", parsed.progress_json);
     let models = if parsed.suite_models.is_empty() {
         list_bundled_models()
     } else {
@@ -388,10 +439,13 @@ fn cmd_all(parsed: ParsedArgs) {
             .map(String::as_str)
             .collect::<Vec<_>>()
     };
-    let mut aggregate_status = 0;
+    let total = models.len();
+    let mut aggregate_status = ExitCode::Success;
     let mut json_runs = Vec::new();
+    progress.start(Some(total));
 
-    for model in models {
+    for (index, model) in models.into_iter().enumerate() {
+        progress.item_start(index, total, model);
         let request = CheckRequest {
             request_id: format!("cargo-valid-check-{model}"),
             source_name: normalized_model_ref(model),
@@ -402,20 +456,22 @@ fn cmd_all(parsed: ParsedArgs) {
             solver_args: parsed.solver_args.clone(),
         };
         let outcome = check_source(&request);
-        let exit_code = outcome_exit_code(&outcome);
-        aggregate_status = aggregate_exit_code(aggregate_status, exit_code);
+        let exit_code = ExitCode::from_check_outcome(&outcome);
+        aggregate_status = aggregate_status.aggregate(exit_code);
         if parsed.json {
             json_runs.push(render_outcome_json(model, &outcome));
         } else {
             println!("== {model} ==");
             print!("{}", render_outcome_text(&outcome));
         }
+        progress.item_complete(index, total, model, exit_code.code());
     }
 
     if parsed.json {
         println!("{{\"runs\":[{}]}}", json_runs.join(","));
     }
-    process::exit(aggregate_status);
+    progress.finish(aggregate_status);
+    process::exit(aggregate_status.code());
 }
 
 fn cmd_list(parsed: ParsedArgs) {
@@ -437,6 +493,8 @@ fn cmd_list(parsed: ParsedArgs) {
 }
 
 fn cmd_inspect(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("inspect", parsed.progress_json);
+    progress.start(None);
     let model = parsed
         .model
         .unwrap_or_else(|| usage_exit("usage: cargo valid inspect <model> [--json]"));
@@ -452,21 +510,15 @@ fn cmd_inspect(parsed: ParsedArgs) {
             } else {
                 print!("{}", render_inspect_text(&response));
             }
+            progress.finish(ExitCode::Success);
         }
-        Err(diagnostics) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                for diagnostic in diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(diagnostics) => diagnostics_exit("inspect", parsed.json, &diagnostics),
     }
 }
 
 fn cmd_graph(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("graph", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| {
         usage_exit(
             "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
@@ -483,6 +535,7 @@ fn cmd_graph(parsed: ParsedArgs) {
         .as_deref()
         .or(env_default_format.as_deref())
         .unwrap_or("mermaid");
+    let json_output = parsed.json || default_format == "json";
     let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
         Ok(response) => match default_format {
@@ -492,20 +545,14 @@ fn cmd_graph(parsed: ParsedArgs) {
             "svg" => println!("{}", render_model_svg_with_view(&response, view)),
             _ => println!("{}", render_model_mermaid_with_view(&response, view)),
         },
-        Err(diagnostics) => {
-            if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                for diagnostic in diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics),
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_lint(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("lint", parsed.progress_json);
+    progress.start(None);
     let model = parsed
         .model
         .unwrap_or_else(|| usage_exit("usage: cargo valid lint <model> [--json]"));
@@ -525,22 +572,21 @@ fn cmd_lint(parsed: ParsedArgs) {
                 .findings
                 .iter()
                 .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
-            process::exit(if has_findings { 2 } else { 0 });
-        }
-        Err(diagnostics) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&diagnostics));
+            let exit_code = if has_findings {
+                ExitCode::Fail
             } else {
-                for diagnostic in diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
+                ExitCode::Success
+            };
+            progress.finish(exit_code);
+            process::exit(exit_code.code());
         }
+        Err(diagnostics) => diagnostics_exit("lint", parsed.json, &diagnostics),
     }
 }
 
 fn cmd_benchmark(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("benchmark", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| {
         usage_exit("usage: cargo valid benchmark <model> [--json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>]")
     });
@@ -612,27 +658,28 @@ fn cmd_benchmark(parsed: ParsedArgs) {
     }
     let exit_code = if baseline_mode == "ignore" {
         if summary.error_count > 0 {
-            3
-        } else if summary.fail_count > 0 {
-            2
+            ExitCode::Error
+        } else if summary.fail_count > 0 || regression_detected {
+            ExitCode::Fail
         } else if summary.unknown_count > 0 {
-            4
-        } else if regression_detected {
-            5
+            ExitCode::Unknown
         } else {
-            0
+            ExitCode::Success
         }
     } else if summary.error_count > 0 {
-        3
+        ExitCode::Error
     } else if regression_detected {
-        5
+        ExitCode::Fail
     } else {
-        0
+        ExitCode::Success
     };
-    process::exit(exit_code);
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_migrate(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("migrate", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| {
         usage_exit("usage: cargo valid migrate <model> [--json] [--write[=<path>]] [--check]")
     });
@@ -670,32 +717,26 @@ fn cmd_migrate(parsed: ParsedArgs) {
             }
             let exit_code = if parsed.check {
                 match migration.check.as_ref().map(|check| check.status.as_str()) {
-                    Some("already-declarative") => 0,
-                    Some("no-candidates") => 2,
-                    Some("candidate-complete") | Some("partial") => 6,
-                    _ => 3,
+                    Some("already-declarative") => ExitCode::Success,
+                    Some("no-candidates") => ExitCode::Unknown,
+                    Some("candidate-complete") | Some("partial") => ExitCode::Fail,
+                    _ => ExitCode::Error,
                 }
             } else if migration.snippets.is_empty() {
-                2
+                ExitCode::Unknown
             } else {
-                0
+                ExitCode::Success
             };
-            process::exit(exit_code);
+            progress.finish(exit_code);
+            process::exit(exit_code.code());
         }
-        Err(diagnostics) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                for diagnostic in diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(diagnostics) => diagnostics_exit("migrate", parsed.json, &diagnostics),
     }
 }
 
 fn cmd_check(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("check", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let inspect_request = InspectRequest {
         request_id: "cargo-valid-check-preflight".to_string(),
@@ -705,7 +746,11 @@ fn cmd_check(parsed: ParsedArgs) {
     if matches!(parsed.backend.as_deref(), None | Some("explicit")) {
         if let Ok(inspect) = inspect_source(&inspect_request) {
             if let Some(warning) = explicit_analysis_warning(&inspect) {
-                eprintln!("{warning}");
+                if parsed.json {
+                    eprintln!("{}", valid::cli::render_cli_warning_json("check", &warning));
+                } else {
+                    eprintln!("{warning}");
+                }
             }
         }
     }
@@ -724,17 +769,14 @@ fn cmd_check(parsed: ParsedArgs) {
     } else {
         print!("{}", render_outcome_text(&outcome));
     }
-    process::exit(match outcome {
-        CheckOutcome::Completed(result) => match result.status {
-            valid::engine::RunStatus::Pass => 0,
-            valid::engine::RunStatus::Fail => 2,
-            valid::engine::RunStatus::Unknown => 4,
-        },
-        CheckOutcome::Errored(_) => 3,
-    });
+    let exit_code = ExitCode::from_check_outcome(&outcome);
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_explain(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("explain", parsed.progress_json);
+    progress.start(None);
     let model = parsed
         .model
         .unwrap_or_else(|| usage_exit("usage: cargo valid explain <model> [--json]"));
@@ -754,36 +796,31 @@ fn cmd_explain(parsed: ParsedArgs) {
             } else {
                 print!("{}", render_explain_text(&response));
             }
+            progress.finish(ExitCode::Success);
         }
-        Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                for diagnostic in error.diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(error) => diagnostics_exit("explain", parsed.json, &error.diagnostics),
     }
 }
 
 fn cmd_coverage(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("coverage", parsed.progress_json);
+    progress.start(None);
     let model = parsed
         .model
         .unwrap_or_else(|| usage_exit("usage: cargo valid coverage <model> [--json]"));
-    let report = coverage_bundled_model(&normalized_model_ref(&model)).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    let report = coverage_bundled_model(&normalized_model_ref(&model))
+        .unwrap_or_else(|message| message_exit("coverage", parsed.json, &message, None));
     if parsed.json {
         println!("{}", render_coverage_json(&report));
     } else {
         println!("{}", render_coverage_text(&report));
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_orchestrate(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid orchestrate <model> [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let request = OrchestrateRequest {
         request_id: "cargo-valid-orchestrate".to_string(),
@@ -821,21 +858,15 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
                     println!("property_id: {} status: {}", run.property_id, run.status);
                 }
             }
+            progress.finish(ExitCode::Success);
         }
-        Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                for diagnostic in error.diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(error) => diagnostics_exit("orchestrate", parsed.json, &error.diagnostics),
     }
 }
 
 fn cmd_testgen(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("testgen", parsed.progress_json);
+    progress.start(None);
     let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"));
     let request = TestgenRequest {
         request_id: "cargo-valid-testgen".to_string(),
@@ -890,21 +921,15 @@ fn cmd_testgen(parsed: ParsedArgs) {
                     }
                 }
             }
+            progress.finish(ExitCode::Success);
         }
-        Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                for diagnostic in error.diagnostics {
-                    eprintln!("{}", diagnostic.message);
-                }
-            }
-            process::exit(3);
-        }
+        Err(error) => diagnostics_exit("testgen", parsed.json, &error.diagnostics),
     }
 }
 
 fn cmd_replay(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("replay", parsed.progress_json);
+    progress.start(None);
     let model = parsed
         .model
         .unwrap_or_else(|| usage_exit("usage: cargo valid replay <model> [--json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]"));
@@ -914,14 +939,14 @@ fn cmd_replay(parsed: ParsedArgs) {
         &parsed.actions,
         parsed.focus_action_id.as_deref(),
     )
-    .unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    .unwrap_or_else(|message| message_exit("replay", parsed.json, &message, None));
     println!("{output}");
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_clean(parsed: &CliArgs) -> ! {
+    let progress = ProgressReporter::new("clean", parsed.progress_json);
+    progress.start(None);
     let scope = parsed.model.as_deref().unwrap_or("all");
     let root = clean_root(parsed);
     let mut removed = Vec::new();
@@ -937,7 +962,7 @@ fn cmd_clean(parsed: &CliArgs) -> ! {
             removed.extend(clean_artifacts(&root));
         }
         other => usage_exit(&format!(
-            "usage: cargo valid clean [generated|artifacts|all] [--json]\nunknown clean scope `{other}`"
+            "usage: cargo valid clean [generated|artifacts|all] [--json] [--progress=json]\nunknown clean scope `{other}`"
         )),
     }
     if parsed.json {
@@ -960,12 +985,14 @@ fn cmd_clean(parsed: &CliArgs) -> ! {
             }
         }
     }
-    process::exit(0);
+    progress.finish(ExitCode::Success);
+    process::exit(ExitCode::Success.code());
 }
 
 #[derive(Default)]
 struct ParsedArgs {
     json: bool,
+    progress_json: bool,
     model: Option<String>,
     repeat: usize,
     baseline_mode: Option<String>,
@@ -1005,6 +1032,7 @@ struct CliArgs {
     actions: Vec<String>,
     focus_action_id: Option<String>,
     json: bool,
+    progress_json: bool,
     suite_models: Vec<String>,
     benchmark_models: Vec<String>,
     write_path: Option<String>,
@@ -1013,6 +1041,8 @@ struct CliArgs {
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
     let mut parsed = CliArgs::default();
+    parsed.json = detect_json_flag(&args);
+    parsed.progress_json = detect_progress_json_flag(&args);
     let normalized_args = if matches!(args.first().map(String::as_str), Some("valid")) {
         args.into_iter().skip(1).collect::<Vec<_>>()
     } else {
@@ -1033,6 +1063,8 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             "--solver-arg" => parsed.solver_args.push(next_arg(&mut iter, "--solver-arg")),
             "--json" => parsed.json = true,
+            "--progress=json" => parsed.progress_json = true,
+            _ if arg.starts_with("--progress=") => usage_exit("`--progress` only supports `json`"),
             "--check" => parsed.check = true,
             "--write" => parsed.write_path = Some(String::new()),
             _ if arg.starts_with("--write=") => {
@@ -1132,7 +1164,10 @@ struct ExternalTarget {
 }
 
 fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
-    if matches!(parsed.command.as_str(), "clean" | "init" | "help") {
+    if matches!(
+        parsed.command.as_str(),
+        "clean" | "init" | "help" | "commands" | "schema" | "batch"
+    ) {
         return parsed;
     }
     let current_dir = project_root(&parsed);
@@ -1194,8 +1229,7 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
         }
         Ok(None) => {}
         Err(message) => {
-            eprintln!("{message}");
-            process::exit(3);
+            message_exit("cargo-valid", parsed.json, &message, None);
         }
     }
     if parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some() {
@@ -1316,30 +1350,199 @@ fn parse_models_json(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-fn outcome_exit_code(outcome: &CheckOutcome) -> i32 {
-    match outcome {
-        CheckOutcome::Completed(result) => match result.status {
-            valid::engine::RunStatus::Pass => 0,
-            valid::engine::RunStatus::Fail => 2,
-            valid::engine::RunStatus::Unknown => 4,
-        },
-        CheckOutcome::Errored(_) => 3,
-    }
-}
-
-fn aggregate_exit_code(current: i32, next: i32) -> i32 {
-    match (current, next) {
-        (3, _) | (_, 3) => 3,
-        (2, _) | (_, 2) => 2,
-        (4, _) | (_, 4) => 4,
-        (5, _) | (_, 5) => 5,
-        _ => 0,
-    }
-}
-
 fn usage_exit(usage: &str) -> ! {
-    eprintln!("{usage}");
-    process::exit(3);
+    if detect_json_flag(&env::args().skip(1).collect::<Vec<_>>()) {
+        eprintln!(
+            "{}",
+            render_cli_error_json(
+                "cargo-valid",
+                &[usage_diagnostic("invalid command arguments", usage)],
+                Some(usage),
+            )
+        );
+    } else {
+        eprintln!("{usage}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn to_exit_code(code: i32) -> ExitCode {
+    match code {
+        0 => ExitCode::Success,
+        1 => ExitCode::Fail,
+        2 => ExitCode::Unknown,
+        4 => ExitCode::Unknown,
+        5 | 6 => ExitCode::Fail,
+        _ => ExitCode::Error,
+    }
+}
+
+fn preferred_child_json(output: &process::Output) -> Value {
+    if !String::from_utf8_lossy(&output.stdout).trim().is_empty() {
+        child_stream_to_json(&output.stdout)
+    } else {
+        child_stream_to_json(&output.stderr)
+    }
+}
+
+fn message_exit(command: &str, json: bool, message: &str, usage: Option<&str>) -> ! {
+    if json {
+        eprintln!(
+            "{}",
+            render_cli_error_json(command, &[message_diagnostic(message)], usage)
+        );
+    } else {
+        if let Some(usage) = usage {
+            eprintln!("{usage}");
+        }
+        eprintln!("{message}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn diagnostics_exit(
+    command: &str,
+    json: bool,
+    diagnostics: &[valid::support::diagnostics::Diagnostic],
+) -> ! {
+    if json {
+        eprintln!("{}", render_cli_error_json(command, diagnostics, None));
+    } else {
+        for diagnostic in diagnostics {
+            eprintln!("{}", diagnostic.message);
+        }
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn cmd_commands(json: bool) {
+    if json {
+        println!("{}", render_commands_json(Surface::CargoValid));
+    } else {
+        println!("{}", render_commands_text(Surface::CargoValid));
+    }
+    process::exit(ExitCode::Success.code());
+}
+
+fn cmd_schema(parsed: &CliArgs) -> ! {
+    let command = parsed.model.as_deref().unwrap_or_else(|| {
+        message_exit(
+            "schema",
+            true,
+            "missing command name",
+            Some("usage: cargo valid schema <command>"),
+        )
+    });
+    match render_schema_json(Surface::CargoValid, &normalize_command(command)) {
+        Ok(body) => println!("{body}"),
+        Err(message) => message_exit(
+            "schema",
+            true,
+            &message,
+            Some("usage: cargo valid schema <command>"),
+        ),
+    }
+    process::exit(ExitCode::Success.code());
+}
+
+fn cmd_batch(parsed: &CliArgs) -> ! {
+    let progress = ProgressReporter::new("batch", parsed.progress_json);
+    let mut stdin = String::new();
+    io::stdin()
+        .read_to_string(&mut stdin)
+        .unwrap_or_else(|err| {
+            message_exit(
+                "batch",
+                parsed.json,
+                &format!("failed to read stdin: {err}"),
+                None,
+            )
+        });
+    let request = parse_batch_request(&stdin).unwrap_or_else(|message| {
+        message_exit(
+            "batch",
+            true,
+            &message,
+            Some("usage: cargo valid batch [--json] [--progress=json] < batch.json"),
+        )
+    });
+    let total = request.operations.len();
+    progress.start(Some(total));
+    let current_exe = env::current_exe().unwrap_or_else(|err| {
+        message_exit(
+            "batch",
+            parsed.json,
+            &format!("failed to resolve current executable: {err}"),
+            None,
+        )
+    });
+    let mut aggregate = ExitCode::Success;
+    let mut results = Vec::new();
+    for (index, operation) in request.operations.into_iter().enumerate() {
+        progress.item_start(index, total, &operation.command);
+        let mut command_args = Vec::new();
+        if let Some(manifest_path) = &parsed.manifest_path {
+            command_args.push("--manifest-path".to_string());
+            command_args.push(manifest_path.clone());
+        }
+        if let Some(file) = &parsed.file {
+            command_args.push("--file".to_string());
+            command_args.push(file.clone());
+        }
+        if let Some(example) = &parsed.example {
+            command_args.push("--example".to_string());
+            command_args.push(example.clone());
+        }
+        if let Some(bin) = &parsed.bin {
+            command_args.push("--bin".to_string());
+            command_args.push(bin.clone());
+        }
+        command_args.push(operation.command.clone());
+        let mut operation_args = operation.args.clone();
+        if operation.json
+            && !operation_args
+                .iter()
+                .any(|arg| arg == "--json" || arg.starts_with("--format="))
+        {
+            if operation.command == "graph" {
+                operation_args.push("--format=json".to_string());
+            } else {
+                operation_args.push("--json".to_string());
+            }
+        }
+        command_args.extend(operation_args.clone());
+        let output = Command::new(&current_exe)
+            .args(&command_args)
+            .output()
+            .unwrap_or_else(|err| {
+                message_exit(
+                    "batch",
+                    true,
+                    &format!(
+                        "failed to execute batch operation `{}`: {err}",
+                        operation.command
+                    ),
+                    None,
+                )
+            });
+        let exit_code = output.status.code().unwrap_or(ExitCode::Error.code());
+        aggregate = aggregate.aggregate(to_exit_code(exit_code));
+        results.push(BatchResult {
+            index,
+            command: operation.command.clone(),
+            args: operation_args,
+            exit_code,
+            stdout: child_stream_to_json(&output.stdout),
+            stderr: child_stream_to_json(&output.stderr),
+        });
+        progress.item_complete(index, total, &operation.command, exit_code);
+        if exit_code != 0 && !request.continue_on_error {
+            break;
+        }
+    }
+    progress.finish(aggregate);
+    println!("{}", render_batch_response(aggregate, results));
+    process::exit(aggregate.code());
 }
 
 fn clean_root(parsed: &CliArgs) -> PathBuf {
@@ -1347,47 +1550,77 @@ fn clean_root(parsed: &CliArgs) -> PathBuf {
 }
 
 fn cmd_init(parsed: &CliArgs) -> ! {
+    let progress = ProgressReporter::new("init", parsed.progress_json);
+    progress.start(None);
     let root = project_root(parsed);
     let cargo_toml = root.join("Cargo.toml");
     if !cargo_toml.exists() {
-        eprintln!("expected Cargo.toml in {}", root.display());
-        process::exit(3);
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("expected Cargo.toml in {}", root.display()),
+            None,
+        );
     }
     let config_path = root.join("valid.toml");
     if config_path.exists() {
-        eprintln!("`{}` already exists", config_path.display());
-        process::exit(3);
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("`{}` already exists", config_path.display()),
+            None,
+        );
     }
     let registry = parsed.file.as_deref().unwrap_or("examples/valid_models.rs");
     let body = render_project_config_template(registry);
     let registry_path = root.join(registry);
     if let Some(parent) = registry_path.parent() {
         fs::create_dir_all(parent).unwrap_or_else(|err| {
-            eprintln!("failed to create `{}`: {err}", parent.display());
-            process::exit(3);
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to create `{}`: {err}", parent.display()),
+                None,
+            )
         });
     }
     if !registry_path.exists() {
         fs::write(&registry_path, render_registry_source_template()).unwrap_or_else(|err| {
-            eprintln!("failed to write `{}`: {err}", registry_path.display());
-            process::exit(3);
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", registry_path.display()),
+                None,
+            )
         });
     }
     let generated_dir = root.join("generated-tests");
     fs::create_dir_all(&generated_dir).unwrap_or_else(|err| {
-        eprintln!("failed to create `{}`: {err}", generated_dir.display());
-        process::exit(3);
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", generated_dir.display()),
+            None,
+        )
     });
     let gitkeep = generated_dir.join(".gitkeep");
     if !gitkeep.exists() {
         fs::write(&gitkeep, "").unwrap_or_else(|err| {
-            eprintln!("failed to write `{}`: {err}", gitkeep.display());
-            process::exit(3);
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", gitkeep.display()),
+                None,
+            )
         });
     }
     fs::write(&config_path, body).unwrap_or_else(|err| {
-        eprintln!("failed to write `{}`: {err}", config_path.display());
-        process::exit(3);
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", config_path.display()),
+            None,
+        )
     });
     if parsed.json {
         println!(
@@ -1403,7 +1636,8 @@ fn cmd_init(parsed: &CliArgs) -> ! {
         println!("scaffolded_registry: {}", registry_path.display());
         println!("generated_tests_dir: {}", generated_dir.display());
     }
-    process::exit(0);
+    progress.finish(ExitCode::Success);
+    process::exit(ExitCode::Success.code());
 }
 
 fn clean_generated_tests(root: &Path) -> Vec<String> {
