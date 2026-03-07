@@ -472,6 +472,7 @@ fn coverage_selfcheck_trace() -> EvidenceTrace {
                 depth: 1,
                 state_before: selfcheck_state_snapshot(0),
                 state_after: selfcheck_state_snapshot(1),
+                path: None,
                 note: None,
             },
             TraceStep {
@@ -483,6 +484,7 @@ fn coverage_selfcheck_trace() -> EvidenceTrace {
                 depth: 2,
                 state_before: selfcheck_state_snapshot(1),
                 state_after: selfcheck_state_snapshot(2),
+                path: None,
                 note: None,
             },
             TraceStep {
@@ -494,6 +496,7 @@ fn coverage_selfcheck_trace() -> EvidenceTrace {
                 depth: 3,
                 state_before: selfcheck_state_snapshot(2),
                 state_after: selfcheck_state_snapshot(0),
+                path: None,
                 note: None,
             },
         ],

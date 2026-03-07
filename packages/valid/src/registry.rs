@@ -715,8 +715,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         .into_iter()
         .map(|property| InspectProperty {
             property_id: property.property_id.to_string(),
-            kind: property.property_kind.to_string(),
-kind: crate::api::property_kind_label(&property.property_kind).to_string(),
+            kind: crate::api::property_kind_label(&property.property_kind).to_string(),
             expr: property.expr.map(str::to_string),
         })
         .collect::<Vec<_>>();

@@ -125,9 +125,6 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
 
         let node = nodes[node_index].clone();
         if property_triggered(model, &node.state, property)? {
-if matches!(property.kind, PropertyKind::Invariant)
-            && !property_holds(model, &node.state, property)?
-        {
             return Ok(fail_result(model, plan, property, &nodes, node_index));
         }
 
@@ -169,11 +166,7 @@ if matches!(property.kind, PropertyKind::Invariant)
             }
         }
 
-        if plan.detect_deadlocks && enabled == 0 && property.kind == PropertyKind::Invariant {
-if matches!(property.kind, PropertyKind::DeadlockFreedom)
-            && plan.detect_deadlocks
-            && enabled == 0
-        {
+        if matches!(property.kind, PropertyKind::DeadlockFreedom) && enabled == 0 {
             return Ok(deadlock_result(model, plan, property, &nodes, node_index));
         }
     }
@@ -198,17 +191,6 @@ if matches!(property.kind, PropertyKind::DeadlockFreedom)
             terminal_state_id: None,
             evidence_id: None,
             summary: pass_summary(property, assurance),
-summary: match property.kind {
-                PropertyKind::Invariant => {
-                    if assurance == AssuranceLevel::Bounded {
-                    }
-                }
-                PropertyKind::DeadlockFreedom => {
-                    if assurance == AssuranceLevel::Bounded {
-                        "no deadlock state found within the configured depth bound".to_string()
-                        "no deadlock state found in the reachable state space".to_string()
-                    }
-                }
         },
         explored_states: visited.len(),
         explored_transitions,
@@ -248,6 +230,7 @@ fn property_triggered(
     Ok(match property.kind {
         PropertyKind::Invariant => !value,
         PropertyKind::Reachability => value,
+        PropertyKind::DeadlockFreedom => false,
     })
 }
 
@@ -267,7 +250,6 @@ fn property_value(
             ),
         )
         .with_help("keep lowered properties boolean regardless of property kind")),
-        PropertyKind::DeadlockFreedom => Ok(true),
     }
 }
 
@@ -381,8 +363,6 @@ fn unknown_result(
                 .as_ref()
                 .map(|property| property.kind)
                 .unwrap_or(PropertyKind::Invariant),
-            property_kind: selected_property(model, plan)
-                .map(|p| p.kind.clone())
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
             reason_code: None,
@@ -506,6 +486,7 @@ fn property_evidence_kind(kind: PropertyKind) -> EvidenceKind {
     match kind {
         PropertyKind::Invariant => EvidenceKind::Counterexample,
         PropertyKind::Reachability => EvidenceKind::Witness,
+        PropertyKind::DeadlockFreedom => EvidenceKind::Counterexample,
     }
 }
 
@@ -513,6 +494,7 @@ fn fail_reason_code(kind: PropertyKind) -> &'static str {
     match kind {
         PropertyKind::Invariant => "PROPERTY_FAILED",
         PropertyKind::Reachability => "TARGET_REACHED",
+        PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED",
     }
 }
 
@@ -522,6 +504,8 @@ fn pass_reason_code(kind: PropertyKind, assurance: AssuranceLevel) -> &'static s
         (PropertyKind::Invariant, _) => "COMPLETE_SPACE_EXHAUSTED",
         (PropertyKind::Reachability, AssuranceLevel::Bounded) => "TARGET_NOT_REACHED_WITHIN_BOUND",
         (PropertyKind::Reachability, _) => "TARGET_UNREACHABLE",
+        (PropertyKind::DeadlockFreedom, AssuranceLevel::Bounded) => "BOUNDED_SPACE_EXHAUSTED",
+        (PropertyKind::DeadlockFreedom, _) => "COMPLETE_SPACE_EXHAUSTED",
     }
 }
 
@@ -533,6 +517,10 @@ fn fail_summary(property: &PropertyIr) -> String {
         ),
         PropertyKind::Reachability => format!(
             "reachability target for `{}` was reached during explicit exploration",
+            property.property_id
+        ),
+        PropertyKind::DeadlockFreedom => format!(
+            "deadlock found for `{}` during explicit exploration",
             property.property_id
         ),
     }
@@ -552,6 +540,12 @@ fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
         (PropertyKind::Reachability, _) => {
             "reachability target was not found in the reachable state space".to_string()
         }
+        (PropertyKind::DeadlockFreedom, AssuranceLevel::Bounded) => {
+            "no deadlock state found within the configured depth bound".to_string()
+        }
+        (PropertyKind::DeadlockFreedom, _) => {
+            "no deadlock state found in the reachable state space".to_string()
+        }
     }
 }
 
@@ -559,6 +553,7 @@ fn fail_note(kind: PropertyKind) -> &'static str {
     match kind {
         PropertyKind::Invariant => "property violated",
         PropertyKind::Reachability => "reachability target reached",
+        PropertyKind::DeadlockFreedom => "deadlock reached",
     }
 }
 

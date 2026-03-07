@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["verification-runtime"]
 verification-runtime = []
 varisat-backend = ["verification-runtime", "dep:varisat"]
 
@@ -28,6 +28,7 @@ required-features = ["verification-runtime"]
 [[bin]]
 name = "valid-mcp"
 path = "packages/valid/src/bin/valid-mcp.rs"
+required-features = ["verification-runtime"]
 
 [[example]]
 name = "practical_use_cases_registry"

@@ -30,9 +30,7 @@ use crate::{
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::{
         build_path_from_parts, decision_path_tags as ir_decision_path_tags,
-        infer_decision_path_tags as ir_infer_decision_path_tags, ActionIr, BinaryOp, ExprIr,
-        FieldType, InitAssignment, ModelIr, Path, PropertyIr, SourceSpan, StateField, UnaryOp,
-        UpdateIr, Value,
+        infer_decision_path_tags as ir_infer_decision_path_tags, Path,
     },
     solver::{
         backend_version_for_config as solver_backend_version_for_config, run_with_adapter,
@@ -1104,6 +1102,9 @@ fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment
             &mut codes,
             &mut unsupported_features,
         );
+        if matches!(property.kind, crate::ir::PropertyKind::DeadlockFreedom) {
+            codes.insert("deadlock_freedom_requires_explicit_backend".to_string());
+        }
     }
     let codes = codes.into_iter().collect::<Vec<_>>();
     if codes.is_empty() {
@@ -1117,8 +1118,6 @@ fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment
                 unsupported_features.into_iter().collect(),
             ),
         }
-if matches!(property.kind, crate::ir::PropertyKind::DeadlockFreedom) {
-            reasons.insert("deadlock_freedom_requires_explicit_backend".to_string());
     }
 }
 
@@ -1378,7 +1377,6 @@ pub fn machine_transition_path_for_action<M: ModelSpec>(
         ));
     }
     path
-#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 }
 
 #[doc(hidden)]
@@ -1778,8 +1776,6 @@ macro_rules! valid_model {
         init [$($init_state:expr),* $(,)?];
         transitions {
             $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:tt)+];)+
-            $($property_tokens:tt)+
-                $($property_tokens)+
         }
         properties {
             $($property_tokens:tt)+
@@ -1871,7 +1867,6 @@ macro_rules! valid_model {
             writes: descriptor.writes,
             path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
             updates: &[
-            $($property_tokens:tt)+
                 $(
                     $crate::modeling::TransitionUpdateDescriptor {
                         field: stringify!($field),
@@ -1879,9 +1874,6 @@ macro_rules! valid_model {
                     }
                 ),*
             ],
-                let mut properties = Vec::new();
-                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
-                properties
         }
     }};
     (
@@ -2995,7 +2987,8 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
         .into_iter()
         .map(|property| {
             let expr = match property.property_kind {
-                crate::ir::PropertyKind::Invariant => property
+                crate::ir::PropertyKind::Invariant
+                | crate::ir::PropertyKind::Reachability => property
                     .expr
                     .and_then(|expr| lower_machine_expr_with_enums(expr, &enum_literals))
                     .ok_or_else(|| {
@@ -3829,6 +3822,9 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                 crate::ir::PropertyKind::Invariant => {
                     "no violating state found in the reachable state space".to_string()
                 }
+                crate::ir::PropertyKind::Reachability => {
+                    "reachability target was not found in the reachable state space".to_string()
+                }
                 crate::ir::PropertyKind::DeadlockFreedom => {
                     "no deadlock state found in the reachable state space".to_string()
                 }
@@ -3841,11 +3837,15 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                 RunStatus::Fail,
                 Some(match &property_kind {
                     crate::ir::PropertyKind::Invariant => "PROPERTY_VIOLATED".to_string(),
+                    crate::ir::PropertyKind::Reachability => "TARGET_REACHED".to_string(),
                     crate::ir::PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED".to_string(),
                 }),
                 match &property_kind {
                     crate::ir::PropertyKind::Invariant => {
                         "violating state discovered in reachable state space".to_string()
+                    }
+                    crate::ir::PropertyKind::Reachability => {
+                        "reachability target reached in reachable state space".to_string()
                     }
                     crate::ir::PropertyKind::DeadlockFreedom => {
                         "deadlock detected in reachable state space".to_string()

@@ -25,6 +25,7 @@ use crate::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
     },
+    ir::Path,
     testgen::render_replay_json,
 };
 
@@ -898,6 +899,7 @@ fn check_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult, S
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
+                seed: None,
             };
             let outcome = check_source(&request);
             let rendered = render_outcome_json(&source_name, &outcome);
@@ -934,6 +936,7 @@ fn explain_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult,
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
+                seed: None,
             };
             match explain_source(&request) {
                 Ok(response) => Ok(ToolResult::success(parse_embedded_json(
@@ -982,6 +985,7 @@ fn coverage_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
+                seed: None,
             };
             match check_source(&request) {
                 CheckOutcome::Completed(result) => {
@@ -1029,6 +1033,7 @@ fn testgen_tool(config: &ServerConfig, args: &TestgenArgs) -> Result<ToolResult,
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
+                seed: None,
             };
             match testgen_source(&request) {
                 Ok(response) => Ok(ToolResult::success(json!({
@@ -1141,7 +1146,7 @@ fn replay_tool(config: &ServerConfig, args: &ReplayArgs) -> Result<ToolResult, S
                     args.focus_action_id.as_deref(),
                     focus_action_enabled,
                     Some(property_holds),
-                    &path_tags.into_iter().collect::<Vec<_>>(),
+                    &Path::from_legacy_tags(path_tags.into_iter().collect()),
                 ),
             )?))
         }

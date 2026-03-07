@@ -105,30 +105,23 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
 
     let mut properties = Vec::new();
     for property in &parsed.properties {
-        let Some(kind) = PropertyKind::parse(&property.kind) else {
-            errors.push(lowering_error(
-                format!("unsupported property kind `{}`", property.kind),
-                property.line,
-            ));
-            continue;
-        };
-        match lower_expr(&property.expr) {
-            Some(expr) => properties.push(PropertyIr {
-match lower_property_kind(&property.kind) {
-            Some(PropertyKind::Invariant) => match lower_expr(&property.expr) {
-                    property_id: property.name.clone(),
-                    kind: PropertyKind::Invariant,
-                    expr,
-                }),
-                None => errors.push(lowering_error(
-                    format!("unsupported property expression `{}`", property.expr),
-                )),
-            },
+        match lower_property_kind(&property.kind) {
+            Some(PropertyKind::Invariant) | Some(PropertyKind::Reachability) => {
+                match lower_expr(&property.expr) {
+                    Some(expr) => properties.push(PropertyIr {
+                        property_id: property.name.clone(),
+                        kind: PropertyKind::parse(&property.kind).unwrap(),
+                        expr,
+                    }),
+                    None => errors.push(lowering_error(
+                        format!("unsupported property expression `{}`", property.expr),
+                        property.line,
+                    )),
+                }
+            }
             Some(PropertyKind::DeadlockFreedom) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
-                kind,
-                expr,
-kind: PropertyKind::DeadlockFreedom,
+                kind: PropertyKind::DeadlockFreedom,
                 expr: ExprIr::Literal(Value::Bool(true)),
             }),
             None => errors.push(lowering_error(
@@ -197,11 +190,7 @@ fn lower_value(input: &str) -> Option<Value> {
 }
 
 fn lower_property_kind(input: &str) -> Option<PropertyKind> {
-    match input {
-        "invariant" => Some(PropertyKind::Invariant),
-        "deadlock_freedom" => Some(PropertyKind::DeadlockFreedom),
-        _ => None,
-    }
+    PropertyKind::parse(input)
 }
 
 fn lower_expr(input: &str) -> Option<ExprIr> {
@@ -619,13 +608,18 @@ property P_OPEN:
             crate::ir::PropertyKind::Reachability
         );
     }
+    #[test]
     fn lowers_deadlock_freedom_property_kind() {
-model CounterLock
-  x: u8[0..1]
-  x = 0
-property P_LIVE: deadlock_freedom
+        let source = "model CounterLock\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\nproperty P_LIVE: deadlock_freedom\n";
+        let model = compile_model(source).expect("compile");
         assert_eq!(model.properties[0].property_id, "P_LIVE");
+        assert_eq!(
+            model.properties[0].kind,
             crate::ir::PropertyKind::DeadlockFreedom
+        );
+        assert_eq!(
             model.properties[0].expr,
             crate::ir::ExprIr::Literal(crate::ir::Value::Bool(true))
+        );
+    }
 }

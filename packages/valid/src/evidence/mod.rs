@@ -742,7 +742,6 @@ fn error_status_label(status: ErrorStatus) -> &'static str {
 }
 fn property_kind_label(kind: &crate::ir::PropertyKind) -> &'static str {
     kind.as_str()
-        crate::ir::PropertyKind::DeadlockFreedom => "deadlock_freedom",
 }
 fn assurance_label(level: AssuranceLevel) -> &'static str {
     match level {

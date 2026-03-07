@@ -86,8 +86,7 @@ fn normalize_command(command: &str) -> String {
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid check <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("check", parsed.progress_json);
     progress.start(None);
@@ -125,8 +124,7 @@ fn cmd_check(args: Vec<String>) {
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid explain <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("explain", parsed.progress_json);
     progress.start(None);
@@ -161,8 +159,7 @@ fn cmd_explain(args: Vec<String>) {
 fn cmd_minimize(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid minimize <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid minimize <model-file> [--json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid minimize <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("minimize", parsed.progress_json);
     progress.start(None);
@@ -470,8 +467,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
@@ -558,8 +554,7 @@ fn cmd_testgen(args: Vec<String>) {
 fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
-"usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
         |arg, options| {
             let _ = (arg, options);
             false
@@ -691,8 +686,7 @@ fn cmd_replay(args: Vec<String>) {
 fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid orchestrate <model-file> [--json] [--progress=json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid orchestrate <model-file> [--json] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid orchestrate <model-file> [--json] [--progress=json] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
     progress.start(None);
@@ -755,8 +749,7 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
-"usage: valid coverage <model-file> [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("coverage", parsed.progress_json);
     progress.start(None);
@@ -892,14 +885,15 @@ where
     parsed
 }
 
-fn cmd_selfcheck(args: Vec<String>) {
-    let json = detect_json_flag(&args);
 fn parse_seed_arg(value: &str, usage: &str) -> u64 {
     value.parse().unwrap_or_else(|_| {
         eprintln!("{usage}");
         process::exit(3);
     })
 }
+
+fn cmd_selfcheck(args: Vec<String>) {
+    let json = detect_json_flag(&args);
     let report = run_smoke_selfcheck();
     let _ = write_selfcheck_artifact(&report);
     if json {

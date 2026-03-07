@@ -12,6 +12,7 @@ pub struct PropertyIr {
 pub enum PropertyKind {
     Invariant,
     Reachability,
+    DeadlockFreedom,
 }
 
 impl PropertyKind {
@@ -19,6 +20,7 @@ impl PropertyKind {
         match input {
             "invariant" => Some(Self::Invariant),
             "reachability" => Some(Self::Reachability),
+            "deadlock_freedom" => Some(Self::DeadlockFreedom),
             _ => None,
         }
     }
@@ -27,6 +29,7 @@ impl PropertyKind {
         match self {
             Self::Invariant => "invariant",
             Self::Reachability => "reachability",
+            Self::DeadlockFreedom => "deadlock_freedom",
         }
     }
 }
@@ -35,5 +38,4 @@ impl fmt::Display for PropertyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
-DeadlockFreedom,
 }

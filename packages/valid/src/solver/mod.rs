@@ -947,7 +947,8 @@ fn normalize_protocol_result(
 
 fn protocol_trace_kind(property_kind: crate::ir::PropertyKind, status: &str) -> EvidenceKind {
     match (property_kind, status) {
-        (crate::ir::PropertyKind::Invariant, "FAIL") => EvidenceKind::Counterexample,
+        (crate::ir::PropertyKind::Invariant, "FAIL")
+        | (crate::ir::PropertyKind::DeadlockFreedom, "FAIL") => EvidenceKind::Counterexample,
         (crate::ir::PropertyKind::Reachability, "FAIL") => EvidenceKind::Witness,
         _ => EvidenceKind::Trace,
     }

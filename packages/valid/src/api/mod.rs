@@ -12,9 +12,8 @@ use crate::{
     },
     engine::{build_run_manifest, CheckErrorEnvelope, CheckOutcome, PropertySelection, RunPlan},
     frontend,
-    ir::{DecisionKind, DecisionOutcome, ModelIr, Path},
+    ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind},
     modeling::CapabilityDetail,
-ir::{ModelIr, PropertyKind},
     orchestrator::run_all_properties_with_backend,
     solver::{
         backend_version_for_config as solver_backend_version_for_config, capabilities_for_config,
@@ -340,7 +339,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
     let supports_solver = model
         .properties
         .iter()
-        .all(|property| matches!(property.kind, PropertyKind::Invariant));
+        .all(|property| !matches!(property.kind, PropertyKind::DeadlockFreedom));
     let capability_reasons = if supports_solver {
         Vec::new()
     } else {
@@ -353,9 +352,11 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         model_id: model.model_id.clone(),
         machine_ir_ready: true,
         machine_ir_error: None,
-        capabilities: InspectCapabilities::fully_ready(),
+        capabilities: InspectCapabilities {
             solver_ready: supports_solver,
             reasons: capability_reasons,
+            ..InspectCapabilities::fully_ready()
+        },
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
         actions: model.actions.iter().map(|a| a.action_id.clone()).collect(),
         properties: model
@@ -449,9 +450,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .iter()
             .map(|property| InspectProperty {
                 property_id: property.property_id.clone(),
-                kind: property.kind.to_string(),
-                expr: Some(render_expr_ir(&property.expr)),
-kind: property_kind_label(&property.kind).to_string(),
+                kind: property_kind_label(&property.kind).to_string(),
                 expr: property_expr_for_inspect(property),
             })
             .collect(),
@@ -463,15 +462,14 @@ pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
 }
 
 pub(crate) fn property_kind_label(kind: &PropertyKind) -> &'static str {
-    match kind {
-        PropertyKind::Invariant => "invariant",
-        PropertyKind::DeadlockFreedom => "deadlock_freedom",
-    }
+    kind.as_str()
 }
 
 fn property_expr_for_inspect(property: &crate::ir::PropertyIr) -> Option<String> {
     match property.kind {
-        PropertyKind::Invariant => Some(render_expr_ir(&property.expr)),
+        PropertyKind::Invariant | PropertyKind::Reachability => {
+            Some(render_expr_ir(&property.expr))
+        }
         PropertyKind::DeadlockFreedom => None,
     }
 }
@@ -899,6 +897,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 crate::ir::PropertyKind::Reachability => {
                                     format!("{action} reached the target state without a visible field delta")
                                 }
+                                crate::ir::PropertyKind::DeadlockFreedom => {
+                                    format!("{action} led to a deadlocked state without a visible field delta")
+                                }
                             })
                             .unwrap_or_else(|| match property_kind {
                                 crate::ir::PropertyKind::Invariant => {
@@ -906,6 +907,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 }
                                 crate::ir::PropertyKind::Reachability => {
                                     "initial or terminal condition satisfied the reachability target".to_string()
+                                }
+                                crate::ir::PropertyKind::DeadlockFreedom => {
+                                    "deadlock detected: no enabled actions from this state".to_string()
                                 }
                             }),
                     },
@@ -2923,12 +2927,20 @@ mod tests {
     }
 
     #[test]
-fn inspect_hides_expr_for_deadlock_freedom_property() {
+    fn inspect_hides_expr_for_deadlock_freedom_property() {
         let source =
             "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\nproperty P_LIVE: deadlock_freedom\n";
+        let request = InspectRequest {
             request_id: "req-deadlock".to_string(),
+            source_name: "a.valid".to_string(),
+            source: source.to_string(),
+        };
+        let response = inspect_source(&request).unwrap();
         assert_eq!(response.property_details[0].kind, "deadlock_freedom");
         assert_eq!(response.property_details[0].expr, None);
+    }
+
+    #[test]
     fn check_can_fail_deadlock_freedom_property() {
         let outcome = check_source(&CheckRequest {
             request_id: "req-deadlock-fail".to_string(),
@@ -2938,9 +2950,11 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
+            seed: None,
         });
         let CheckOutcome::Completed(result) = outcome else {
-            panic!("expected completed")
+            panic!("expected completed");
+        };
         assert_eq!(result.status, crate::engine::RunStatus::Fail);
         assert_eq!(
             result.property_result.property_kind,
@@ -2951,6 +2965,9 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             Some("DEADLOCK_REACHED")
         );
         assert!(result.trace.is_some());
+    }
+
+    #[test]
     fn check_can_pass_deadlock_freedom_property() {
         let outcome = check_source(&CheckRequest {
             request_id: "req-deadlock-pass".to_string(),
@@ -2960,14 +2977,19 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
+            seed: None,
         });
         let CheckOutcome::Completed(result) = outcome else {
-            panic!("expected completed")
+            panic!("expected completed");
+        };
         assert_eq!(result.status, crate::engine::RunStatus::Pass);
         assert_eq!(
             result.property_result.property_kind,
             crate::ir::PropertyKind::DeadlockFreedom
         );
+    }
+
+    #[test]
     fn lint_surfaces_step_to_declarative_migration_hints() {
         let request = InspectRequest {
             request_id: "req-lint".to_string(),
@@ -3155,6 +3177,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
+            seed: None,
         };
         let response = explain_source(&request).unwrap();
         assert!(response
@@ -3241,6 +3264,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             backend: None,
             solver_executable: None,
             solver_args: vec![],
+            seed: None,
         })
         .unwrap();
         assert_eq!(response.vector_ids.len(), 1);

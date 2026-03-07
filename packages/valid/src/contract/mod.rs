@@ -242,7 +242,6 @@ fn field_type_label(field_type: &FieldType) -> String {
 
 fn property_kind_label(kind: &PropertyKind) -> &'static str {
     kind.as_str()
-        PropertyKind::DeadlockFreedom => "deadlock_freedom",
 }
 
 fn extract_json_string(body: &str, key: &str) -> Option<String> {
