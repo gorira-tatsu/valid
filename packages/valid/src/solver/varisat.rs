@@ -62,7 +62,15 @@ struct CnfEncoder<'a> {
     solver: Solver<'static>,
     next_var_index: usize,
     state_lits: Vec<Vec<EncodedFieldState>>,
+state_lits: Vec<Vec<Vec<Lit>>>,
     action_lits: Vec<Vec<Lit>>,
+}
+
+#[cfg(feature = "varisat-backend")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EncodedExprKind {
+    Bool,
+    EnumSet(usize),
 }
 
 #[cfg(feature = "varisat-backend")]
@@ -81,6 +89,10 @@ impl<'a> CnfEncoder<'a> {
                     .state_fields
                     .iter()
                     .map(|field| allocate_field_state(field, &mut alloc))
+.map(|field| {
+                        (0..state_field_width(&field.ty))
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -202,6 +214,16 @@ impl<'a> CnfEncoder<'a> {
                         }
                     }
                 }
+let field_ty = self.model.state_fields[field_index].ty.clone();
+            let lits = self.state_lits[0][field_index].clone();
+            match (&field_ty, &assignment.value) {
+                (FieldType::Bool, Value::Bool(value)) => {
+                    self.solver
+                        .add_clause(&[if *value { lits[0] } else { !lits[0] }]);
+                (FieldType::EnumSet { .. }, Value::UInt(bits)) => {
+                    for (index, lit) in lits.into_iter().enumerate() {
+                        let present = *bits & enum_variant_mask(index as u64) != 0;
+                        self.solver.add_clause(&[if present { lit } else { !lit }]);
                 _ => {
                     return Err(format!(
                         "backend=sat-varisat does not support init assignment `{}` for `{}`",
@@ -234,6 +256,9 @@ impl<'a> CnfEncoder<'a> {
                             }
                         }
                     }
+"backend=sat-varisat does not support init assignment `{}` with type/value combination `{:?}`/`{:?}`",
+                        field_ty,
+                        assignment.value
                 }
             }
         }
@@ -261,6 +286,7 @@ impl<'a> CnfEncoder<'a> {
                 for field_index in 0..self.model.state_fields.len() {
                     let field_id = self.model.state_fields[field_index].id.clone();
                     let default_expr = ExprIr::FieldRef(field_id.clone());
+                    let next = self.state_lits[step + 1][field_index].clone();
                     let expr = action
                         .updates
                         .iter()
@@ -268,6 +294,21 @@ impl<'a> CnfEncoder<'a> {
                         .map(|update| &update.value)
                         .unwrap_or(&default_expr);
                     self.encode_field_assignment_under(selector, step, field_index, expr)?;
+                    match &field.ty {
+                        FieldType::Bool => {
+                            self.add_equivalence_under(selector, next[0], value);
+                        }
+                        FieldType::EnumSet { variants } => {
+                            let value =
+                                self.encode_set_expr_with_width(step, &expr.value, variants.len())?;
+                            self.add_equivalence_under_many(selector, &next, &value)?;
+                        }
+                        other => return Err(format!(
+                            "backend=sat-varisat does not support state field `{}` of type `{}`",
+                            field.name,
+                            rust_type_label(other)
+                        )),
+                    }
                 }
             }
         }
@@ -301,6 +342,13 @@ impl<'a> CnfEncoder<'a> {
                         "backend=sat-varisat cannot use non-boolean field `{field}` as a predicate"
                     )),
                 }
+match &self.model.state_fields[index].ty {
+                    FieldType::Bool => Ok(self.state_lits[step][index][0]),
+                    FieldType::EnumSet { .. } => Err(format!(
+                        "backend=sat-varisat requires set fields to be used via set operators, got field `{field}` in boolean context"
+                    other => Err(format!(
+                        "backend=sat-varisat does not support boolean encoding for `{}` fields",
+                        rust_type_label(other)
             }
             ExprIr::Unary { op, expr } => match op {
                 UnaryOp::Not => Ok(!self.encode_bool_expr(step, expr)?),
@@ -308,9 +356,25 @@ impl<'a> CnfEncoder<'a> {
                 UnaryOp::StringLen => Err(
                     "backend=sat-varisat does not yet support string length expressions; use explicit backend"
                         .to_string(),
+                    "backend=sat-varisat does not support string length expressions".to_string(),
                 ),
+                UnaryOp::SetIsEmpty => {
+                    let width = match self.expr_kind(expr)? {
+                        EncodedExprKind::EnumSet(width) => width,
+                        EncodedExprKind::Bool => {
+                            return Err(format!(
+                                "backend=sat-varisat expected finite set expression in `{expr:?}`"
+                            ))
+                        }
+                    };
+                    let set = self.encode_set_expr_with_width(step, expr, width)?;
+                    Ok(!self.bool_or_many(&set))
+                }
             },
             ExprIr::Binary { op, left, right } => match op {
+                BinaryOp::StringContains | BinaryOp::RegexMatch => Err(format!(
+                    "backend=sat-varisat currently supports only boolean declarative expressions; unsupported operator `{op:?}`"
+                )),
                 BinaryOp::And => {
                     let a = self.encode_bool_expr(step, left)?;
                     let b = self.encode_bool_expr(step, right)?;
@@ -356,6 +420,19 @@ impl<'a> CnfEncoder<'a> {
                         None,
                     )
                 }
+BinaryOp::Equal => self.encode_equal_expr(step, left, right),
+                BinaryOp::NotEqual => Ok(!self.encode_equal_expr(step, left, right)?),
+                BinaryOp::SetContains => {
+                    let index = self.extract_enum_index(right, expr)?;
+                    let width = match self.expr_kind(left)? {
+                        EncodedExprKind::EnumSet(width) => width.max(index + 1),
+                        EncodedExprKind::Bool => {
+                            return Err(format!(
+                                "backend=sat-varisat expected finite set operand in `{expr:?}`"
+                            ))
+                    };
+                    let set = self.encode_set_expr_with_width(step, left, width)?;
+                    Ok(set[index])
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mod
@@ -371,6 +448,9 @@ impl<'a> CnfEncoder<'a> {
                 | BinaryOp::GreaterThan
                 | BinaryOp::GreaterThanOrEqual => Err(format!(
                     "backend=sat-varisat currently supports only boolean declarative expressions; unsupported operator `{op:?}`"
+                )),
+                BinaryOp::SetInsert | BinaryOp::SetRemove => Err(format!(
+                    "backend=sat-varisat expected set expression, got `{op:?}` in boolean context"
                 )),
             },
             ExprIr::Literal(other) => Err(format!(
@@ -504,6 +584,53 @@ impl<'a> CnfEncoder<'a> {
     }
 
     fn encode_relation_intersects(
+fn encode_set_expr_with_width(
+        expr: &ExprIr,
+        expected_width: usize,
+    ) -> Result<Vec<Lit>, String> {
+        match expr {
+            ExprIr::Literal(Value::UInt(bits)) => Ok((0..expected_width)
+                .map(|index| self.bool_const(*bits & enum_variant_mask(index as u64) != 0))
+                .collect()),
+            ExprIr::FieldRef(field) => {
+                let index = self.field_index(field)?;
+                let field_ty = self.model.state_fields[index].ty.clone();
+                match field_ty {
+                    FieldType::EnumSet { variants } => {
+                        if variants.len() != expected_width {
+                                "backend=sat-varisat expected finite set width {} for field `{field}`, got {}",
+                                expected_width,
+                                variants.len()
+                        Ok(self.state_lits[step][index].clone())
+                    FieldType::Bool => Err(format!(
+                        "backend=sat-varisat expected finite set field, got boolean field `{field}`"
+                        "backend=sat-varisat does not support set encoding for `{}` fields",
+                        rust_type_label(&other)
+            ExprIr::Binary { op, left, right } => match op {
+                BinaryOp::SetInsert => {
+                    let mut set = self.encode_set_expr_with_width(step, left, expected_width)?;
+                    let index = self.extract_enum_index(right, expr)?;
+                    if index >= set.len() {
+                            "backend=sat-varisat set insert index {} is outside width {}",
+                            index,
+                            set.len()
+                    set[index] = self.bool_const(true);
+                    Ok(set)
+                BinaryOp::SetRemove => {
+                    let mut set = self.encode_set_expr_with_width(step, left, expected_width)?;
+                    let index = self.extract_enum_index(right, expr)?;
+                    if index >= set.len() {
+                            "backend=sat-varisat set remove index {} is outside width {}",
+                            index,
+                            set.len()
+                    set[index] = self.bool_const(false);
+                    Ok(set)
+                _ => Err(format!(
+                    "backend=sat-varisat expected finite set expression, got `{expr:?}`"
+            },
+            _ => Err(format!(
+                "backend=sat-varisat expected finite set expression, got `{expr:?}`"
+    fn encode_equal_expr(
         &mut self,
         step: usize,
         left: &ExprIr,
@@ -795,6 +922,55 @@ impl<'a> CnfEncoder<'a> {
     }
 
     fn bool_equal(&mut self, a: Lit, b: Lit) -> Lit {
+match (self.expr_kind(left)?, self.expr_kind(right)?) {
+            (EncodedExprKind::Bool, EncodedExprKind::Bool) => {
+                Ok(self.bool_equal(a, b))
+            (EncodedExprKind::EnumSet(left_width), EncodedExprKind::EnumSet(right_width)) => {
+                let width = left_width.max(right_width);
+                let left = self.encode_set_expr_with_width(step, left, width)?;
+                let right = self.encode_set_expr_with_width(step, right, width)?;
+                let equalities = left
+                    .into_iter()
+                    .zip(right)
+                    .map(|(a, b)| self.bool_equal(a, b))
+                    .collect::<Vec<_>>();
+                Ok(self.bool_and_many(&equalities))
+            (left_kind, right_kind) => Err(format!(
+                "backend=sat-varisat cannot compare `{left_kind:?}` with `{right_kind:?}`"
+    fn expr_kind(&self, expr: &ExprIr) -> Result<EncodedExprKind, String> {
+            ExprIr::Literal(Value::Bool(_)) => Ok(EncodedExprKind::Bool),
+            ExprIr::Literal(Value::UInt(bits)) => Ok(EncodedExprKind::EnumSet(set_width(*bits))),
+            ExprIr::Literal(other) => Err(format!(
+                "backend=sat-varisat does not support expression literal `{other:?}`"
+                let index = self.field_index(field)?;
+                match &self.model.state_fields[index].ty {
+                    FieldType::Bool => Ok(EncodedExprKind::Bool),
+                    FieldType::EnumSet { variants } => Ok(EncodedExprKind::EnumSet(variants.len())),
+                        "backend=sat-varisat does not support expression kind `{}`",
+            ExprIr::Unary { op, .. } => match op {
+                UnaryOp::Not | UnaryOp::SetIsEmpty => Ok(EncodedExprKind::Bool),
+                UnaryOp::StringLen => Err(
+                    "backend=sat-varisat does not support string length expressions".to_string(),
+                ),
+            ExprIr::Binary { op, left, right } => match op {
+                BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::SetContains => Ok(EncodedExprKind::Bool),
+                BinaryOp::SetInsert | BinaryOp::SetRemove => {
+                    let left_width = match self.expr_kind(left)? {
+                        EncodedExprKind::EnumSet(width) => width,
+                        EncodedExprKind::Bool => {
+                                "backend=sat-varisat expected finite set operand in `{expr:?}`"
+                            ))
+                    };
+                    let index = self.extract_enum_index(right, expr)?;
+                    Ok(EncodedExprKind::EnumSet(left_width.max(index + 1)))
+                    "backend=sat-varisat does not support expression operator `{other:?}`"
+    fn extract_enum_index(&self, expr: &ExprIr, parent: &ExprIr) -> Result<usize, String> {
+            ExprIr::Literal(Value::EnumVariant { index, .. }) => Ok(*index as usize),
+                "backend=sat-varisat expected enum literal operand in `{parent:?}`"
         let z = self.fresh_lit();
         self.solver.add_clause(&[!z, !a, b]);
         self.solver.add_clause(&[!z, a, !b]);
@@ -834,10 +1010,44 @@ impl<'a> CnfEncoder<'a> {
         };
         iter.fold(first, |acc, lit| self.bool_or(acc, lit))
     }
-
+fn bool_and_many(&mut self, lits: &[Lit]) -> Lit {
+        match lits {
+            [] => self.bool_const(true),
+            [lit] => *lit,
+            [first, rest @ ..] => rest
+                .iter()
+                .copied()
+                .fold(*first, |acc, lit| self.bool_and(acc, lit)),
+    fn bool_or_many(&mut self, lits: &[Lit]) -> Lit {
+        match lits {
+            [] => self.bool_const(false),
+            [lit] => *lit,
+            [first, rest @ ..] => rest
+                .iter()
+                .copied()
+                .fold(*first, |acc, lit| self.bool_or(acc, lit)),
     fn add_equivalence_under(&mut self, condition: Lit, target: Lit, value: Lit) {
         self.solver.add_clause(&[!condition, !target, value]);
         self.solver.add_clause(&[!condition, target, !value]);
+    }
+
+    fn add_equivalence_under_many(
+        &mut self,
+        condition: Lit,
+        targets: &[Lit],
+        values: &[Lit],
+    ) -> Result<(), String> {
+        if targets.len() != values.len() {
+            return Err(format!(
+                "backend=sat-varisat cannot equate {} target slots with {} value slots",
+                targets.len(),
+                values.len()
+            ));
+        }
+        for (target, value) in targets.iter().copied().zip(values.iter().copied()) {
+            self.add_equivalence_under(condition, target, value);
+        }
+        Ok(())
     }
 
     fn bool_const(&mut self, value: bool) -> Lit {
@@ -882,8 +1092,10 @@ fn validate_varisat_model(model: &ModelIr, target_property_ids: &[String]) -> Re
             field.ty,
             FieldType::Bool | FieldType::EnumRelation { .. } | FieldType::EnumMap { .. }
         ) {
+if !matches!(field.ty, FieldType::Bool | FieldType::EnumSet { .. }) {
             return Err(format!(
                 "backend=sat-varisat currently supports bool, FiniteRelation, and FiniteMap state fields only; `{}` is `{}`",
+"backend=sat-varisat currently supports boolean and finite enum set state fields only; `{}` is `{}`",
                 field.name,
                 rust_type_label(&field.ty)
             ));
@@ -1038,3 +1250,15 @@ fn relation_literal_contains(
     let bit_index = relation_slot_index(left_index, right_index, right_len);
     bits & (1u64.checked_shl(bit_index as u32).unwrap_or(0)) != 0
 }
+fn state_field_width(ty: &FieldType) -> usize {
+    match ty {
+        FieldType::Bool => 1,
+        FieldType::EnumSet { variants } => variants.len(),
+        _ => 1,
+fn set_width(bits: u64) -> usize {
+    if bits == 0 {
+        0
+    } else {
+        u64::BITS as usize - bits.leading_zeros() as usize
+fn enum_variant_mask(index: u64) -> u64 {
+    1u64.checked_shl(index as u32).unwrap_or(0)

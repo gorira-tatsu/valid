@@ -4233,11 +4233,11 @@ fn build_evidence_trace<M: VerifiedMachine>(
 mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
-        check_machine_outcomes, collect_machine_coverage, contains, explain_machine, iff, implies,
-        insert, is_empty, len, lower_machine_expr, lower_machine_expr_with_enums,
-        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
-        regex_match, remove, state_field_descriptors, transition_descriptors, xor, FiniteEnumSet,
-        ModelingRunStatus, ModelingState, StateSpec,
+        check_machine_outcomes, check_machine_with_adapter, collect_machine_coverage, contains,
+        explain_machine, iff, implies, insert, is_empty, len, lower_machine_expr,
+        lower_machine_expr_with_enums, lower_machine_model, machine_capability_report,
+        machine_transition_ir, property_ids, regex_match, remove, state_field_descriptors,
+        transition_descriptors, xor, FiniteEnumSet, ModelingRunStatus, ModelingState, StateSpec,
     };
     use crate::{
         engine::{CheckOutcome, PropertySelection, RunPlan, RunStatus},
@@ -5102,6 +5102,100 @@ mod tests {
         let property_debug = format!("{:?}", lowered.properties[0].expr);
         assert!(property_debug.contains("Or"));
         assert!(property_debug.contains("Not"));
+    }
+
+    #[test]
+    fn declarative_set_models_report_solver_ready_capabilities() {
+        let report = machine_capability_report::<RoleSetModel>();
+        assert!(report.explicit_ready);
+        assert!(report.ir_ready);
+        assert!(report.solver_ready);
+        assert!(report.reasons.is_empty());
+    }
+
+    #[cfg(feature = "varisat-backend")]
+    #[test]
+    fn varisat_matches_explicit_for_passing_finite_set_properties() {
+        let explicit = check_machine_with_adapter::<RoleSetModel>(
+            "req-role-set-pass-explicit",
+            Some("P_ADMIN_IMPLIES_APPROVED"),
+            &AdapterConfig::Explicit,
+        )
+        .expect("explicit backend should run");
+        let varisat = check_machine_with_adapter::<RoleSetModel>(
+            "req-role-set-pass-varisat",
+            Some("P_ADMIN_IMPLIES_APPROVED"),
+            &AdapterConfig::SatVarisat,
+        )
+        .expect("varisat backend should run");
+
+        match (explicit, varisat) {
+            (CheckOutcome::Completed(explicit), CheckOutcome::Completed(varisat)) => {
+                assert_eq!(explicit.status, RunStatus::Pass);
+                assert_eq!(varisat.status, explicit.status);
+            }
+            (explicit, varisat) => {
+                panic!("unexpected outcomes: explicit={explicit:?}, varisat={varisat:?}")
+            }
+        }
+    }
+
+    #[cfg(feature = "varisat-backend")]
+    #[test]
+    fn varisat_matches_explicit_for_failing_finite_set_properties() {
+        let explicit = check_machine_with_adapter::<RoleSetModel>(
+            "req-role-set-fail-explicit",
+            Some("P_APPROVED_IFF_NOT_EMPTY"),
+            &AdapterConfig::Explicit,
+        )
+        .expect("explicit backend should run");
+        let varisat = check_machine_with_adapter::<RoleSetModel>(
+            "req-role-set-fail-varisat",
+            Some("P_APPROVED_IFF_NOT_EMPTY"),
+            &AdapterConfig::SatVarisat,
+        )
+        .expect("varisat backend should run");
+
+        match (explicit, varisat) {
+            (CheckOutcome::Completed(explicit), CheckOutcome::Completed(varisat)) => {
+                let explicit_actions = explicit
+                    .trace
+                    .expect("explicit failure trace")
+                    .steps
+                    .iter()
+                    .filter_map(|step| step.action_id.clone())
+                    .flat_map(|action_ids| {
+                        action_ids
+                            .split(',')
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let varisat_actions = varisat
+                    .trace
+                    .expect("varisat failure trace")
+                    .steps
+                    .iter()
+                    .filter_map(|step| step.action_id.clone())
+                    .flat_map(|action_ids| {
+                        action_ids
+                            .split(',')
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(explicit.status, RunStatus::Fail);
+                assert_eq!(varisat.status, explicit.status);
+                assert_eq!(
+                    explicit_actions,
+                    vec!["GRANT_ADMIN".to_string(), "REVOKE_ADMIN".to_string()]
+                );
+                assert_eq!(varisat_actions, explicit_actions);
+            }
+            (explicit, varisat) => {
+                panic!("unexpected outcomes: explicit={explicit:?}, varisat={varisat:?}")
+            }
+        }
     }
 
     #[test]
