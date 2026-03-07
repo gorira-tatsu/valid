@@ -1,7 +1,12 @@
 //! Selfcheck smoke suite for the current kernel and engine contracts.
 
+use std::collections::BTreeMap;
+
 use crate::{
-    engine::{check_explicit, CheckOutcome, PropertySelection, RunPlan},
+    contract::snapshot_model,
+    coverage::{collect_coverage, validate_coverage_report},
+    engine::{check_explicit, AssuranceLevel, CheckOutcome, PropertySelection, RunPlan, RunStatus},
+    evidence::{validate_trace, EvidenceKind, EvidenceTrace, TraceStep},
     frontend::compile_model,
     ir::{
         ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, PropertyKind,
@@ -43,6 +48,9 @@ pub fn run_smoke_selfcheck() -> SelfcheckReport {
     cases.push(run_transition_case());
     cases.push(run_replay_case());
     cases.push(run_engine_case());
+    cases.push(run_predecessor_case());
+    cases.push(run_coverage_case());
+    cases.push(run_contract_hash_case());
 
     let status = if cases.iter().all(|case| case.status == "PASS") {
         "PASS"
@@ -198,6 +206,87 @@ fn run_engine_case() -> SelfcheckCase {
     }
 }
 
+fn run_predecessor_case() -> SelfcheckCase {
+    let model = predecessor_selfcheck_model();
+    let mut plan = RunPlan::default();
+    plan.property_selection = PropertySelection::ExactlyOne("P_SAFE".to_string());
+    let status = match check_explicit(&model, &plan) {
+        CheckOutcome::Completed(result) if result.status == RunStatus::Fail => {
+            let terminal_matches =
+                result.property_result.terminal_state_id.as_deref() == Some("s-000003");
+            match result.trace {
+                Some(trace)
+                    if terminal_matches
+                        && validate_trace(&trace).is_ok()
+                        && trace_matches_predecessor_chain(&trace) =>
+                {
+                    "PASS"
+                }
+                _ => "FAIL",
+            }
+        }
+        _ => "FAIL",
+    };
+    SelfcheckCase {
+        case_id: "predecessor-trace".to_string(),
+        status: status.to_string(),
+    }
+}
+
+fn run_coverage_case() -> SelfcheckCase {
+    let model = coverage_selfcheck_model();
+    let trace = coverage_selfcheck_trace();
+    let report = collect_coverage(&model, &[trace]);
+    let status = if validate_coverage_report(&report).is_ok()
+        && report.model_id == "CoverageSelfcheck"
+        && report.transition_coverage_percent == 100
+        && report.guard_full_coverage_percent == 100
+        && report.covered_actions == report.total_actions
+        && report.action_execution_counts.get("Inc") == Some(&2)
+        && report.action_execution_counts.get("Reset") == Some(&1)
+        && report.guard_true_counts.get("Inc") == Some(&2)
+        && report.guard_false_counts.get("Inc") == Some(&1)
+        && report.guard_true_counts.get("Reset") == Some(&1)
+        && report.guard_false_counts.get("Reset") == Some(&2)
+        && report.path_tag_counts.get("inc_path") == Some(&2)
+        && report.path_tag_counts.get("reset_path") == Some(&1)
+        && report.visited_state_count == 4
+        && report.repeated_state_count == 2
+        && report.step_count == 3
+        && report.max_depth_observed == 3
+        && report.depth_histogram.get(&0) == Some(&1)
+        && report.depth_histogram.get(&1) == Some(&1)
+        && report.depth_histogram.get(&2) == Some(&1)
+        && report.depth_histogram.get(&3) == Some(&1)
+        && report.uncovered_guards.is_empty()
+    {
+        "PASS"
+    } else {
+        "FAIL"
+    };
+    SelfcheckCase {
+        case_id: "coverage-aggregate".to_string(),
+        status: status.to_string(),
+    }
+}
+
+fn run_contract_hash_case() -> SelfcheckCase {
+    let first = snapshot_model(&selfcheck_model());
+    let second = snapshot_model(&selfcheck_model());
+    let status = if first == second
+        && first.contract_hash == second.contract_hash
+        && first.contract_hash != "sha256:unknown"
+    {
+        "PASS"
+    } else {
+        "FAIL"
+    };
+    SelfcheckCase {
+        case_id: "contract-hash-deterministic".to_string(),
+        status: status.to_string(),
+    }
+}
+
 fn selfcheck_model() -> ModelIr {
     ModelIr {
         model_id: "Selfcheck".to_string(),
@@ -236,19 +325,259 @@ fn selfcheck_model() -> ModelIr {
     }
 }
 
+fn predecessor_selfcheck_model() -> ModelIr {
+    ModelIr {
+        model_id: "PredecessorSelfcheck".to_string(),
+        state_fields: vec![StateField {
+            id: "x".to_string(),
+            name: "x".to_string(),
+            ty: FieldType::BoundedU8 { min: 0, max: 7 },
+            span: selfcheck_span(),
+        }],
+        init: vec![InitAssignment {
+            field: "x".to_string(),
+            value: Value::UInt(0),
+            span: selfcheck_span(),
+        }],
+        actions: vec![
+            ActionIr {
+                action_id: "Step".to_string(),
+                label: "Step".to_string(),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+                path_tags: vec!["step_path".to_string()],
+                guard: ExprIr::Binary {
+                    op: BinaryOp::LessThan,
+                    left: Box::new(ExprIr::FieldRef("x".to_string())),
+                    right: Box::new(ExprIr::Literal(Value::UInt(2))),
+                },
+                updates: vec![UpdateIr {
+                    field: "x".to_string(),
+                    value: ExprIr::Binary {
+                        op: BinaryOp::Add,
+                        left: Box::new(ExprIr::FieldRef("x".to_string())),
+                        right: Box::new(ExprIr::Literal(Value::UInt(1))),
+                    },
+                }],
+            },
+            ActionIr {
+                action_id: "Jump".to_string(),
+                label: "Jump".to_string(),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+                path_tags: vec!["jump_path".to_string()],
+                guard: ExprIr::Binary {
+                    op: BinaryOp::Equal,
+                    left: Box::new(ExprIr::FieldRef("x".to_string())),
+                    right: Box::new(ExprIr::Literal(Value::UInt(2))),
+                },
+                updates: vec![UpdateIr {
+                    field: "x".to_string(),
+                    value: ExprIr::Literal(Value::UInt(3)),
+                }],
+            },
+        ],
+        properties: vec![PropertyIr {
+            property_id: "P_SAFE".to_string(),
+            kind: PropertyKind::Invariant,
+            expr: ExprIr::Binary {
+                op: BinaryOp::LessThanOrEqual,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(2))),
+            },
+        }],
+    }
+}
+
+fn coverage_selfcheck_model() -> ModelIr {
+    ModelIr {
+        model_id: "CoverageSelfcheck".to_string(),
+        state_fields: vec![StateField {
+            id: "x".to_string(),
+            name: "x".to_string(),
+            ty: FieldType::BoundedU8 { min: 0, max: 2 },
+            span: selfcheck_span(),
+        }],
+        init: vec![InitAssignment {
+            field: "x".to_string(),
+            value: Value::UInt(0),
+            span: selfcheck_span(),
+        }],
+        actions: vec![
+            ActionIr {
+                action_id: "Inc".to_string(),
+                label: "Inc".to_string(),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+                path_tags: vec!["inc_path".to_string()],
+                guard: ExprIr::Binary {
+                    op: BinaryOp::LessThan,
+                    left: Box::new(ExprIr::FieldRef("x".to_string())),
+                    right: Box::new(ExprIr::Literal(Value::UInt(2))),
+                },
+                updates: vec![UpdateIr {
+                    field: "x".to_string(),
+                    value: ExprIr::Binary {
+                        op: BinaryOp::Add,
+                        left: Box::new(ExprIr::FieldRef("x".to_string())),
+                        right: Box::new(ExprIr::Literal(Value::UInt(1))),
+                    },
+                }],
+            },
+            ActionIr {
+                action_id: "Reset".to_string(),
+                label: "Reset".to_string(),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+                path_tags: vec!["reset_path".to_string()],
+                guard: ExprIr::Binary {
+                    op: BinaryOp::Equal,
+                    left: Box::new(ExprIr::FieldRef("x".to_string())),
+                    right: Box::new(ExprIr::Literal(Value::UInt(2))),
+                },
+                updates: vec![UpdateIr {
+                    field: "x".to_string(),
+                    value: ExprIr::Literal(Value::UInt(0)),
+                }],
+            },
+        ],
+        properties: vec![PropertyIr {
+            property_id: "P_SAFE".to_string(),
+            kind: PropertyKind::Invariant,
+            expr: ExprIr::Binary {
+                op: BinaryOp::LessThanOrEqual,
+                left: Box::new(ExprIr::FieldRef("x".to_string())),
+                right: Box::new(ExprIr::Literal(Value::UInt(2))),
+            },
+        }],
+    }
+}
+
+fn coverage_selfcheck_trace() -> EvidenceTrace {
+    EvidenceTrace {
+        schema_version: "1.0.0".to_string(),
+        evidence_id: "ev-selfcheck-coverage".to_string(),
+        run_id: "run-selfcheck-coverage".to_string(),
+        property_id: "P_SAFE".to_string(),
+        evidence_kind: EvidenceKind::Trace,
+        assurance_level: AssuranceLevel::Complete,
+        trace_hash: "sha256:selfcheck-coverage".to_string(),
+        steps: vec![
+            TraceStep {
+                index: 0,
+                from_state_id: "s-000000".to_string(),
+                action_id: Some("Inc".to_string()),
+                action_label: Some("Inc".to_string()),
+                to_state_id: "s-000001".to_string(),
+                depth: 1,
+                state_before: selfcheck_state_snapshot(0),
+                state_after: selfcheck_state_snapshot(1),
+                note: None,
+            },
+            TraceStep {
+                index: 1,
+                from_state_id: "s-000001".to_string(),
+                action_id: Some("Inc".to_string()),
+                action_label: Some("Inc".to_string()),
+                to_state_id: "s-000002".to_string(),
+                depth: 2,
+                state_before: selfcheck_state_snapshot(1),
+                state_after: selfcheck_state_snapshot(2),
+                note: None,
+            },
+            TraceStep {
+                index: 2,
+                from_state_id: "s-000002".to_string(),
+                action_id: Some("Reset".to_string()),
+                action_label: Some("Reset".to_string()),
+                to_state_id: "s-000003".to_string(),
+                depth: 3,
+                state_before: selfcheck_state_snapshot(2),
+                state_after: selfcheck_state_snapshot(0),
+                note: None,
+            },
+        ],
+    }
+}
+
+fn trace_matches_predecessor_chain(trace: &EvidenceTrace) -> bool {
+    let expected = [
+        (
+            "s-000000",
+            Some("Step"),
+            "s-000001",
+            1u32,
+            Value::UInt(0),
+            Value::UInt(1),
+        ),
+        (
+            "s-000001",
+            Some("Step"),
+            "s-000002",
+            2u32,
+            Value::UInt(1),
+            Value::UInt(2),
+        ),
+        (
+            "s-000002",
+            Some("Jump"),
+            "s-000003",
+            3u32,
+            Value::UInt(2),
+            Value::UInt(3),
+        ),
+    ];
+    trace.steps.len() == expected.len()
+        && trace.steps.iter().enumerate().all(|(index, step)| {
+            let (from_state_id, action_id, to_state_id, depth, before, after) = &expected[index];
+            step.index == index
+                && step.from_state_id == *from_state_id
+                && step.action_id.as_deref() == *action_id
+                && step.action_label.as_deref() == *action_id
+                && step.to_state_id == *to_state_id
+                && step.depth == *depth
+                && step.state_before.get("x") == Some(before)
+                && step.state_after.get("x") == Some(after)
+        })
+}
+
+fn selfcheck_state_snapshot(x: u64) -> BTreeMap<String, Value> {
+    BTreeMap::from([("x".to_string(), Value::UInt(x))])
+}
+
+fn selfcheck_span() -> SourceSpan {
+    SourceSpan { line: 1, column: 1 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        render_selfcheck_json, run_smoke_selfcheck, validate_rendered_selfcheck_json,
-        validate_selfcheck_report, write_selfcheck_artifact,
+        render_selfcheck_json, run_contract_hash_case, run_coverage_case, run_predecessor_case,
+        run_smoke_selfcheck, validate_rendered_selfcheck_json, validate_selfcheck_report,
+        write_selfcheck_artifact,
     };
 
     #[test]
     fn smoke_selfcheck_passes() {
         let report = run_smoke_selfcheck();
         assert_eq!(report.status, "PASS");
-        assert!(report.cases.len() >= 5);
+        assert!(report.cases.len() >= 8);
+        let case_ids = report
+            .cases
+            .iter()
+            .map(|case| case.case_id.as_str())
+            .collect::<Vec<_>>();
+        assert!(case_ids.contains(&"predecessor-trace"));
+        assert!(case_ids.contains(&"coverage-aggregate"));
+        assert!(case_ids.contains(&"contract-hash-deterministic"));
         validate_selfcheck_report(&report).unwrap();
+    }
+
+    #[test]
+    fn phase_two_cases_pass() {
+        assert_eq!(run_predecessor_case().status, "PASS");
+        assert_eq!(run_coverage_case().status, "PASS");
+        assert_eq!(run_contract_hash_case().status, "PASS");
     }
 
     #[test]
