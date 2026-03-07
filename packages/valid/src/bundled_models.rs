@@ -296,7 +296,7 @@ pub fn replay_bundled_model(
     action_ids: &[String],
     focus_action_id: Option<&str>,
 ) -> Result<String, String> {
-    let (terminal_state, property_id, focus_action_enabled, property_holds, path_tags) =
+    let (terminal_state, property_id, focus_action_enabled, property_holds, path) =
         match parse_model_ref(model_ref) {
             Some(BundledModel::Counter) => {
                 replay_machine_actions::<CounterModel>(property_id, action_ids, focus_action_id)?
@@ -318,7 +318,7 @@ pub fn replay_bundled_model(
         focus_action_id,
         focus_action_enabled,
         Some(property_holds),
-        &path_tags,
+        &path,
     ))
 }
 

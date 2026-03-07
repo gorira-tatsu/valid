@@ -1,4 +1,4 @@
-use crate::ir::expr::ExprIr;
+use crate::ir::{expr::ExprIr, Path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionIr {
@@ -15,4 +15,14 @@ pub struct ActionIr {
 pub struct UpdateIr {
     pub field: String,
     pub value: ExprIr,
+}
+
+impl ActionIr {
+    pub fn decision_path(&self) -> Path {
+        Path::from_action(self, true)
+    }
+
+    pub fn decision_path_for_guard(&self, guard_enabled: bool) -> Path {
+        Path::from_action(self, guard_enabled)
+    }
 }

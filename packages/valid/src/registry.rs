@@ -746,7 +746,7 @@ fn replay_machine<M: VerifiedMachine>(
     action_ids: &[String],
     focus_action_id: Option<&str>,
 ) -> Result<String, String> {
-    let (terminal_state, property_id, focus_action_enabled, property_holds, path_tags) =
+    let (terminal_state, property_id, focus_action_enabled, property_holds, path) =
         replay_machine_actions::<M>(property_id, action_ids, focus_action_id)?;
     Ok(render_replay_json(
         property_id,
@@ -755,7 +755,7 @@ fn replay_machine<M: VerifiedMachine>(
         focus_action_id,
         focus_action_enabled,
         Some(property_holds),
-        &path_tags,
+        &path,
     ))
 }
 

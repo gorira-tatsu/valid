@@ -22,8 +22,10 @@ use crate::{
     },
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::{
-        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, SourceSpan,
-        StateField, UnaryOp, UpdateIr, Value,
+        build_path_from_parts, decision_path_tags as ir_decision_path_tags,
+        infer_decision_path_tags as ir_infer_decision_path_tags, ActionIr, BinaryOp, ExprIr,
+        FieldType, InitAssignment, ModelIr, Path, PropertyIr, SourceSpan, StateField, UnaryOp,
+        UpdateIr, Value,
     },
     solver::{run_with_adapter, AdapterConfig},
     support::hash::stable_hash_hex,
@@ -715,51 +717,7 @@ where
     RI: IntoIterator<Item = &'a str>,
     WI: IntoIterator<Item = &'a str>,
 {
-    let reads = reads.into_iter().collect::<Vec<_>>();
-    let writes = writes.into_iter().collect::<Vec<_>>();
-    let mut tags = BTreeSet::new();
-    if guard.is_some() {
-        tags.insert("guard_path".to_string());
-    }
-    if !reads.is_empty() {
-        tags.insert("read_path".to_string());
-    }
-    if !writes.is_empty() {
-        tags.insert("write_path".to_string());
-    }
-    let mut text = action_id.to_ascii_lowercase();
-    for part in &reads {
-        text.push(' ');
-        text.push_str(&part.to_ascii_lowercase());
-    }
-    for part in &writes {
-        text.push(' ');
-        text.push_str(&part.to_ascii_lowercase());
-    }
-    if let Some(guard) = guard {
-        text.push(' ');
-        text.push_str(&guard.to_ascii_lowercase());
-    }
-    if let Some(effect) = effect {
-        text.push(' ');
-        text.push_str(&effect.to_ascii_lowercase());
-    }
-    for (needle, tag) in [
-        ("allow", "allow_path"),
-        ("deny", "deny_path"),
-        ("boundary", "boundary_path"),
-        ("exception", "exception_path"),
-        ("session", "session_path"),
-        ("lock", "state_gate_path"),
-    ] {
-        if text.contains(needle) {
-            tags.insert(tag.to_string());
-        }
-    }
-    if tags.is_empty() {
-        tags.insert("transition_path".to_string());
-    }
-    tags.into_iter().collect()
+    ir_infer_decision_path_tags(action_id, reads, writes, guard, effect)
 }
 
 pub fn decision_path_tags<'a, RI, WI>(
@@ -774,14 +732,7 @@ where
     RI: IntoIterator<Item = &'a str>,
     WI: IntoIterator<Item = &'a str>,
 {
-    let mut tags = explicit_tags
-        .iter()
-        .map(|tag| tag.to_string())
-        .collect::<BTreeSet<_>>();
-    tags.extend(infer_decision_path_tags(
-        action_id, reads, writes, guard, effect,
-    ));
-    tags.into_iter().collect()
+    ir_decision_path_tags(explicit_tags, action_id, reads, writes, guard, effect)
 }
 
 pub trait StateSpec: ModelingState {
@@ -1001,25 +952,56 @@ fn collect_solver_subset_reasons_from_expr(expr: &ExprIr, reasons: &mut BTreeSet
 }
 
 pub fn machine_transition_tags_for_action<M: ModelSpec>(action_id: &str) -> Vec<String> {
-    let mut tags = BTreeSet::new();
+    machine_transition_path_for_action::<M>(action_id, true).legacy_path_tags()
+}
+
+pub fn machine_transition_path_for_action<M: ModelSpec>(
+    action_id: &str,
+    guard_enabled: bool,
+) -> Path {
+    let mut path = Path::default();
     for transition in machine_transition_ir::<M>()
         .into_iter()
         .filter(|transition| transition.action_id == action_id)
     {
-        tags.extend(decision_path_tags(
-            &transition.path_tags,
+        path.extend(build_path_from_parts(
             transition.action_id,
-            transition.reads.iter().copied(),
-            transition.writes.iter().copied(),
-            transition.guard,
-            transition.effect,
+            &transition
+                .reads
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>(),
+            &transition
+                .writes
+                .iter()
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>(),
+            decision_path_tags(
+                &transition.path_tags,
+                transition.action_id,
+                transition.reads.iter().copied(),
+                transition.writes.iter().copied(),
+                transition.guard,
+                transition.effect,
+            ),
+            transition.guard.map(str::to_string),
+            transition
+                .updates
+                .iter()
+                .map(|update| {
+                    (
+                        update.field.to_string(),
+                        update
+                            .expr
+                            .map(str::to_string)
+                            .unwrap_or_else(|| update.field.to_string()),
+                    )
+                })
+                .collect(),
+            guard_enabled,
         ));
     }
-    if tags.is_empty() {
-        vec!["transition_path".to_string()]
-    } else {
-        tags.into_iter().collect()
-    }
+    path
 }
 
 fn machine_capability_reasons<M: VerifiedMachine>(error: &str) -> Vec<String> {
@@ -1753,8 +1735,19 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         .into_iter()
         .map(|action| action.action_id())
         .collect::<BTreeSet<_>>();
+    let total_decisions = total_actions
+        .iter()
+        .flat_map(|action_id| {
+            machine_transition_path_for_action::<M>(action_id, true)
+                .decision_ids()
+                .into_iter()
+                .chain(machine_transition_path_for_action::<M>(action_id, false).decision_ids())
+        })
+        .collect::<BTreeSet<_>>();
     let mut covered_actions = BTreeSet::new();
+    let mut covered_decisions = BTreeSet::new();
     let mut action_execution_counts = BTreeMap::new();
+    let mut decision_counts = BTreeMap::new();
     let mut guard_true_actions = BTreeSet::new();
     let mut guard_false_actions = BTreeSet::new();
     let mut guard_true_counts = BTreeMap::new();
@@ -1762,16 +1755,35 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
     let mut path_tag_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut repeated_state_count = 0usize;
-    let transition_ir = machine_transition_ir::<M>();
 
     for node in &exploration.nodes {
         *depth_histogram.entry(node.depth).or_insert(0) += 1;
         for action in M::Action::all() {
             let next_states = M::step(&node.state, &action);
             if next_states.is_empty() {
+                for decision_id in
+                    machine_transition_path_for_action::<M>(&action.action_id(), false)
+                        .decisions
+                        .into_iter()
+                        .take(1)
+                        .map(|decision| decision.decision_id())
+                {
+                    covered_decisions.insert(decision_id.clone());
+                    *decision_counts.entry(decision_id).or_insert(0) += 1;
+                }
                 guard_false_actions.insert(action.action_id());
                 *guard_false_counts.entry(action.action_id()).or_insert(0) += 1;
             } else {
+                for decision_id in
+                    machine_transition_path_for_action::<M>(&action.action_id(), true)
+                        .decisions
+                        .into_iter()
+                        .take(1)
+                        .map(|decision| decision.decision_id())
+                {
+                    covered_decisions.insert(decision_id.clone());
+                    *decision_counts.entry(decision_id).or_insert(0) += 1;
+                }
                 guard_true_actions.insert(action.action_id());
                 *guard_true_counts.entry(action.action_id()).or_insert(0) += 1;
             }
@@ -1782,20 +1794,19 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         let action_id = edge.action.action_id();
         covered_actions.insert(action_id.clone());
         *action_execution_counts.entry(action_id).or_insert(0) += 1;
-        if let Some(transition) = transition_ir
-            .iter()
-            .find(|transition| transition.action_id == edge.action.action_id())
+        for decision_id in machine_transition_path_for_action::<M>(&edge.action.action_id(), true)
+            .decisions
+            .into_iter()
+            .skip(1)
+            .map(|decision| decision.decision_id())
         {
-            for tag in decision_path_tags(
-                &transition.path_tags,
-                transition.action_id,
-                transition.reads.iter().copied(),
-                transition.writes.iter().copied(),
-                transition.guard,
-                transition.effect,
-            ) {
-                *path_tag_counts.entry(tag).or_insert(0) += 1;
-            }
+            covered_decisions.insert(decision_id.clone());
+            *decision_counts.entry(decision_id).or_insert(0) += 1;
+        }
+        for tag in machine_transition_path_for_action::<M>(&edge.action.action_id(), true)
+            .legacy_path_tags()
+        {
+            *path_tag_counts.entry(tag).or_insert(0) += 1;
         }
         if edge.to_index <= edge.from_index {
             repeated_state_count += 1;
@@ -1806,6 +1817,11 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         100
     } else {
         ((covered_actions.len() * 100) / total_actions.len()) as u32
+    };
+    let decision_coverage_percent = if total_decisions.is_empty() {
+        100
+    } else {
+        ((covered_decisions.len() * 100) / total_decisions.len()) as u32
     };
     let fully_covered_guards = total_actions
         .iter()
@@ -1837,10 +1853,14 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         schema_version: "1.0.0".to_string(),
         model_id: M::model_id().to_string(),
         transition_coverage_percent,
+        decision_coverage_percent,
         guard_full_coverage_percent,
         covered_actions,
+        covered_decisions,
         total_actions,
+        total_decisions,
         action_execution_counts,
+        decision_counts,
         visited_state_count: exploration.nodes.len(),
         repeated_state_count,
         max_depth_observed: exploration
@@ -1894,6 +1914,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         .find(|transition| transition.action_id == action_id);
     let mut action_reads = Vec::new();
     let mut action_writes = Vec::new();
+    let mut decision_path = failure_step.path.clone().unwrap_or_default();
     let mut action_path_tags = Vec::new();
     let mut write_overlap_fields = Vec::new();
     let mut candidate_causes = Vec::new();
@@ -1951,14 +1972,8 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             .filter(|field| transition.writes.contains(&field.as_str()))
             .cloned()
             .collect();
-        let path_tags = decision_path_tags(
-            &transition.path_tags,
-            transition.action_id,
-            transition.reads.iter().copied(),
-            transition.writes.iter().copied(),
-            transition.guard,
-            transition.effect,
-        );
+        decision_path = machine_transition_path_for_action::<M>(transition.action_id, true);
+        let path_tags = decision_path.legacy_path_tags();
         action_path_tags = path_tags.clone();
         if !path_tags.is_empty() {
             candidate_causes.push(ExplainCandidateCause {
@@ -2021,6 +2036,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         property_id: trace.property_id,
         failure_step_index: failure_step.index,
         failing_action_id: Some(action_id.clone()),
+        decision_path,
         failing_action_reads: action_reads,
         failing_action_writes: action_writes,
         failing_action_path_tags: action_path_tags,
@@ -2089,6 +2105,10 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 focus_field: None,
                 expected_guard_enabled: Some(true),
                 expected_property_holds: Some(true),
+                expected_path: machine_transition_path_for_action::<M>(
+                    &edge.action.action_id(),
+                    true,
+                ),
                 expected_path_tags: machine_transition_tags_for_action::<M>(
                     &edge.action.action_id(),
                 ),
@@ -2417,10 +2437,20 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         .join(",");
     let property = find_property::<M>(property_id);
     let property_holds = (property.holds)(&nodes.get(end_index)?.state);
-    let expected_path_tags = focus_action_id
+    let expected_path = focus_action_id
         .as_deref()
-        .map(machine_transition_tags_for_action::<M>)
+        .map(|action_id| {
+            machine_transition_path_for_action::<M>(
+                action_id,
+                expected_guard_enabled.unwrap_or(true),
+            )
+        })
         .unwrap_or_default();
+    let expected_path_tags = if expected_path.decisions.is_empty() {
+        Vec::new()
+    } else {
+        expected_path.legacy_path_tags()
+    };
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -2465,6 +2495,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         focus_field,
         expected_guard_enabled,
         expected_property_holds: Some(property_holds),
+        expected_path,
         expected_path_tags,
         notes,
         replay_target: None,
@@ -3502,7 +3533,7 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
         &'static str,
         Option<bool>,
         bool,
-        Vec<String>,
+        Path,
     ),
     String,
 > {
@@ -3533,16 +3564,21 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
             .unwrap_or(false)
     });
     let property_holds = (property.holds)(&state);
-    let transition_ir = machine_transition_ir::<M>();
-    let mut path_tags = BTreeSet::new();
+    let mut path = Path::default();
     for action_id in action_ids {
-        for transition in transition_ir
-            .iter()
-            .filter(|transition| transition.action_id == action_id.as_str())
-        {
-            for tag in &transition.path_tags {
-                path_tags.insert((*tag).to_string());
-            }
+        path.extend(machine_transition_path_for_action::<M>(action_id, true));
+    }
+    if let Some(action_id) = focus_action_id {
+        let focus_is_already_last = action_ids.last().map(String::as_str) == Some(action_id);
+        if !focus_is_already_last {
+            let guard_enabled = focus_action_enabled.unwrap_or(false);
+            path.extend(Path::new(
+                machine_transition_path_for_action::<M>(action_id, guard_enabled)
+                    .decisions
+                    .into_iter()
+                    .take(1)
+                    .collect(),
+            ));
         }
     }
     Ok((
@@ -3550,7 +3586,7 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
         property.property_id,
         focus_action_enabled,
         property_holds,
-        path_tags.into_iter().collect(),
+        path,
     ))
 }
 
@@ -3712,6 +3748,10 @@ fn build_evidence_trace<M: VerifiedMachine>(
             depth: (index + 1) as u32,
             state_before: step.state_before.snapshot(),
             state_after: step.state_after.snapshot(),
+            path: Some(machine_transition_path_for_action::<M>(
+                &step.action.action_id(),
+                true,
+            )),
             note: None,
         })
         .collect::<Vec<_>>();

@@ -715,6 +715,7 @@ impl SolverAdapter for CommandSolverAdapter {
                             depth: action_ids.len() as u32,
                             state_before: initial.as_named_map(model),
                             state_after: terminal.as_named_map(model),
+                            path: None,
                             note: Some("normalized from command adapter".to_string()),
                         }],
                     })
@@ -775,6 +776,7 @@ fn normalize_protocol_result(
                 depth: protocol.actions.len() as u32,
                 state_before: initial.as_named_map(model),
                 state_after: terminal.as_named_map(model),
+                path: None,
                 note: Some("normalized from command adapter".to_string()),
             }],
         })

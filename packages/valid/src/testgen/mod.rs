@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use crate::{
     evidence::EvidenceTrace,
-    ir::{ModelIr, PropertyKind, Value},
+    ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
         replay::replay_actions,
@@ -40,6 +40,7 @@ pub struct TestVector {
     pub focus_field: Option<String>,
     pub expected_guard_enabled: Option<bool>,
     pub expected_property_holds: Option<bool>,
+    pub expected_path: Path,
     pub expected_path_tags: Vec<String>,
     pub notes: Vec<String>,
     pub replay_target: Option<ReplayTarget>,
@@ -96,6 +97,8 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         .iter()
         .map(|step| format!("{:?}", step.state_after))
         .collect::<Vec<_>>();
+    let expected_path = trace_path(trace);
+    let expected_path_tags = path_tags_or_empty(&expected_path);
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: trace.evidence_id.replace("ev-", "vec-"),
@@ -115,13 +118,8 @@ pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, 
         focus_field: None,
         expected_guard_enabled: None,
         expected_property_holds: Some(false),
-        expected_path_tags: trace
-            .steps
-            .iter()
-            .filter_map(|step| step.note.as_ref())
-            .filter_map(|note| note.strip_prefix("path_tag:"))
-            .map(str::to_string)
-            .collect(),
+        expected_path,
+        expected_path_tags,
         notes: Vec::new(),
         replay_target: None,
     })
@@ -332,6 +330,18 @@ fn synthetic_trace_from_states(
                         (field.name.clone(), after.values[field_index].clone())
                     })
                     .collect::<BTreeMap<_, _>>(),
+                path: model
+                    .actions
+                    .iter()
+                    .find(|action| {
+                        action.action_id == *action_id
+                            && apply_action_transition(model, before, action)
+                                .ok()
+                                .flatten()
+                                .map(|next| next == **after)
+                                .unwrap_or(false)
+                    })
+                    .map(|action| action.decision_path()),
                 note: Some(if transitions.len() == 1 {
                     "synthetic witness from initial state".to_string()
                 } else {
@@ -506,6 +516,12 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     for tag in &vector.expected_path_tags {
         out.push_str(&format!("    expected_path_tags.push({tag:?});\n"));
     }
+    out.push_str("    let mut expected_decision_ids = Vec::new();\n");
+    for decision_id in vector.expected_path.decision_ids() {
+        out.push_str(&format!(
+            "    expected_decision_ids.push({decision_id:?});\n"
+        ));
+    }
     if let Some(target) = &vector.replay_target {
         out.push_str(&format!("    let replay_runner = {:?};\n", target.runner));
         out.push_str("    let mut replay_args = Vec::new();\n");
@@ -523,7 +539,7 @@ pub fn render_rust_test(vector: &TestVector) -> String {
         out.push_str("        .expect(\"generated replay command should execute\");\n");
         out.push_str("    assert!(output.status.success(), \"replay failed: {}\", String::from_utf8_lossy(&output.stderr));\n");
         out.push_str("    let stdout = String::from_utf8(output.stdout).expect(\"replay output must be utf-8\");\n");
-        out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled, expected_property_holds, &expected_path_tags);\n");
+        out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled, expected_property_holds, &expected_path_tags, &expected_decision_ids);\n");
     }
     out.push_str("    assert!(!vector_id.is_empty());\n");
     out.push_str("    assert!(!property_id.is_empty());\n");
@@ -561,6 +577,7 @@ pub fn assert_replay_output_json(
     expected_guard_enabled: Option<bool>,
     expected_property_holds: Option<bool>,
     expected_path_tags: &[&str],
+    expected_decision_ids: &[&str],
 ) {
     let normalized = body.trim();
     assert!(
@@ -607,6 +624,12 @@ pub fn assert_replay_output_json(
             "replay missing path tag `{tag}`: {normalized}"
         );
     }
+    for decision_id in expected_decision_ids {
+        assert!(
+            normalized.contains(&format!("\"decision_id\":\"{decision_id}\"")),
+            "replay missing decision `{decision_id}`: {normalized}"
+        );
+    }
 }
 
 pub fn render_replay_json(
@@ -616,7 +639,7 @@ pub fn render_replay_json(
     focus_action_id: Option<&str>,
     focus_action_enabled: Option<bool>,
     property_holds: Option<bool>,
-    path_tags: &[String],
+    path: &Path,
 ) -> String {
     let actions = action_ids
         .iter()
@@ -632,22 +655,63 @@ pub fn render_replay_json(
     let property_holds = property_holds
         .map(|value| value.to_string())
         .unwrap_or_else(|| "null".to_string());
-    let path_tags = path_tags
+    let path_tags = path
+        .legacy_path_tags()
         .iter()
         .map(|tag| format!("\"{tag}\""))
         .collect::<Vec<_>>()
         .join(",");
     let terminal_state = format!("{terminal_state:?}");
     format!(
-        "{{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"property_id\":\"{}\",\"replayed_actions\":[{}],\"terminal_state\":{:?},\"focus_action_id\":{},\"focus_action_enabled\":{},\"property_holds\":{},\"path_tags\":[{}]}}",
+        "{{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"property_id\":\"{}\",\"replayed_actions\":[{}],\"terminal_state\":{:?},\"focus_action_id\":{},\"focus_action_enabled\":{},\"property_holds\":{},\"path\":{},\"path_tags\":[{}]}}",
         property_id,
         actions,
         terminal_state,
         focus_action_id,
         focus_action_enabled,
         property_holds,
+        render_path_json(path),
         path_tags
     )
+}
+
+pub fn replay_path_for_model(
+    model: &ModelIr,
+    action_ids: &[String],
+    focus_action_id: Option<&str>,
+    focus_action_enabled: Option<bool>,
+) -> Path {
+    let mut path = Path::default();
+    for action_id in action_ids {
+        if let Some(action) = model
+            .actions
+            .iter()
+            .find(|action| action.action_id == *action_id)
+        {
+            path.extend(action.decision_path());
+        }
+    }
+    if let Some(action_id) = focus_action_id {
+        let focus_is_already_last = action_ids.last().map(String::as_str) == Some(action_id);
+        if !focus_is_already_last {
+            if let Some(action) = model
+                .actions
+                .iter()
+                .find(|action| action.action_id == action_id)
+            {
+                let guard_enabled = focus_action_enabled.unwrap_or(false);
+                path.extend(Path::new(
+                    action
+                        .decision_path_for_guard(guard_enabled)
+                        .decisions
+                        .into_iter()
+                        .take(1)
+                        .collect(),
+                ));
+            }
+        }
+    }
+    path
 }
 
 pub fn generated_test_output_path(vector: &TestVector) -> String {
@@ -669,6 +733,7 @@ pub fn write_generated_test_files(vectors: &[TestVector]) -> Result<Vec<String>,
 struct ModelNode {
     state: MachineState,
     parent: Option<usize>,
+    via_action_index: Option<usize>,
     via_action_id: Option<String>,
     via_action_label: Option<String>,
 }
@@ -690,6 +755,7 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
     let mut nodes = vec![ModelNode {
         state: initial.clone(),
         parent: None,
+        via_action_index: None,
         via_action_id: None,
         via_action_label: None,
     }];
@@ -710,6 +776,7 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
                 nodes.push(ModelNode {
                     state: next_state,
                     parent: Some(node_index),
+                    via_action_index: Some(action_index),
                     via_action_id: Some(action.action_id.clone()),
                     via_action_label: Some(action.label.clone()),
                 });
@@ -766,13 +833,13 @@ fn build_model_guard_vectors(
                 Some(action.action_id.clone()),
                 None,
                 Some(true),
-                action.path_tags.clone(),
+                action.decision_path(),
                 {
                     let mut notes = vec![format!("guard_true:{:?}", action.guard)];
                     notes.extend(
                         action
-                            .path_tags
-                            .clone()
+                            .decision_path()
+                            .legacy_path_tags()
                             .into_iter()
                             .map(|tag| format!("path_tag:{tag}")),
                     );
@@ -811,13 +878,13 @@ fn build_model_guard_vectors(
                 Some(action.action_id.clone()),
                 None,
                 Some(false),
-                action.path_tags.clone(),
+                action.decision_path_for_guard(false),
                 {
                     let mut notes = vec![format!("guard_false:{:?}", action.guard)];
                     notes.extend(
                         action
-                            .path_tags
-                            .clone()
+                            .decision_path_for_guard(false)
+                            .legacy_path_tags()
                             .into_iter()
                             .map(|tag| format!("path_tag:{tag}")),
                     );
@@ -849,11 +916,8 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
     let mut seen = BTreeSet::new();
 
     for (action_index, action) in model.actions.iter().enumerate() {
-        let tags = if action.path_tags.is_empty() {
-            vec!["transition_path".to_string()]
-        } else {
-            action.path_tags.clone()
-        };
+        let action_path = action.decision_path();
+        let tags = action_path.legacy_path_tags();
         let Some((_, edge)) =
             exploration
                 .edges_by_node
@@ -879,7 +943,7 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
                 Some(action.action_id.clone()),
                 None,
                 Some(true),
-                vec![tag.clone()],
+                Path::from_legacy_tags(vec![tag.clone()]),
                 vec![format!("path_tag:{tag}")],
             ) {
                 let signature = (
@@ -935,7 +999,7 @@ fn build_model_boundary_vectors(
                     None,
                     Some(field.name.clone()),
                     None,
-                    Vec::new(),
+                    Path::default(),
                     vec![format!("boundary_target:{target}")],
                 ) {
                     let signature = (
@@ -994,7 +1058,7 @@ fn build_model_random_vectors(
                 None,
                 None,
                 None,
-                Vec::new(),
+                Path::default(),
                 vec!["deterministic_randomized_sample".to_string()],
             )?;
             vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| {
@@ -1015,7 +1079,7 @@ fn build_model_vector_for_node(
     focus_action_id: Option<String>,
     focus_field: Option<String>,
     expected_guard_enabled: Option<bool>,
-    expected_path_tags: Vec<String>,
+    expected_path: Path,
     notes: Vec<String>,
 ) -> Option<TestVector> {
     let steps = build_model_path(model, nodes, end_index);
@@ -1049,6 +1113,12 @@ fn build_model_vector_for_node(
         .properties
         .iter()
         .find(|property| property.property_id == property_id)?;
+    let mut expected_path = expected_path;
+    if expected_path.decisions.is_empty() {
+        for step in &steps {
+            expected_path.extend(step.path.clone());
+        }
+    }
     let property_holds = matches!(
         eval_expr(model, &nodes.get(end_index)?.state, &property.expr).ok(),
         Some(Value::Bool(true))
@@ -1085,7 +1155,8 @@ fn build_model_vector_for_node(
         focus_field,
         expected_guard_enabled,
         expected_property_holds: Some(property_holds),
-        expected_path_tags,
+        expected_path_tags: path_tags_or_empty(&expected_path),
+        expected_path,
         notes,
         replay_target: None,
     })
@@ -1095,6 +1166,7 @@ struct ModelPathStep {
     action_id: String,
     action_label: String,
     state_after: BTreeMap<String, Value>,
+    path: Path,
 }
 
 fn build_model_path(model: &ModelIr, nodes: &[ModelNode], end_index: usize) -> Vec<ModelPathStep> {
@@ -1110,6 +1182,10 @@ fn build_model_path(model: &ModelIr, nodes: &[ModelNode], end_index: usize) -> V
         .windows(2)
         .map(|pair| {
             let after = &nodes[pair[1]];
+            let action = after
+                .via_action_index
+                .and_then(|action_index| model.actions.get(action_index))
+                .expect("non-root node must have an action index");
             ModelPathStep {
                 action_id: after
                     .via_action_id
@@ -1120,9 +1196,106 @@ fn build_model_path(model: &ModelIr, nodes: &[ModelNode], end_index: usize) -> V
                     .clone()
                     .expect("non-root node must have an action label"),
                 state_after: after.state.as_named_map(model),
+                path: action.decision_path(),
             }
         })
         .collect()
+}
+
+fn trace_path(trace: &EvidenceTrace) -> Path {
+    let mut path = Path::default();
+    for step in &trace.steps {
+        if let Some(step_path) = &step.path {
+            path.extend(step_path.clone());
+        }
+    }
+    if path.decisions.is_empty() {
+        let fallback = trace
+            .steps
+            .iter()
+            .filter_map(|step| step.note.as_ref())
+            .filter_map(|note| note.strip_prefix("path_tag:"))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if !fallback.is_empty() {
+            return Path::from_legacy_tags(fallback);
+        }
+    }
+    path
+}
+
+fn path_tags_or_empty(path: &Path) -> Vec<String> {
+    if path.decisions.is_empty() {
+        Vec::new()
+    } else {
+        path.legacy_path_tags()
+    }
+}
+
+fn render_path_json(path: &Path) -> String {
+    let mut out = String::from("{\"decisions\":[");
+    for (index, decision) in path.decisions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!("\"decision_id\":\"{}\"", decision.decision_id()));
+        out.push_str(&format!(",\"action_id\":\"{}\"", decision.point.action_id));
+        out.push_str(&format!(
+            ",\"kind\":\"{}\"",
+            match decision.point.kind {
+                DecisionKind::Guard => "guard",
+                DecisionKind::StateUpdate => "state_update",
+            }
+        ));
+        out.push_str(&format!(",\"label\":{:?}", decision.point.label));
+        if let Some(field) = &decision.point.field {
+            out.push_str(&format!(",\"field\":{:?}", field));
+        } else {
+            out.push_str(",\"field\":null");
+        }
+        out.push_str(&format!(
+            ",\"reads\":[{}]",
+            decision
+                .point
+                .reads
+                .iter()
+                .map(|value| format!("{value:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        out.push_str(&format!(
+            ",\"writes\":[{}]",
+            decision
+                .point
+                .writes
+                .iter()
+                .map(|value| format!("{value:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        out.push_str(&format!(
+            ",\"path_tags\":[{}]",
+            decision
+                .point
+                .path_tags
+                .iter()
+                .map(|value| format!("{value:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        out.push_str(&format!(
+            ",\"outcome\":\"{}\"",
+            match decision.outcome {
+                DecisionOutcome::GuardTrue => "guard_true",
+                DecisionOutcome::GuardFalse => "guard_false",
+                DecisionOutcome::UpdateApplied => "update_applied",
+            }
+        ));
+        out.push('}');
+    }
+    out.push_str("]}");
+    out
 }
 
 #[cfg(test)]
@@ -1162,6 +1335,7 @@ mod tests {
                     depth: (index + 1) as u32,
                     state_before: before,
                     state_after: after,
+                    path: None,
                     note: None,
                 }
             })
@@ -1253,6 +1427,7 @@ mod tests {
                 depth: 1,
                 state_before: BTreeMap::from([("x".to_string(), Value::UInt(0))]),
                 state_after: BTreeMap::from([("x".to_string(), Value::UInt(1))]),
+                path: None,
                 note: None,
             }],
         };
