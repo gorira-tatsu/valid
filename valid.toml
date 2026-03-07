@@ -1,12 +1,12 @@
-registry = "examples/practical_use_cases_registry.rs"
+registry = "examples/valid_models.rs"
 default_backend = "explicit"
 default_property = ""
 default_solver_executable = ""
 default_solver_args = []
-suite_models = ["prod-deploy-safe", "breakglass-access-regression", "refund-control", "data-export-control"]
-benchmark_models = ["prod-deploy-safe", "refund-control", "data-export-control"]
+suite_models = ["counter", "failing-counter"]
+benchmark_models = ["counter"]
 benchmark_repeats = 5
-generated_tests_dir = "tests/generated"
+generated_tests_dir = "generated-tests"
 artifacts_dir = "artifacts"
 benchmarks_dir = "artifacts/benchmarks"
 benchmark_baseline_dir = "benchmarks/baselines"

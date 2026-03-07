@@ -69,7 +69,7 @@ default_solver_args = []
 suite_models = []
 benchmark_models = []
 benchmark_repeats = 3
-generated_tests_dir = "tests/generated"
+generated_tests_dir = "generated-tests"
 artifacts_dir = "artifacts"
 benchmarks_dir = "artifacts/benchmarks"
 benchmark_baseline_dir = "benchmarks/baselines"
@@ -78,17 +78,17 @@ default_graph_format = "mermaid"
 ```
 
 This repository already includes a `valid.toml`, so from the repo root the
-default `cargo valid` workflow points at the practical business suite:
+default `cargo valid` workflow points at the smallest step-first example:
 
 ```sh
 cargo valid models
-cargo valid inspect refund-control
-cargo valid graph refund-control
-cargo valid readiness breakglass-access-regression
+cargo valid inspect counter
+cargo valid graph counter
+cargo valid readiness counter
 cargo valid migrate counter
 cargo valid migrate counter --write
 cargo valid migrate counter --check
-cargo valid verify breakglass-access-regression
+cargo valid verify failing-counter
 cargo valid benchmark
 cargo valid benchmark --baseline=compare
 cargo valid suite
@@ -102,18 +102,25 @@ cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZ
 cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz
 ```
 
+Service-oriented grouped transition registries also work:
+
+```sh
+cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe
+cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
+```
+
 Use `--json` for CI, scripts, or AI integrations:
 
 ```sh
-cargo valid verify breakglass-access-regression --json
+cargo valid verify failing-counter --json
 ```
 
 Try the legacy `.valid` path:
 
 ```sh
-cargo run --bin valid -- inspect examples/models/safe_counter.valid
-cargo run --bin valid -- verify examples/models/failing_counter.valid
-cargo run --bin valid -- explain examples/models/failing_counter.valid
+cargo run --bin valid -- inspect tests/fixtures/models/safe_counter.valid
+cargo run --bin valid -- verify tests/fixtures/models/failing_counter.valid
+cargo run --bin valid -- explain tests/fixtures/models/failing_counter.valid
 ```
 
 ## Mental Model
@@ -143,7 +150,7 @@ If you are deciding between the two, use the Rust-first path.
 Primary commands:
 
 - `init`
-  Write `valid.toml`, scaffold a registry file, and create `tests/generated/`
+  Write `valid.toml`, scaffold a registry file, and create `generated-tests/`
 - `models`
   Show the model names exported by the configured registry
 - `inspect <model>`
@@ -167,7 +174,7 @@ Primary commands:
 - `coverage <model>`
   Show action and guard coverage
 - `generate-tests <model>`
-  Generate Rust tests under `tests/generated/*.rs`. JSON output includes
+  Generate Rust tests under `generated-tests/*.rs`. JSON output includes
   `strictness` and `derivation` so CI can distinguish strict trace-backed
   vectors from heuristic or synthetic ones.
 - `replay <model>`
@@ -186,16 +193,16 @@ Examples:
 ```sh
 cargo valid init
 cargo valid models
-cargo valid inspect refund-control
-cargo valid graph refund-control
-cargo valid graph refund-control --format=dot
-cargo valid graph refund-control --format=svg
-cargo valid readiness breakglass-access-regression
+cargo valid inspect counter
+cargo valid graph counter
+cargo valid --registry examples/saas_multi_tenant_registry.rs graph tenant-isolation-safe --format=dot
+cargo valid --registry examples/saas_multi_tenant_registry.rs graph tenant-isolation-safe --format=svg
+cargo valid readiness counter
 cargo valid migrate counter
 cargo valid migrate counter --write
 cargo valid migrate counter --check
-cargo valid verify breakglass-access-regression
-cargo valid verify breakglass-access-regression --json
+cargo valid verify failing-counter
+cargo valid verify failing-counter --json
 cargo valid benchmark --json
 cargo valid benchmark --baseline=record
 cargo valid benchmark --baseline=compare --threshold-percent=25
@@ -207,11 +214,10 @@ Override the configured registry only when needed:
 
 ```sh
 cargo valid --registry examples/valid_models.rs inspect counter
-cargo valid --registry examples/practical_use_cases_registry.rs models
-cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
-cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
+cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression
+cargo valid --registry examples/saas_multi_tenant_registry.rs graph tenant-isolation-safe
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
-cargo valid --registry examples/enterprise_scale_registry.rs verify quota-guardrail-regression
+cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs verify quota-guardrail-regression
 ```
 
 `inspect --json` now includes:
@@ -237,6 +243,9 @@ coverage, explain, and test generation.
 `graph` is built from the same inspect data. Declarative models render guard
 conditions, concrete field updates, and path tags in Mermaid, DOT, and SVG.
 Step-only models are explicitly marked `explicit-only / opaque-step`.
+
+Declarative models can now use either flat `transition Action ...` entries or
+grouped `on Action { ... }` syntax. Both lower to the same transition IR.
 
 `verify --json` now includes CI-oriented summary fields such as `ci.exit_code`
 and `review_summary`, while `explain` includes failing action metadata,
@@ -413,7 +422,7 @@ transition structure.
 
 ## Test Generation
 
-`testgen` writes generated Rust tests to `tests/generated/*.rs`.
+`testgen` writes generated Rust tests to `generated-tests/*.rs`.
 Generated tests are replay-backed: they call `valid replay` or
 `cargo-valid replay` and assert on the terminal state captured in the vector.
 
@@ -440,9 +449,9 @@ Examples:
 ```sh
 cargo valid --registry examples/valid_models.rs generate-tests counter --strategy=witness
 cargo valid --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard
-cargo valid generate-tests refund-control --strategy=path
-cargo run --bin valid -- generate-tests examples/models/safe_counter.valid --strategy=boundary
-cargo run --bin valid -- generate-tests examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample
+cargo valid --registry examples/saas_multi_tenant_registry.rs generate-tests tenant-isolation-regression --strategy=counterexample
+cargo run --bin valid -- generate-tests tests/fixtures/models/safe_counter.valid --strategy=boundary
+cargo run --bin valid -- generate-tests tests/fixtures/models/multi_property.valid --property=P_STRICT --strategy=counterexample
 cargo valid --registry examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC
 ```
 
@@ -451,53 +460,50 @@ cargo valid --registry examples/valid_models.rs replay failing-counter --propert
 Rust-first examples:
 
 - [valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs)
+- [fizzbuzz.rs](/Users/tatsuhiko/code/valid/examples/fizzbuzz.rs)
+- [saas_multi_tenant_registry.rs](/Users/tatsuhiko/code/valid/examples/saas_multi_tenant_registry.rs)
 - [iam_transition_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_transition_registry.rs)
-- [iam_enterprise_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_enterprise_registry.rs)
-- [practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/examples/practical_use_cases_registry.rs)
 - [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
 
-Domain-oriented examples:
+Benchmark and stress registries:
 
-- `cargo run --example iam_like_authz`
-- `cargo run --example iam_policy_diff`
-- `cargo run --example train_fare`
-- `cargo run --example saas_entitlements`
+- [practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/practical_use_cases_registry.rs)
+- [enterprise_scale_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/enterprise_scale_registry.rs)
+- [iam_enterprise_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/iam_enterprise_registry.rs)
 
 Compatibility fixtures:
 
-- [safe_counter.valid](/Users/tatsuhiko/code/valid/examples/models/safe_counter.valid)
-- [failing_counter.valid](/Users/tatsuhiko/code/valid/examples/models/failing_counter.valid)
-- [multi_property.valid](/Users/tatsuhiko/code/valid/examples/models/multi_property.valid)
+- [safe_counter.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/safe_counter.valid)
+- [failing_counter.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/failing_counter.valid)
+- [multi_property.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/multi_property.valid)
 
-## Practical Use-Case Suite
+## Core Examples
 
-The repo now includes a business-oriented registry suite under
-[practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/examples/practical_use_cases_registry.rs).
-It is intended to answer the question "would this survive real policy and
-workflow modeling?" with concrete cases instead of toy counters.
+The default project registry is
+[valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs). It is
+intentionally tiny and easy to debug.
 
-Current suite:
+Use [saas_multi_tenant_registry.rs](/Users/tatsuhiko/code/valid/examples/saas_multi_tenant_registry.rs)
+when you want a still-readable service-oriented example with:
 
-- `prod-deploy-safe`
-  Production deploy gating with approvals, QA, freeze windows, and incidents
-- `breakglass-access-regression`
-  Intentional security regression showing how exception paths can bypass
-  incident/approval controls
-- `refund-control`
-  Finance workflow with fraud clearance, risk escalation, and manager approval
-- `data-export-control`
-  Contract/DPA/region gating for compliance-sensitive exports
+- tenant onboarding growth limits
+- enterprise-only entitlements
+- isolation review gating
+- cross-tenant access regression detection
 
 Quick trial:
 
 ```sh
-cargo valid --registry examples/practical_use_cases_registry.rs models
-cargo valid --registry examples/practical_use_cases_registry.rs verify prod-deploy-safe
-cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
-cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-control
-cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
-cargo valid --registry examples/practical_use_cases_registry.rs suite
+cargo valid models
+cargo valid inspect counter
+cargo valid verify failing-counter
+cargo valid --registry examples/saas_multi_tenant_registry.rs graph tenant-isolation-safe
+cargo valid --registry examples/saas_multi_tenant_registry.rs generate-tests tenant-isolation-regression --strategy=counterexample
 ```
+
+Heavier workflow and scale suites still exist, but they now live under
+`benchmarks/registries/` and are treated as stress inputs instead of the
+default examples.
 
 ## Solver Use
 
@@ -506,7 +512,7 @@ The default and most reliable backend today is the explicit engine.
 For the current bounded SMT subset, you can also run:
 
 ```sh
-cargo run --bin valid -- check examples/models/failing_counter.valid \
+cargo run --bin valid -- check tests/fixtures/models/failing_counter.valid \
   --backend=smt-cvc5 \
   --solver-exec cvc5 \
   --solver-arg --lang \
@@ -517,10 +523,10 @@ cargo run --bin valid -- check examples/models/failing_counter.valid \
 There is also a mock command-backend demo:
 
 ```sh
-cargo run --bin valid -- check examples/models/failing_counter.valid \
+cargo run --bin valid -- check tests/fixtures/models/failing_counter.valid \
   --backend=command \
   --solver-exec sh \
-  --solver-arg examples/solvers/mock_command_solver.sh \
+  --solver-arg tests/fixtures/solvers/mock_command_solver.sh \
   --json
 ```
 
@@ -530,7 +536,7 @@ Declarative Rust models can use the same adapter path:
 cargo valid verify iam-access \
   --backend=command \
   --solver-exec sh \
-  --solver-arg examples/solvers/mock_command_solver.sh \
+  --solver-arg tests/fixtures/solvers/mock_command_solver.sh \
   --json
 ```
 
@@ -550,13 +556,13 @@ cargo valid clean all --json
 valid clean all --json
 ```
 
-To measure a practical suite repeatedly:
+To measure a benchmark registry repeatedly:
 
 ```sh
 cargo valid benchmark --json
 cargo valid benchmark --baseline=record
 cargo valid benchmark --baseline=compare --threshold-percent=25
-cargo valid --registry examples/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --json
+cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --json
 ```
 
 Benchmark baselines are meant to live in-repo under `benchmarks/baselines/` so
@@ -565,18 +571,18 @@ tracked reference set.
 
 ## Repository Layout
 
-- `valid/src/`
-  engine, DSL, lowering, solver adapters, and CLI implementation
 - `examples/`
-  registry files, practical scenarios, and domain-heavy example models
-- `examples/use_cases/`
-  shared business semantics for practical examples and domain E2E tests
+  small user-facing registry examples only
+- `benchmarks/registries/`
+  larger practical and scale-oriented registries
+- `tests/fixtures/`
+  compatibility `.valid` models, mock solvers, and domain fixtures used by tests
 - `tests/`
   engine-facing integration tests and CLI/E2E verification
-
-`valid` is treated as the language/toolchain package. Domain-heavy examples
-stay outside the engine source tree and are exercised through registries,
-example binaries, and integration tests.
+- `packages/valid/src/`
+  engine, DSL, lowering, solver adapters, and CLI implementation
+- `packages/valid_derive/`
+  proc-macro crate for DSL derives and function-like macro validation
 
 ## Recommended Workflow
 

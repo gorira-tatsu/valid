@@ -29,10 +29,16 @@ fn fizzbuzz_registry_file() -> PathBuf {
         .join("fizzbuzz.rs")
 }
 
+fn saas_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("saas_multi_tenant_registry.rs")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
-        .filter(|entry| entry.starts_with("tests/generated/") && entry.ends_with(".rs"))
+        .filter(|entry| entry.starts_with("generated-tests/") && entry.ends_with(".rs"))
     {
         let _ = fs::remove_file(path);
     }
@@ -41,7 +47,7 @@ fn cleanup_generated_files(stdout: &str) {
 fn extract_generated_files(stdout: &str) -> Vec<String> {
     stdout
         .split('"')
-        .filter(|entry| entry.starts_with("tests/generated/") && entry.ends_with(".rs"))
+        .filter(|entry| entry.starts_with("generated-tests/") && entry.ends_with(".rs"))
         .map(|entry| entry.to_string())
         .collect()
 }
@@ -113,9 +119,8 @@ fn cargo_valid_lists_registered_models() {
         .expect("cargo-valid list should run");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"prod-deploy-safe\""));
-    assert!(stdout.contains("\"breakglass-access-regression\""));
-    assert!(stdout.contains("\"refund-control\""));
+    assert!(stdout.contains("\"counter\""));
+    assert!(stdout.contains("\"failing-counter\""));
 }
 
 #[test]
@@ -133,7 +138,7 @@ fn cargo_subcommand_style_prefix_is_accepted() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"prod-deploy-safe\""));
+    assert!(stdout.contains("\"counter\""));
 }
 
 #[test]
@@ -195,6 +200,25 @@ fn cargo_valid_inspects_fizzbuzz_as_solver_ready() {
 }
 
 #[test]
+fn cargo_valid_inspects_grouped_saas_registry() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
+        .arg("inspect")
+        .arg("tenant-isolation-safe")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect saas registry should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"machine_ir_ready\":true"));
+    assert!(stdout.contains("\"solver_ready\":true"));
+    assert!(stdout.contains("\"tenant_isolation_path\""));
+    assert!(stdout.contains("\"P_NO_CROSS_TENANT_ACCESS\""));
+}
+
+#[test]
 fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
@@ -220,26 +244,30 @@ fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
 fn cargo_valid_graph_supports_dot_and_svg_formats() {
     let _guard = cargo_lock().lock().unwrap();
     let dot_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
         .arg("graph")
-        .arg("refund-control")
+        .arg("tenant-isolation-safe")
         .arg("--format=dot")
         .output()
         .expect("cargo-valid graph dot should run");
     assert!(dot_output.status.success());
     let dot = String::from_utf8_lossy(&dot_output.stdout);
     assert!(dot.contains("digraph model"));
-    assert!(dot.contains("ISSUE_REFUND"));
+    assert!(dot.contains("ENABLE_SHARED_SEARCH"));
 
     let svg_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
         .arg("graph")
-        .arg("refund-control")
+        .arg("tenant-isolation-safe")
         .arg("--format=svg")
         .output()
         .expect("cargo-valid graph svg should run");
     assert!(svg_output.status.success());
     let svg = String::from_utf8_lossy(&svg_output.stdout);
     assert!(svg.contains("<svg"));
-    assert!(svg.contains("RefundControlModel"));
+    assert!(svg.contains("TenantIsolationSafeModel"));
 }
 
 #[test]
@@ -295,6 +323,25 @@ fn cargo_valid_verifies_fizzbuzz_declaratively() {
     assert!(stdout.contains("\"status\":\"PASS\""));
     assert!(stdout.contains("\"property_id\":\"P_FIZZBUZZ_DIVISIBLE_BY_BOTH\""));
     assert!(stdout.contains("\"explored_states\":16"));
+}
+
+#[test]
+fn cargo_valid_verifies_grouped_saas_regression() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
+        .arg("verify")
+        .arg("tenant-isolation-regression")
+        .arg("--property=P_NO_CROSS_TENANT_ACCESS")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid verify saas regression should run");
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"property_id\":\"P_NO_CROSS_TENANT_ACCESS\""));
+    assert!(stdout.contains("SERVE_CROSS_TENANT_QUERY"));
 }
 
 #[test]
@@ -423,8 +470,10 @@ fn cargo_valid_migrate_check_marks_step_models_for_manual_review() {
 fn cargo_valid_migrate_check_passes_for_declarative_models() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
         .arg("migrate")
-        .arg("refund-control")
+        .arg("tenant-isolation-safe")
         .arg("--check")
         .arg("--json")
         .output()
@@ -441,8 +490,10 @@ fn cargo_valid_migrate_check_passes_for_declarative_models() {
 fn cargo_valid_explain_includes_review_metadata() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
         .arg("explain")
-        .arg("breakglass-access-regression")
+        .arg("tenant-isolation-regression")
         .arg("--json")
         .output()
         .expect("cargo-valid explain should run");
@@ -451,6 +502,7 @@ fn cargo_valid_explain_includes_review_metadata() {
     assert!(stdout.contains("\"failing_action_id\""));
     assert!(stdout.contains("\"next_steps\""));
     assert!(stdout.contains("\"review_summary\""));
+    assert!(stdout.contains("tenant_isolation_path"));
 }
 
 #[test]
@@ -541,7 +593,7 @@ fn cargo_valid_testgen_witness_generates_files() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"generated_files\":["));
-    assert!(stdout.contains("tests/generated/"));
+    assert!(stdout.contains("generated-tests/"));
     for path in extract_generated_files(&stdout) {
         let body = fs::read_to_string(&path).expect("generated file must exist");
         assert!(body.contains("assert_replay_output_json"));
@@ -553,10 +605,7 @@ fn cargo_valid_testgen_witness_generates_files() {
 fn cargo_valid_clean_removes_generated_and_artifacts() {
     let _guard = cargo_lock().lock().unwrap();
     let temp_root = unique_temp_project_dir("valid-clean");
-    let generated = temp_root
-        .join("tests")
-        .join("generated")
-        .join("clean-sentinel.rs");
+    let generated = temp_root.join("generated-tests").join("clean-sentinel.rs");
     let artifact_dir = temp_root.join("artifacts").join("clean-sentinel");
     fs::create_dir_all(generated.parent().unwrap()).expect("generated dir");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
@@ -600,7 +649,7 @@ fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"generated_files\":["));
-    assert!(stdout.contains("tests/generated/"));
+    assert!(stdout.contains("generated-tests/"));
     for path in extract_generated_files(&stdout) {
         let body = fs::read_to_string(&path).expect("generated file must exist");
         assert!(body.contains("assert_replay_output_json"));
@@ -736,7 +785,8 @@ fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
         .arg("--file")
         .arg(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples")
+                .join("benchmarks")
+                .join("registries")
                 .join("iam_enterprise_registry.rs"),
         )
         .arg("inspect")
@@ -804,14 +854,13 @@ fn cargo_valid_init_writes_valid_toml() {
     assert!(body.contains("default_solver_args = []"));
     assert!(body.contains("benchmark_repeats = 3"));
     assert!(body.contains("benchmarks_dir = \"artifacts/benchmarks\""));
-    assert!(body.contains("generated_tests_dir = \"tests/generated\""));
+    assert!(body.contains("generated_tests_dir = \"generated-tests\""));
     assert!(project_dir
         .join("examples")
         .join("valid_models.rs")
         .exists());
     assert!(project_dir
-        .join("tests")
-        .join("generated")
+        .join("generated-tests")
         .join(".gitkeep")
         .exists());
 
@@ -916,7 +965,7 @@ fn cargo_valid_benchmark_uses_project_config_targets() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"artifact_path\""));
     assert!(stdout.contains("\"runs\":["));
-    assert!(stdout.contains("refund-control"));
+    assert!(stdout.contains("counter"));
     assert!(stdout.contains("\"average_elapsed_ms\""));
 }
 
@@ -1020,7 +1069,8 @@ fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
         .arg("--solver-arg")
         .arg(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples")
+                .join("tests")
+                .join("fixtures")
                 .join("solvers")
                 .join("mock_cvc5_solver.sh"),
         )
@@ -1055,7 +1105,8 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
         .arg("--solver-arg")
         .arg(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("examples")
+                .join("tests")
+                .join("fixtures")
                 .join("solvers")
                 .join("mock_cvc5_solver.sh"),
         )

@@ -301,6 +301,7 @@ fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
     let legacy_property_count = count("property");
     let invariant_count = count_ident_recursive(tokens, "invariant");
     let transition_item_count = count_ident_recursive(tokens, "transition");
+    let grouped_on_count = count_ident_recursive(tokens, "on");
 
     let has_init = init_count > 0;
     let has_step = step_count > 0;
@@ -335,9 +336,9 @@ fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
                 .to_string(),
         );
     }
-    if has_transitions && transition_item_count == 0 {
+    if has_transitions && transition_item_count == 0 && grouped_on_count == 0 {
         return Err(
-            "valid_model! requires at least one `transition ...` inside `transitions { ... }`"
+            "valid_model! requires at least one `transition ...` or `on Action { ... }` entry inside `transitions { ... }`"
                 .to_string(),
         );
     }
@@ -676,6 +677,14 @@ mod tests {
     #[test]
     fn valid_model_shape_accepts_transitions_and_properties() {
         let tokens = "model CounterModel<State, Action>; init []; transitions { transition Go when |state| true => []; } properties { invariant P |state| true; }"
+            .parse()
+            .unwrap();
+        assert!(validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>()).is_ok());
+    }
+
+    #[test]
+    fn valid_model_shape_accepts_grouped_on_transitions() {
+        let tokens = "model CounterModel<State, Action>; init []; transitions { on Go { when |state| true => []; } } properties { invariant P |state| true; }"
             .parse()
             .unwrap();
         assert!(validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>()).is_ok());

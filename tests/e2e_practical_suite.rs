@@ -22,14 +22,15 @@ fn manifest_path() -> PathBuf {
 
 fn practical_registry_file() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples")
+        .join("benchmarks")
+        .join("registries")
         .join("practical_use_cases_registry.rs")
 }
 
 fn extract_generated_files(stdout: &str) -> Vec<String> {
     stdout
         .split('"')
-        .filter(|entry| entry.starts_with("tests/generated/") && entry.ends_with(".rs"))
+        .filter(|entry| entry.starts_with("generated-tests/") && entry.ends_with(".rs"))
         .map(|entry| entry.to_string())
         .collect()
 }

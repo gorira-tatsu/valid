@@ -45,21 +45,23 @@ valid_model! {
     init [FizzBuzzState { i: 0, fizz: false, buzz: false }];
 
     transitions {
-        transition Step [tags = ["fizzbuzz_path"]]
+        on Step {
+            [tags = ["fizzbuzz_path"]]
             when |state| state.i < 15 && (state.i + 1) % 15 == 0
             => [FizzBuzzState { i: state.i + 1, fizz: true, buzz: true }];
 
-        transition Step [tags = ["fizz_path"]]
+            [tags = ["fizz_path"]]
             when |state| state.i < 15 && (state.i + 1) % 3 == 0 && (state.i + 1) % 5 != 0
             => [FizzBuzzState { i: state.i + 1, fizz: true, buzz: false }];
 
-        transition Step [tags = ["buzz_path"]]
+            [tags = ["buzz_path"]]
             when |state| state.i < 15 && (state.i + 1) % 5 == 0 && (state.i + 1) % 3 != 0
             => [FizzBuzzState { i: state.i + 1, fizz: false, buzz: true }];
 
-        transition Step [tags = ["number_path"]]
+            [tags = ["number_path"]]
             when |state| state.i < 15 && (state.i + 1) % 3 != 0 && (state.i + 1) % 5 != 0
             => [FizzBuzzState { i: state.i + 1, fizz: false, buzz: false }];
+        }
     }
 
     properties {

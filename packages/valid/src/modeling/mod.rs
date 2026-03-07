@@ -875,6 +875,72 @@ macro_rules! __valid_model_internal {
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
+            $(
+                on $group_action:ident {
+                    $(
+                        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+                        when |$guard_state:ident| $guard_expr:expr
+                        => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];
+                    )+
+                }
+            )+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        $crate::__valid_model_internal! {
+            model $model<$state_ty, $action_ty>;
+            init [$($init_state),*];
+            transitions {
+                $(
+                    $(
+                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$state_ctor { $($field: $update_expr),* }];
+                    )+
+                )+
+            }
+            properties {
+                $(invariant $property |$holds_state| $holds_expr;)+
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
+            $(
+                on $group_action:ident {
+                    $(
+                        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+                        when |$guard_state:ident| $guard_expr:expr
+                        => [$($next_state:expr),* $(,)?];
+                    )+
+                }
+            )+
+        }
+        properties {
+            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
+        }
+    ) => {
+        $crate::__valid_model_internal! {
+            model $model<$state_ty, $action_ty>;
+            init [$($init_state),*];
+            transitions {
+                $(
+                    $(
+                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state),*];
+                    )+
+                )+
+            }
+            properties {
+                $(invariant $property |$holds_state| $holds_expr;)+
+            }
+        }
+    };
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        transitions {
             $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];)+
         }
         properties {
@@ -3348,14 +3414,16 @@ mod tests {
             even: true,
         }];
         transitions {
-            transition Step [tags = ["even_path"]] when |state| state.x < 3 && (state.x + 1) % 2 == 0 => [BranchState {
-                x: state.x + 1,
-                even: true,
-            }];
-            transition Step [tags = ["odd_path"]] when |state| state.x < 3 && (state.x + 1) % 2 != 0 => [BranchState {
-                x: state.x + 1,
-                even: false,
-            }];
+            on Step {
+                [tags = ["even_path"]] when |state| state.x < 3 && (state.x + 1) % 2 == 0 => [BranchState {
+                    x: state.x + 1,
+                    even: true,
+                }];
+                [tags = ["odd_path"]] when |state| state.x < 3 && (state.x + 1) % 2 != 0 => [BranchState {
+                    x: state.x + 1,
+                    even: false,
+                }];
+            }
         }
         properties {
             invariant P_BRANCH_BOUND |state| state.x <= 3;

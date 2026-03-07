@@ -1,9 +1,9 @@
 use valid::modeling::Finite;
-#[path = "../examples/use_cases/authz.rs"]
+#[path = "fixtures/domain/authz.rs"]
 mod authz;
-#[path = "../examples/use_cases/entitlements.rs"]
+#[path = "fixtures/domain/entitlements.rs"]
 mod entitlements;
-#[path = "../examples/use_cases/fare.rs"]
+#[path = "fixtures/domain/fare.rs"]
 mod fare;
 
 use authz::{

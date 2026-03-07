@@ -180,12 +180,12 @@ fn generated_vec_000001() {
 
 ### 5.3 保存方式の判断
 
-- MVP採用: `tests/generated/*.rs`
+- MVP採用: `generated-tests/*.rs`
 - Phase 2追加: `OUT_DIR + include!`
 
 ### 5.4 判断理由
 
-`tests/generated/*.rs` を MVP採用する理由:
+`generated-tests/*.rs` を MVP採用する理由:
 
 - 差分レビューしやすい。
 - 失敗時の参照が容易。
@@ -290,7 +290,7 @@ function minimize_trace(vector, predicate):
 
 出力先:
 
-- `tests/generated/<vector-id>.rs`
+- `generated-tests/<vector-id>.rs`
 
 利点:
 
@@ -547,7 +547,7 @@ pub fn compute_coverage(
 |---|---|---|---|
 | T-01 | vector | counterexample変換 | vector生成 |
 | T-02 | vector | witness変換 | coverage metadata付与 |
-| T-03 | render | generated file mode | `tests/generated/*.rs` 生成 |
+| T-03 | render | generated file mode | `generated-tests/*.rs` 生成 |
 | T-04 | render | include mode | `OUT_DIR` 生成 |
 | T-05 | minimize | 冗長trace短縮 | 短縮成功 |
 | T-06 | contract | hash生成 | 決定的hash |

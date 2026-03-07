@@ -42,7 +42,7 @@
 
 ## 7. generated tests
 
-- `tests/generated/<vector-id>.rs`
+- `generated-tests/<vector-id>.rs`
 
 ## 8. 原則
 

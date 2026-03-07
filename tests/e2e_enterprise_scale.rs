@@ -21,7 +21,8 @@ fn manifest_path() -> PathBuf {
 
 fn scale_registry_file() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples")
+        .join("benchmarks")
+        .join("registries")
         .join("enterprise_scale_registry.rs")
 }
 

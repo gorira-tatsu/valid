@@ -93,7 +93,7 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
 
 pub fn render_project_config_template(registry: &str) -> String {
     format!(
-        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"tests/generated\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
+        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
         registry
     )
 }
@@ -192,7 +192,7 @@ default_solver_args = ["--lang", "smt2"]
 suite_models = ["counter", "failing-counter"]
 benchmark_models = ["counter"]
 benchmark_repeats = 5
-generated_tests_dir = "tests/generated"
+generated_tests_dir = "generated-tests"
 artifacts_dir = "artifacts"
 benchmarks_dir = "artifacts/benchmarks"
 benchmark_baseline_dir = "benchmarks/baselines"
@@ -212,7 +212,7 @@ default_graph_format = "mermaid"
                 suite_models: vec!["counter".to_string(), "failing-counter".to_string()],
                 benchmark_models: vec!["counter".to_string()],
                 benchmark_repeats: Some(5),
-                generated_tests_dir: Some("tests/generated".to_string()),
+                generated_tests_dir: Some("generated-tests".to_string()),
                 artifacts_dir: Some("artifacts".to_string()),
                 benchmarks_dir: Some("artifacts/benchmarks".to_string()),
                 benchmark_baseline_dir: Some("benchmarks/baselines".to_string()),
@@ -227,7 +227,7 @@ default_graph_format = "mermaid"
         let body = render_project_config_template("examples/valid_models.rs");
         assert!(body.contains("registry = \"examples/valid_models.rs\""));
         assert!(body.contains("default_backend = \"explicit\""));
-        assert!(body.contains("generated_tests_dir = \"tests/generated\""));
+        assert!(body.contains("generated_tests_dir = \"generated-tests\""));
         assert!(body.contains("benchmark_repeats = 3"));
         assert!(body.contains("benchmark_baseline_dir = \"benchmarks/baselines\""));
     }

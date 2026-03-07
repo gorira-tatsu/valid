@@ -34,7 +34,7 @@ fn real_cvc5_backend_finds_counterexample_when_available() {
         return;
     };
 
-    let fail = repo_path("examples/models/failing_counter.valid");
+    let fail = repo_path("tests/fixtures/models/failing_counter.valid");
     let output = Command::new(binary_path())
         .arg("check")
         .arg(&fail)

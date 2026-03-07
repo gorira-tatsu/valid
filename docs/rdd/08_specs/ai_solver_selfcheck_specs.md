@@ -295,7 +295,7 @@
   "status": "ok",
   "vector_ids": ["vec-000001"],
   "generated_files": [
-    "tests/generated/vec-000001.rs"
+    "generated-tests/vec-000001.rs"
   ]
 }
 ```

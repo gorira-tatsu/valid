@@ -1252,12 +1252,18 @@ fn target_from_file(manifest_path: Option<String>, file: &str) -> ExternalTarget
         || normalized == format!("examples/{stem}.rs")
     {
         "--example"
+    } else if normalized.ends_with(&format!("/benchmarks/registries/{stem}.rs"))
+        || normalized == format!("benchmarks/registries/{stem}.rs")
+    {
+        "--example"
     } else if normalized.ends_with(&format!("/src/bin/{stem}.rs"))
         || normalized == format!("src/bin/{stem}.rs")
     {
         "--bin"
     } else {
-        usage_exit("`--file` currently supports files under `examples/` or `src/bin/`");
+        usage_exit(
+            "`--file` currently supports files under `examples/`, `benchmarks/registries/`, or `src/bin/`",
+        );
     };
     ExternalTarget {
         manifest_path,
@@ -1346,7 +1352,7 @@ fn cmd_init(parsed: &CliArgs) -> ! {
             process::exit(3);
         });
     }
-    let generated_dir = root.join("tests").join("generated");
+    let generated_dir = root.join("generated-tests");
     fs::create_dir_all(&generated_dir).unwrap_or_else(|err| {
         eprintln!("failed to create `{}`: {err}", generated_dir.display());
         process::exit(3);
@@ -1380,7 +1386,7 @@ fn cmd_init(parsed: &CliArgs) -> ! {
 }
 
 fn clean_generated_tests(root: &Path) -> Vec<String> {
-    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "tests/generated");
+    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "generated-tests");
     let mut removed = Vec::new();
     let Ok(entries) = fs::read_dir(&generated_dir) else {
         return removed;

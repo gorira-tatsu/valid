@@ -40,7 +40,7 @@ fn cleanup_generated_files(paths: &[String]) {
 
 #[test]
 fn safe_counter_passes_via_api() {
-    let source = read_fixture("examples/models/safe_counter.valid");
+    let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let outcome = check_source(&CheckRequest {
         request_id: "req-test-safe".to_string(),
         source_name: "safe_counter.valid".to_string(),
@@ -61,7 +61,7 @@ fn safe_counter_passes_via_api() {
 
 #[test]
 fn failing_counter_explains_and_generates_vectors() {
-    let source = read_fixture("examples/models/failing_counter.valid");
+    let source = read_fixture("tests/fixtures/models/failing_counter.valid");
     let outcome = check_source(&CheckRequest {
         request_id: "req-test-fail".to_string(),
         source_name: "failing_counter.valid".to_string(),
@@ -113,7 +113,7 @@ fn failing_counter_explains_and_generates_vectors() {
 
 #[test]
 fn multi_property_orchestrate_returns_aggregate_coverage() {
-    let source = read_fixture("examples/models/multi_property.valid");
+    let source = read_fixture("tests/fixtures/models/multi_property.valid");
     let response = orchestrate_source(&OrchestrateRequest {
         request_id: "req-test-orchestrate".to_string(),
         source_name: "multi_property.valid".to_string(),
@@ -129,7 +129,7 @@ fn multi_property_orchestrate_returns_aggregate_coverage() {
 
 #[test]
 fn inspect_includes_metadata_details() {
-    let source = read_fixture("examples/models/safe_counter.valid");
+    let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let response = inspect_source(&InspectRequest {
         request_id: "req-test-inspect".to_string(),
         source_name: "safe_counter.valid".to_string(),
@@ -149,7 +149,7 @@ fn inspect_includes_metadata_details() {
 
 #[test]
 fn cli_graph_renders_mermaid_for_valid_model() {
-    let safe = repo_path("examples/models/safe_counter.valid");
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
     let output = Command::new(binary_path())
         .arg("graph")
         .arg(&safe)
@@ -165,7 +165,7 @@ fn cli_graph_renders_mermaid_for_valid_model() {
 
 #[test]
 fn cli_graph_supports_dot_and_svg_formats() {
-    let safe = repo_path("examples/models/safe_counter.valid");
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
     let dot_output = Command::new(binary_path())
         .arg("graph")
         .arg(&safe)
@@ -191,7 +191,7 @@ fn cli_graph_supports_dot_and_svg_formats() {
 
 #[test]
 fn lint_reports_clean_valid_models() {
-    let source = read_fixture("examples/models/safe_counter.valid");
+    let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let response = lint_source(&InspectRequest {
         request_id: "req-test-lint".to_string(),
         source_name: "safe_counter.valid".to_string(),
@@ -204,7 +204,7 @@ fn lint_reports_clean_valid_models() {
 
 #[test]
 fn multi_property_testgen_can_target_specific_property() {
-    let source = read_fixture("examples/models/multi_property.valid");
+    let source = read_fixture("tests/fixtures/models/multi_property.valid");
     let response = testgen_source(&TestgenRequest {
         request_id: "req-testgen-property".to_string(),
         source_name: "multi_property.valid".to_string(),
@@ -225,7 +225,7 @@ fn parse_and_type_errors_are_visible_via_api() {
     let parse_diagnostics = inspect_source(&InspectRequest {
         request_id: "req-test-parse".to_string(),
         source_name: "parse_error.valid".to_string(),
-        source: read_fixture("examples/models/parse_error.valid"),
+        source: read_fixture("tests/fixtures/models/parse_error.valid"),
     })
     .expect_err("parse fixture must fail");
     assert_eq!(parse_diagnostics[0].error_code.as_str(), "PARSE_ERROR");
@@ -233,7 +233,7 @@ fn parse_and_type_errors_are_visible_via_api() {
     let type_outcome = check_source(&CheckRequest {
         request_id: "req-test-type".to_string(),
         source_name: "type_error.valid".to_string(),
-        source: read_fixture("examples/models/type_error.valid"),
+        source: read_fixture("tests/fixtures/models/type_error.valid"),
         property_id: None,
         backend: None,
         solver_executable: None,
@@ -249,9 +249,9 @@ fn parse_and_type_errors_are_visible_via_api() {
 
 #[test]
 fn cli_check_and_orchestrate_work_against_repo_examples() {
-    let safe = repo_path("examples/models/safe_counter.valid");
-    let fail = repo_path("examples/models/failing_counter.valid");
-    let multi = repo_path("examples/models/multi_property.valid");
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let fail = repo_path("tests/fixtures/models/failing_counter.valid");
+    let multi = repo_path("tests/fixtures/models/multi_property.valid");
 
     let safe_output = Command::new(binary_path())
         .arg("verify")
@@ -282,9 +282,9 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
 
 #[test]
 fn cli_readiness_and_clean_work() {
-    let safe = repo_path("examples/models/safe_counter.valid");
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
     let temp_root = unique_temp_dir("valid-cli-clean");
-    let generated = temp_root.join("tests/generated/valid-clean-sentinel.rs");
+    let generated = temp_root.join("generated-tests/valid-clean-sentinel.rs");
     let artifact_dir = temp_root.join("artifacts/valid-clean-sentinel");
     fs::create_dir_all(generated.parent().unwrap()).expect("generated dir");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
@@ -317,8 +317,8 @@ fn cli_readiness_and_clean_work() {
 
 #[test]
 fn cli_command_backend_demo_script_normalizes_failures() {
-    let fail = repo_path("examples/models/failing_counter.valid");
-    let solver = repo_path("examples/solvers/mock_command_solver.sh");
+    let fail = repo_path("tests/fixtures/models/failing_counter.valid");
+    let solver = repo_path("tests/fixtures/solvers/mock_command_solver.sh");
 
     let output = Command::new(binary_path())
         .arg("check")
@@ -340,8 +340,8 @@ fn cli_command_backend_demo_script_normalizes_failures() {
 
 #[test]
 fn cli_cvc5_backend_demo_script_normalizes_failures() {
-    let fail = repo_path("examples/models/failing_counter.valid");
-    let solver = repo_path("examples/solvers/mock_cvc5_solver.sh");
+    let fail = repo_path("tests/fixtures/models/failing_counter.valid");
+    let solver = repo_path("tests/fixtures/solvers/mock_cvc5_solver.sh");
 
     let output = Command::new(binary_path())
         .arg("check")
@@ -363,17 +363,19 @@ fn cli_cvc5_backend_demo_script_normalizes_failures() {
 }
 
 #[test]
-fn rust_native_examples_run_successfully() {
+fn small_registry_examples_run_successfully() {
     for example in [
-        "iam_like_authz",
-        "iam_policy_diff",
-        "train_fare",
-        "saas_entitlements",
+        "valid_models",
+        "fizzbuzz",
+        "iam_transition_registry",
+        "saas_multi_tenant_registry",
     ] {
         let output = Command::new("cargo")
             .arg("run")
             .arg("--example")
             .arg(example)
+            .arg("--")
+            .arg("models")
             .output()
             .expect("example should run");
         assert!(

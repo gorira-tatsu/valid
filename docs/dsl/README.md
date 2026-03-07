@@ -194,6 +194,23 @@ valid_model! {
 }
 ```
 
+Grouped action syntax is also supported and lowers to the same flat transition
+IR:
+
+```rust
+transitions {
+    on Approve {
+        [tags = ["allow_path", "approval_path"]]
+        when |state| state.approved == false
+        => [ReviewState {
+            score: state.score,
+            waiver: state.waiver,
+            approved: true,
+        }];
+    }
+}
+```
+
 Each transition carries:
 
 - action variant
@@ -204,6 +221,10 @@ Each transition carries:
 Modulo-based arithmetic is part of the supported declarative subset, so models
 like FizzBuzz can stay on the solver-ready path instead of falling back to
 `step`.
+
+`on Action { ... }` is currently grouping sugar. It does not yet provide
+`otherwise` / `else if` semantics; each `when` still lowers to an ordinary
+guarded transition for that action.
 
 ### Tags
 
@@ -297,6 +318,14 @@ the repo. It exercises:
 - multiple invariants
 - graph / inspect / verify on a solver-ready registry
 
+`examples/saas_multi_tenant_registry.rs` is the smallest service-oriented grouped
+transition example. It exercises:
+
+- `on Action { ... }` grouped transitions
+- enterprise entitlement checks with `FiniteEnumSet`
+- multi-tenant isolation properties
+- a safe model and an intentional regression model
+
 Run it with:
 
 ```sh
@@ -366,7 +395,7 @@ cargo valid suite
 - `coverage`
   Reports action, guard, and path-tag coverage.
 - `generate-tests`
-  Produces regression-oriented Rust tests under `tests/generated/`. JSON output
+  Produces regression-oriented Rust tests under `generated-tests/`. JSON output
   reports `strictness` and `derivation` for each vector so review tooling can
   tell strict trace-backed vectors from heuristic or synthetic ones.
 - `benchmark`

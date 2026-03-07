@@ -14,7 +14,7 @@
 ## 2. 受け入れ条件
 
 1. evidence から `TestVector` が作れる。
-2. `tests/generated/*.rs` を出力できる。
+2. `generated-tests/*.rs` を出力できる。
 3. minimization が目的関数を守る。
 
 ## 3. DoD

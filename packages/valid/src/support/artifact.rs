@@ -36,7 +36,7 @@ pub fn vector_path(run_id: &str, vector_id: &str) -> String {
 pub fn generated_test_path(vector_id: &str) -> String {
     path_from_env_or_default(
         "VALID_GENERATED_TESTS_DIR",
-        "tests/generated",
+        "generated-tests",
         &format!("{vector_id}.rs"),
     )
 }

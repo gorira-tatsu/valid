@@ -886,7 +886,7 @@ fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
 }
 
 fn clean_generated_tests(root: &std::path::Path) -> Vec<String> {
-    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "tests/generated");
+    let generated_dir = resolve_project_dir(root, "VALID_GENERATED_TESTS_DIR", "generated-tests");
     let mut removed = Vec::new();
     let Ok(entries) = fs::read_dir(&generated_dir) else {
         return removed;

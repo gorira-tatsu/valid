@@ -4,19 +4,31 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["valid_derive"]
+members = ["packages/valid_derive"]
 
 [lib]
 name = "valid"
-path = "valid/src/lib.rs"
+path = "packages/valid/src/lib.rs"
 
 [[bin]]
 name = "valid"
-path = "valid/src/bin/valid.rs"
+path = "packages/valid/src/bin/valid.rs"
 
 [[bin]]
 name = "cargo-valid"
-path = "valid/src/bin/cargo-valid.rs"
+path = "packages/valid/src/bin/cargo-valid.rs"
+
+[[example]]
+name = "practical_use_cases_registry"
+path = "benchmarks/registries/practical_use_cases_registry.rs"
+
+[[example]]
+name = "enterprise_scale_registry"
+path = "benchmarks/registries/enterprise_scale_registry.rs"
+
+[[example]]
+name = "iam_enterprise_registry"
+path = "benchmarks/registries/iam_enterprise_registry.rs"
 
 [dependencies]
-valid_derive = { path = "valid_derive" }
+valid_derive = { path = "packages/valid_derive" }

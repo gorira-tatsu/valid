@@ -1,4 +1,4 @@
 /target
 /artifacts
-/tests/generated/*.rs
+/generated-tests/*.rs
 .DS_Store
