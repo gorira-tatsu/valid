@@ -13,6 +13,24 @@ Help the user create or refine a `valid` model for `$ARGUMENTS`.
 - Treat the job as model design first, code generation second.
 - Favor concrete state fields, explicit actions, and named safety properties over prose-only guidance.
 
+## Target Resolution
+
+1. Prefer direct MCP tools when a `valid`, `pri`, or similarly named verification server exposes model-oriented operations such as `inspect`, `check`, `coverage`, or `testgen`.
+2. If no matching MCP tool is available, fall back to CLI.
+3. Resolve the target the same way as `valid-check`:
+   - `.valid` file or existing path -> file mode
+   - non-file first argument -> Rust registry model name
+   - no argument with `valid.toml` -> run `cargo valid models --json` or `cargo run -q --bin cargo-valid -- valid models --json`, then resolve the best candidate from the current context and ask only when it is still ambiguous
+
+## CLI Fallback
+
+- Rust/project mode:
+  - Preferred if installed: `cargo valid`
+  - Repo-local fallback: `cargo run -q --bin cargo-valid -- valid`
+- `.valid` file mode:
+  - Preferred if installed: `valid`
+  - Repo-local fallback: `cargo run -q --bin valid --`
+
 ## Discovery Workflow
 
 1. Read the user request and search the repository for adjacent domain logic, policy checks, reducers, state machines, or existing `valid` examples.
@@ -28,13 +46,15 @@ Help the user create or refine a `valid` model for `$ARGUMENTS`.
 
 1. Draft the smallest useful model skeleton that captures the core business rules.
 2. When working in Rust-first mode:
-   - Prefer adding or updating a registry-backed model file.
+   - Prefer MCP or registry-backed model operations when they are available.
+   - Otherwise add or update a registry-backed model file.
    - Keep names stable and property identifiers readable.
 3. When working in `.valid` mode:
    - Use syntax that `valid inspect` can parse immediately.
 4. After writing or updating the model, validate it:
+   - First prefer direct MCP or registry-backed validation if it is available.
    - Rust/project mode: `cargo valid inspect <model> --json` with repo-local fallback `cargo run -q --bin cargo-valid -- valid inspect <model> --json`
-   - File mode: `cargo run -q --bin valid -- inspect <file> --json`
+   - File mode: `valid inspect <file> --json` with repo-local fallback `cargo run -q --bin valid -- inspect <file> --json`
 5. If validation fails, fix structural issues before discussing advanced refinements.
 
 ## Required Summary
