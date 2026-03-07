@@ -1,25 +1,28 @@
+use std::process::Command;
 use std::{
     env, fs,
     path::{Path, PathBuf},
     process,
 };
-use std::process::Command;
 
 use valid::{
     api::{
-        check_source, explain_source, inspect_source, lint_source,
-        orchestrate_source, render_inspect_json, render_inspect_text, render_lint_json,
-        render_lint_text, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
-        TestgenRequest,
+        check_source, explain_source, inspect_source, lint_source, orchestrate_source,
+        render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
+        testgen_source, CheckRequest, InspectRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
     coverage::{render_coverage_json, render_coverage_text},
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
+    project::{load_project_config, render_project_config_template},
 };
 
 fn main() {
     let parsed = maybe_auto_discover_external(parse_cli(env::args().skip(1).collect()));
+    if parsed.command == "init" {
+        cmd_init(&parsed);
+    }
     if parsed.command == "clean" {
         cmd_clean(&parsed);
     }
@@ -41,6 +44,7 @@ fn main() {
         solver_args: parsed.solver_args,
         actions: parsed.actions,
         focus_action_id: parsed.focus_action_id,
+        suite_models: parsed.suite_models,
     };
 
     match parsed.command.as_str() {
@@ -54,6 +58,7 @@ fn main() {
         "orchestrate" => cmd_orchestrate(local_args),
         "testgen" => cmd_testgen(local_args),
         "replay" => cmd_replay(local_args),
+        "init" => usage_exit(&primary_usage()),
         "help" => usage_exit(&primary_usage()),
         _ => {
             usage_exit(&primary_usage());
@@ -62,7 +67,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <models|inspect|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
 }
 
 fn run_external_registry(parsed: CliArgs) -> ! {
@@ -80,7 +85,11 @@ fn run_external_registry(parsed: CliArgs) -> ! {
 }
 
 fn run_external_all(parsed: CliArgs) -> ! {
-    let models = fetch_external_models(&parsed);
+    let models = if parsed.suite_models.is_empty() {
+        fetch_external_models(&parsed)
+    } else {
+        parsed.suite_models.clone()
+    };
     let mut aggregate_status = 0;
     let mut json_runs = Vec::new();
 
@@ -100,6 +109,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
             example: parsed.example.clone(),
             bin: parsed.bin.clone(),
             file: parsed.file.clone(),
+            suite_models: Vec::new(),
         });
         let output = command.output().unwrap_or_else(|err| {
             eprintln!("failed to execute target registry: {err}");
@@ -191,6 +201,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         example: parsed.example.clone(),
         bin: parsed.bin.clone(),
         file: parsed.file.clone(),
+        suite_models: Vec::new(),
     })
     .output()
     .unwrap_or_else(|err| {
@@ -205,7 +216,15 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
 }
 
 fn cmd_all(parsed: ParsedArgs) {
-    let models = list_bundled_models();
+    let models = if parsed.suite_models.is_empty() {
+        list_bundled_models()
+    } else {
+        parsed
+            .suite_models
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    };
     let mut aggregate_status = 0;
     let mut json_runs = Vec::new();
 
@@ -255,7 +274,9 @@ fn cmd_list(parsed: ParsedArgs) {
 }
 
 fn cmd_inspect(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid inspect <model> [--json]"));
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid inspect <model> [--json]"));
     let request = InspectRequest {
         request_id: "cargo-valid-inspect".to_string(),
         source_name: normalized_model_ref(&model),
@@ -283,7 +304,9 @@ fn cmd_inspect(parsed: ParsedArgs) {
 }
 
 fn cmd_lint(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid lint <model> [--json]"));
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid lint <model> [--json]"));
     let request = InspectRequest {
         request_id: "cargo-valid-lint".to_string(),
         source_name: normalized_model_ref(&model),
@@ -343,7 +366,9 @@ fn cmd_check(parsed: ParsedArgs) {
 }
 
 fn cmd_explain(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid explain <model> [--json]"));
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid explain <model> [--json]"));
     let request = CheckRequest {
         request_id: "cargo-valid-explain".to_string(),
         source_name: normalized_model_ref(&model),
@@ -391,7 +416,9 @@ fn cmd_explain(parsed: ParsedArgs) {
 }
 
 fn cmd_coverage(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid coverage <model> [--json]"));
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid coverage <model> [--json]"));
     let report = coverage_bundled_model(&normalized_model_ref(&model)).unwrap_or_else(|message| {
         eprintln!("{message}");
         process::exit(3);
@@ -568,6 +595,7 @@ struct ParsedArgs {
     solver_args: Vec<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
+    suite_models: Vec<String>,
 }
 
 #[derive(Default)]
@@ -586,6 +614,7 @@ struct CliArgs {
     actions: Vec<String>,
     focus_action_id: Option<String>,
     json: bool,
+    suite_models: Vec<String>,
 }
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
@@ -593,12 +622,16 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--manifest-path" => parsed.manifest_path = Some(next_arg(&mut iter, "--manifest-path")),
+            "--manifest-path" => {
+                parsed.manifest_path = Some(next_arg(&mut iter, "--manifest-path"))
+            }
             "--registry" => parsed.file = Some(next_arg(&mut iter, "--registry")),
             "--example" => parsed.example = Some(next_arg(&mut iter, "--example")),
             "--bin" => parsed.bin = Some(next_arg(&mut iter, "--bin")),
             "--file" => parsed.file = Some(next_arg(&mut iter, "--file")),
-            "--solver-exec" => parsed.solver_executable = Some(next_arg(&mut iter, "--solver-exec")),
+            "--solver-exec" => {
+                parsed.solver_executable = Some(next_arg(&mut iter, "--solver-exec"))
+            }
             "--solver-arg" => parsed.solver_args.push(next_arg(&mut iter, "--solver-arg")),
             "--json" => parsed.json = true,
             _ if arg.starts_with("--strategy=") => {
@@ -648,7 +681,8 @@ fn normalize_command(command: &str) -> String {
 }
 
 fn next_arg(iter: &mut impl Iterator<Item = String>, flag: &str) -> String {
-    iter.next().unwrap_or_else(|| usage_exit(&format!("missing value for {flag}")))
+    iter.next()
+        .unwrap_or_else(|| usage_exit(&format!("missing value for {flag}")))
 }
 
 fn normalized_model_ref(model: &str) -> String {
@@ -666,25 +700,41 @@ struct ExternalTarget {
 }
 
 fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
-    if parsed.command == "clean" {
+    if matches!(parsed.command.as_str(), "clean" | "init" | "help") {
         return parsed;
     }
-    if parsed.manifest_path.is_some()
-        || parsed.file.is_some()
-        || parsed.example.is_some()
-        || parsed.bin.is_some()
-    {
-        return parsed;
-    }
-    let current_dir = match env::current_dir() {
-        Ok(dir) => dir,
-        Err(_) => return parsed,
-    };
+    let current_dir = project_root(&parsed);
     let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cargo_toml = current_dir.join("Cargo.toml");
+    match load_project_config(&current_dir) {
+        Ok(Some(config)) => {
+            if parsed.backend.is_none() {
+                parsed.backend = config.default_backend;
+            }
+            if parsed.suite_models.is_empty() {
+                parsed.suite_models = config.suite_models;
+            }
+            if parsed.file.is_none() && parsed.example.is_none() && parsed.bin.is_none() {
+                if let Some(registry) = config.registry {
+                    parsed.file = Some(current_dir.join(registry).to_string_lossy().to_string());
+                }
+            }
+            if parsed.manifest_path.is_none() && cargo_toml.exists() {
+                parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
+            }
+        }
+        Ok(None) => {}
+        Err(message) => {
+            eprintln!("{message}");
+            process::exit(3);
+        }
+    }
+    if parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some() {
+        return parsed;
+    }
     if current_dir == built_in_manifest_dir {
         return parsed;
     }
-    let cargo_toml = current_dir.join("Cargo.toml");
     if !cargo_toml.exists() {
         return parsed;
     }
@@ -693,10 +743,23 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
         current_dir.join("src").join("bin").join("valid_models.rs"),
     ];
     if let Some(file) = candidates.into_iter().find(|path| path.exists()) {
-        parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
+        if parsed.manifest_path.is_none() {
+            parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
+        }
         parsed.file = Some(file.to_string_lossy().to_string());
     }
     parsed
+}
+
+fn project_root(parsed: &CliArgs) -> PathBuf {
+    if let Some(manifest_path) = &parsed.manifest_path {
+        let path = PathBuf::from(manifest_path);
+        return path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+    }
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn resolve_external_target(parsed: &CliArgs) -> ExternalTarget {
@@ -756,7 +819,9 @@ fn parse_models_json(stdout: &str) -> Vec<String> {
     let end = stdout[start..]
         .find(']')
         .map(|offset| start + offset)
-        .unwrap_or_else(|| usage_exit("registry list output did not contain a closing models array"));
+        .unwrap_or_else(|| {
+            usage_exit("registry list output did not contain a closing models array")
+        });
     stdout[start + 1..end]
         .split(',')
         .filter_map(|entry| {
@@ -796,14 +861,38 @@ fn usage_exit(usage: &str) -> ! {
 }
 
 fn clean_root(parsed: &CliArgs) -> PathBuf {
-    if let Some(manifest_path) = &parsed.manifest_path {
-        let path = PathBuf::from(manifest_path);
-        return path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+    project_root(parsed)
+}
+
+fn cmd_init(parsed: &CliArgs) -> ! {
+    let root = project_root(parsed);
+    let cargo_toml = root.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        eprintln!("expected Cargo.toml in {}", root.display());
+        process::exit(3);
     }
-    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    let config_path = root.join("valid.toml");
+    if config_path.exists() {
+        eprintln!("`{}` already exists", config_path.display());
+        process::exit(3);
+    }
+    let registry = parsed.file.as_deref().unwrap_or("examples/valid_models.rs");
+    let body = render_project_config_template(registry);
+    fs::write(&config_path, body).unwrap_or_else(|err| {
+        eprintln!("failed to write `{}`: {err}", config_path.display());
+        process::exit(3);
+    });
+    if parsed.json {
+        println!(
+            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\"}}",
+            config_path.display(),
+            registry
+        );
+    } else {
+        println!("created: {}", config_path.display());
+        println!("registry: {registry}");
+    }
+    process::exit(0);
 }
 
 fn clean_generated_tests(root: &Path) -> Vec<String> {

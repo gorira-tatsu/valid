@@ -928,7 +928,10 @@ mod tests {
             panic!("expected completed outcome");
         };
         assert_eq!(result.status, crate::engine::RunStatus::Fail);
-        assert_eq!(result.manifest.backend_name, crate::engine::BackendKind::SmtCvc5);
+        assert_eq!(
+            result.manifest.backend_name,
+            crate::engine::BackendKind::SmtCvc5
+        );
         assert_eq!(
             result.property_result.reason_code.as_deref(),
             Some("CVC5_COUNTEREXAMPLE")

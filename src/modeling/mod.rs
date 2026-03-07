@@ -240,7 +240,9 @@ where
         .iter()
         .map(|tag| tag.to_string())
         .collect::<BTreeSet<_>>();
-    tags.extend(infer_decision_path_tags(action_id, reads, writes, guard, effect));
+    tags.extend(infer_decision_path_tags(
+        action_id, reads, writes, guard, effect,
+    ));
     tags.into_iter().collect()
 }
 
@@ -1066,7 +1068,12 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         action_execution_counts,
         visited_state_count: exploration.nodes.len(),
         repeated_state_count,
-        max_depth_observed: exploration.nodes.iter().map(|node| node.depth).max().unwrap_or(0),
+        max_depth_observed: exploration
+            .nodes
+            .iter()
+            .map(|node| node.depth)
+            .max()
+            .unwrap_or(0),
         guard_true_actions,
         guard_false_actions,
         guard_true_counts,
@@ -1103,7 +1110,10 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         })
         .collect::<Vec<_>>();
     let coverage = collect_machine_coverage::<M>();
-    let action_id = failure_step.action_id.clone().unwrap_or_else(|| "INITIAL".to_string());
+    let action_id = failure_step
+        .action_id
+        .clone()
+        .unwrap_or_else(|| "INITIAL".to_string());
     let transition = machine_transition_ir::<M>()
         .into_iter()
         .find(|transition| transition.action_id == action_id);
@@ -1176,8 +1186,16 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         ));
     }
     let confidence = (0.45_f32
-        + if !involved_fields.is_empty() { 0.2_f32 } else { 0.0_f32 }
-        + if execution_count <= 1 { 0.15_f32 } else { 0.0_f32 }
+        + if !involved_fields.is_empty() {
+            0.2_f32
+        } else {
+            0.0_f32
+        }
+        + if execution_count <= 1 {
+            0.15_f32
+        } else {
+            0.0_f32
+        }
         + if coverage
             .uncovered_guards
             .iter()
@@ -1323,7 +1341,11 @@ fn build_path_tag_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVect
                 let signature = (
                     tag,
                     vector.focus_action_id.clone(),
-                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|s| s.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -1339,7 +1361,11 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
     let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
     let transition_ir = machine_transition_ir::<M>();
-    if transition_ir.is_empty() || transition_ir.iter().all(|transition| transition.guard.is_none()) {
+    if transition_ir.is_empty()
+        || transition_ir
+            .iter()
+            .all(|transition| transition.guard.is_none())
+    {
         return build_transition_witness_vectors::<M>(property_id);
     }
 
@@ -1366,7 +1392,10 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
                 None,
                 Some(true),
                 {
-                    let mut notes = vec![format!("guard_true: {}", descriptor.guard.unwrap_or("unknown"))];
+                    let mut notes = vec![format!(
+                        "guard_true: {}",
+                        descriptor.guard.unwrap_or("unknown")
+                    )];
                     notes.extend(
                         machine_transition_tags_for_action::<M>(descriptor.action_id)
                             .into_iter()
@@ -1378,7 +1407,11 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
                 let signature = (
                     vector.focus_action_id.clone(),
                     vector.expected_guard_enabled,
-                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|s| s.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -1405,7 +1438,10 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
                 None,
                 Some(false),
                 {
-                    let mut notes = vec![format!("guard_false: {}", descriptor.guard.unwrap_or("unknown"))];
+                    let mut notes = vec![format!(
+                        "guard_false: {}",
+                        descriptor.guard.unwrap_or("unknown")
+                    )];
                     notes.extend(
                         machine_transition_tags_for_action::<M>(descriptor.action_id)
                             .into_iter()
@@ -1417,7 +1453,11 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
                 let signature = (
                     vector.focus_action_id.clone(),
                     vector.expected_guard_enabled,
-                    vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|s| s.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -1461,7 +1501,11 @@ fn build_boundary_focus_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
                     let signature = (
                         vector.focus_field.clone(),
                         vector.notes.clone(),
-                        vector.actions.iter().map(|s| s.action_id.clone()).collect::<Vec<_>>(),
+                        vector
+                            .actions
+                            .iter()
+                            .map(|s| s.action_id.clone())
+                            .collect::<Vec<_>>(),
                     );
                     if seen.insert(signature) {
                         vectors.push(vector);
@@ -1474,7 +1518,10 @@ fn build_boundary_focus_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
     vectors
 }
 
-fn build_randomized_vectors<M: VerifiedMachine>(property_id: &str, limit: usize) -> Vec<TestVector> {
+fn build_randomized_vectors<M: VerifiedMachine>(
+    property_id: &str,
+    limit: usize,
+) -> Vec<TestVector> {
     let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
     let mut candidates = exploration
@@ -1507,7 +1554,9 @@ fn build_randomized_vectors<M: VerifiedMachine>(property_id: &str, limit: usize)
             None,
             vec!["deterministic_randomized_sample".to_string()],
         ) {
-            vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(byte as u64)));
+            vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| {
+                acc.wrapping_mul(131).wrapping_add(byte as u64)
+            }));
             vectors.push(vector);
         }
     }
@@ -1558,7 +1607,9 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
                     + source_kind
                     + strategy
                     + &signature
-                    + &format!("{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"))
+                    + &format!(
+                        "{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"
+                    ))
             )
             .replace("sha256:", "")
         ),
@@ -1638,7 +1689,10 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
         .into_iter()
         .map(|transition| {
             let guard = lower_machine_expr(transition.guard).ok_or_else(|| {
-                format!("unsupported machine guard expression `{}`", transition.guard)
+                format!(
+                    "unsupported machine guard expression `{}`",
+                    transition.guard
+                )
             })?;
             let updates = transition
                 .updates
@@ -1656,8 +1710,16 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
             Ok(ActionIr {
                 action_id: transition.action_id.to_string(),
                 label: transition.action_id.to_string(),
-                reads: transition.reads.iter().map(|item| item.to_string()).collect(),
-                writes: transition.writes.iter().map(|item| item.to_string()).collect(),
+                reads: transition
+                    .reads
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect(),
+                writes: transition
+                    .writes
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect(),
                 path_tags: decision_path_tags(
                     transition.path_tags,
                     transition.action_id,
@@ -1675,15 +1737,12 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
     let properties = M::properties()
         .into_iter()
         .map(|property| {
-            let expr = property
-                .expr
-                .and_then(lower_machine_expr)
-                .ok_or_else(|| {
-                    format!(
-                        "machine property `{}` is not representable in the current IR subset",
-                        property.property_id
-                    )
-                })?;
+            let expr = property.expr.and_then(lower_machine_expr).ok_or_else(|| {
+                format!(
+                    "machine property `{}` is not representable in the current IR subset",
+                    property.property_id
+                )
+            })?;
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
                 kind: property.property_kind,
@@ -1705,8 +1764,7 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
     match field.rust_type {
         "bool" => Ok(FieldType::Bool),
         "u8" => {
-            let (min, max) = parse_inclusive_range(field.range)
-                .unwrap_or((0, u8::MAX as u64));
+            let (min, max) = parse_inclusive_range(field.range).unwrap_or((0, u8::MAX as u64));
             if max > u8::MAX as u64 {
                 return Err(format!(
                     "range `{}` exceeds supported u8 bounds for field `{}`",
@@ -1842,7 +1900,6 @@ fn split_top_level_machine<'a>(input: &'a str, needle: &str) -> Option<(&'a str,
     None
 }
 
-
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
     let property = primary_property::<M>();
     check_machine_outcome_for_property::<M>(request_id, property.property_id)
@@ -1917,9 +1974,11 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
 pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<ExplicitRunResult> {
     property_ids::<M>()
         .into_iter()
-        .filter_map(|property_id| match check_machine_outcome_for_property::<M>(request_id, property_id) {
-            CheckOutcome::Completed(result) => Some(result),
-            CheckOutcome::Errored(_) => None,
+        .filter_map(|property_id| {
+            match check_machine_outcome_for_property::<M>(request_id, property_id) {
+                CheckOutcome::Completed(result) => Some(result),
+                CheckOutcome::Errored(_) => None,
+            }
         })
         .collect()
 }
@@ -1939,7 +1998,12 @@ pub fn check_machine_with_adapter<M: VerifiedMachine>(
     let snapshot = snapshot_model(&model);
     let property_id = property_id
         .map(str::to_string)
-        .or_else(|| model.properties.first().map(|property| property.property_id.clone()))
+        .or_else(|| {
+            model
+                .properties
+                .first()
+                .map(|property| property.property_id.clone())
+        })
         .ok_or_else(|| format!("model `{}` has no properties", M::model_id()))?;
     let mut plan = RunPlan::default();
     plan.manifest = RunManifest {
@@ -1957,8 +2021,7 @@ pub fn check_machine_with_adapter<M: VerifiedMachine>(
         seed: None,
     };
     plan.property_selection = PropertySelection::ExactlyOne(property_id);
-    run_with_adapter(&model, &plan, adapter)
-        .map(|normalized| normalized.outcome)
+    run_with_adapter(&model, &plan, adapter).map(|normalized| normalized.outcome)
 }
 
 fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
@@ -2101,7 +2164,8 @@ fn explore_machine<M: VerifiedMachine>(
                     frontier.push_back(child_index);
                     child_index
                 } else {
-                    nodes.iter()
+                    nodes
+                        .iter()
                         .position(|item| item.state == prior_state)
                         .expect("visited state must exist in node list")
                 };
@@ -2192,11 +2256,15 @@ fn build_evidence_trace<M: VerifiedMachine>(
 mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
-        check_machine_outcomes, collect_machine_coverage, explain_machine,
-        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
-        state_field_descriptors, transition_descriptors, ModelingRunStatus, ModelingState,
+        check_machine_outcomes, collect_machine_coverage, explain_machine, lower_machine_model,
+        machine_capability_report, machine_transition_ir, property_ids, state_field_descriptors,
+        transition_descriptors, ModelingRunStatus, ModelingState,
     };
-    use crate::{engine::CheckOutcome, ir::{BinaryOp, ExprIr}, valid_actions, valid_state};
+    use crate::{
+        engine::CheckOutcome,
+        ir::{BinaryOp, ExprIr},
+        valid_actions, valid_state,
+    };
 
     valid_state! {
         struct State {
@@ -2309,7 +2377,10 @@ mod tests {
 
     #[test]
     fn modeling_spec_exposes_multiple_properties() {
-        assert_eq!(property_ids::<CounterModel>(), vec!["P_RANGE", "P_LOCKED_RANGE"]);
+        assert_eq!(
+            property_ids::<CounterModel>(),
+            vec!["P_RANGE", "P_LOCKED_RANGE"]
+        );
         let outcomes = check_machine_outcomes::<CounterModel>("req-modeling-all");
         assert_eq!(outcomes.len(), 2);
         assert!(outcomes
@@ -2382,7 +2453,11 @@ mod tests {
 
     #[test]
     fn derive_macros_attach_model_traits() {
-        let snapshot = DerivedState { x: 1, locked: false }.snapshot();
+        let snapshot = DerivedState {
+            x: 1,
+            locked: false,
+        }
+        .snapshot();
         assert_eq!(snapshot.get("x"), Some(&crate::ir::Value::UInt(1)));
         let fields = state_field_descriptors::<DerivedState>();
         assert_eq!(fields[0].range, Some("0..=3"));
@@ -2451,7 +2526,9 @@ mod tests {
         let implicit = machine_transition_ir::<CounterModel>();
         assert_eq!(implicit.len(), 3);
         assert!(implicit.iter().all(|transition| transition.guard.is_none()));
-        assert!(implicit.iter().all(|transition| transition.path_tags.is_empty()));
+        assert!(implicit
+            .iter()
+            .all(|transition| transition.path_tags.is_empty()));
     }
 
     #[test]
@@ -2460,7 +2537,13 @@ mod tests {
         assert_eq!(model.model_id, "AccessModel");
         assert_eq!(model.actions.len(), 2);
         assert_eq!(model.properties.len(), 1);
-        assert!(matches!(model.actions[1].guard, ExprIr::Binary { op: BinaryOp::And, .. }));
+        assert!(matches!(
+            model.actions[1].guard,
+            ExprIr::Binary {
+                op: BinaryOp::And,
+                ..
+            }
+        ));
         assert_eq!(model.actions[0].updates[0].field, "attached");
     }
 
@@ -2476,9 +2559,7 @@ mod tests {
         assert!(report.explicit_ready);
         assert!(!report.ir_ready);
         assert!(!report.solver_ready);
-        assert!(report
-            .reasons
-            .contains(&"opaque_step_closure".to_string()));
+        assert!(report.reasons.contains(&"opaque_step_closure".to_string()));
         assert!(report
             .reasons
             .contains(&"missing_declarative_transitions".to_string()));
@@ -2510,6 +2591,8 @@ mod tests {
 
         let witness_vectors = build_machine_test_vectors::<CounterModel>();
         assert!(!witness_vectors.is_empty());
-        assert!(witness_vectors.iter().all(|vector| vector.strategy == "witness"));
+        assert!(witness_vectors
+            .iter()
+            .all(|vector| vector.strategy == "witness"));
     }
 }

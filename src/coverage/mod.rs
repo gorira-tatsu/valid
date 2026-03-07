@@ -91,7 +91,11 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 *action_execution_counts
                     .entry(action_id.clone())
                     .or_insert(0) += 1;
-                if let Some(action) = model.actions.iter().find(|action| &action.action_id == action_id) {
+                if let Some(action) = model
+                    .actions
+                    .iter()
+                    .find(|action| &action.action_id == action_id)
+                {
                     for tag in &action.path_tags {
                         *path_tag_counts.entry(tag.clone()).or_insert(0) += 1;
                     }
@@ -258,11 +262,7 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
         if index > 0 {
             out.push(',');
         }
-        out.push_str(&format!(
-            "{{\"tag\":\"{}\",\"count\":{}}}",
-            tag,
-            count
-        ));
+        out.push_str(&format!("{{\"tag\":\"{}\",\"count\":{}}}", tag, count));
     }
     out.push(']');
     out.push_str(&format!(

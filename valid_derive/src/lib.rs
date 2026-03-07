@@ -320,7 +320,9 @@ fn strip_attributes(tokens: Vec<TokenTree>) -> Vec<TokenTree> {
 }
 
 fn parse_array_values(value: Option<&String>) -> Vec<String> {
-    let Some(value) = value else { return Vec::new() };
+    let Some(value) = value else {
+        return Vec::new();
+    };
     let trimmed = value.trim();
     let inner = trimmed
         .strip_prefix('[')
@@ -344,10 +346,7 @@ fn render_literal_slice(values: &[String]) -> String {
 }
 
 fn trim_quotes(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches('"')
-        .to_string()
+    value.trim().trim_matches('"').to_string()
 }
 
 fn as_ident_name(token: &TokenTree) -> Option<String> {

@@ -1,6 +1,4 @@
-use valid::{
-    registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidState,
-};
+use valid::{registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidState};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, ValidState)]
 struct DeploymentState {

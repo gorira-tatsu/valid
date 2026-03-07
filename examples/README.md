@@ -42,20 +42,27 @@ run_registry_cli(valid_models![
 ]);
 ```
 
-Run it through the cargo subcommand with:
+Project-first flow:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- readiness counter --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify failing-counter --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=witness --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=boundary --json
-cargo run --bin cargo-valid -- --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard --json
-cargo run --bin cargo-valid -- generate-tests iam-access --strategy=path --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs replay failing-counter --property=P_FAIL --actions=INC,INC --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs suite --json
-cargo run --bin cargo-valid -- clean all --json
+cargo install --path .
+cargo valid init
+cargo valid models
+cargo valid inspect counter
+cargo valid readiness counter
+cargo valid verify failing-counter
+cargo valid generate-tests counter --strategy=witness
+cargo valid generate-tests counter --strategy=boundary
+cargo valid replay failing-counter --property=P_FAIL --actions=INC,INC
+cargo valid suite
+cargo valid clean all
+```
+
+Registry override examples:
+
+```sh
+cargo valid --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard --json
+cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 ```
 
 Command meanings:
@@ -114,23 +121,22 @@ tool against more realistic workflows. It currently includes:
 - `data-export-control`
   contract / DPA / region alignment gating
 
-You can run the whole suite with:
+Use `cargo valid` directly:
 
 ```sh
-sh examples/run_practical_suite.sh
-```
-
-Or use `cargo-valid` directly:
-
-```sh
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs models --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs readiness prod-deploy-safe --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs coverage refund-control --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path --json
+cargo valid --registry examples/practical_use_cases_registry.rs models
+cargo valid --registry examples/practical_use_cases_registry.rs readiness prod-deploy-safe
+cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
+cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-control
+cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
+cargo valid --registry examples/practical_use_cases_registry.rs suite
 ```
 
 ## Rust model examples
+
+The underlying business semantics for these examples live in
+`src/use_cases/`, so examples, library code, and integration tests share the
+same model logic.
 
 - `iam_like_authz.rs`
   - IAM-like `deny overrides`, `boundary`, `SCP`, and request-context oriented
@@ -200,20 +206,19 @@ cargo run -- check rust:failing-counter --json
 cargo run -- coverage rust:counter --json
 ```
 
-If you install the cargo subcommand binary, you can also use:
+If `valid.toml` points at `examples/valid_models.rs`, you can use:
 
 ```sh
-cargo valid list --json
-cargo valid inspect counter --json
-cargo valid verify failing-counter --json
-cargo valid --registry examples/valid_models.rs suite --json
-cargo valid clean all --json
+cargo valid models
+cargo valid inspect counter
+cargo valid verify failing-counter
+cargo valid suite
+cargo valid clean all
 ```
 
-From another crate root, `cargo valid` also auto-discovers
+Without `valid.toml`, `cargo valid` still auto-discovers
 `examples/valid_models.rs` or `src/bin/valid_models.rs` when present, so
-`cargo valid inspect <model>` works without an explicit `--file` in the common
-case.
+`cargo valid inspect <model>` continues to work in the common case.
 
 ## Current capability boundary
 

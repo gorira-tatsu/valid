@@ -532,10 +532,15 @@ fn cmd_replay(args: Vec<String>) {
         let property_id = parsed
             .property_id
             .as_deref()
-            .or_else(|| model.properties.first().map(|property| property.property_id.as_str()))
+            .or_else(|| {
+                model
+                    .properties
+                    .first()
+                    .map(|property| property.property_id.as_str())
+            })
             .unwrap_or("P_SAFE");
-        let terminal =
-            valid::kernel::replay::replay_actions(&model, &parsed.actions).unwrap_or_else(|error| {
+        let terminal = valid::kernel::replay::replay_actions(&model, &parsed.actions)
+            .unwrap_or_else(|error| {
                 print_diagnostics(&[error]);
                 process::exit(3);
             });

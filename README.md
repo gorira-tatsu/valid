@@ -7,7 +7,8 @@ stateful workflow rules. The main path is:
 
 1. Write a model in Rust
 2. Export it through a small registry file
-3. Run `cargo-valid` to inspect, verify, explain, cover, clean, and generate tests
+3. Run `cargo valid init` once
+4. Use `cargo valid` from the project root
 
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
@@ -45,21 +46,43 @@ Run the full test suite:
 cargo test -q
 ```
 
-Try the Rust-first path:
+Initialize a project once:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify failing-counter --json
-cargo run --bin cargo-valid -- verify failing-counter --property=P_FAIL --json
+cargo install --path .
+cargo valid init
+```
+
+This creates a minimal `valid.toml`:
+
+```toml
+registry = "examples/valid_models.rs"
+default_backend = "explicit"
+suite_models = []
+```
+
+Use the Rust-first path:
+
+```sh
+cargo valid models
+cargo valid inspect counter
+cargo valid readiness counter
+cargo valid verify failing-counter
+cargo valid suite
+```
+
+Use `--json` for CI, scripts, or AI integrations:
+
+```sh
+cargo valid verify failing-counter --property=P_FAIL --json
 ```
 
 Try the legacy `.valid` path:
 
 ```sh
-cargo run --bin valid -- inspect examples/models/safe_counter.valid --json
-cargo run --bin valid -- check examples/models/failing_counter.valid --json
-cargo run --bin valid -- explain examples/models/failing_counter.valid --json
+cargo run --bin valid -- inspect examples/models/safe_counter.valid
+cargo run --bin valid -- verify examples/models/failing_counter.valid
+cargo run --bin valid -- explain examples/models/failing_counter.valid
 ```
 
 ## Mental Model
@@ -72,7 +95,8 @@ Use this for new work.
 
 - Put model code in `examples/*.rs`, `src/bin/*.rs`, or another Rust target
 - Export models through `run_registry_cli(valid_models![...])`
-- Run them with `cargo-valid --registry <path>`
+- Add `valid.toml`
+- Run them with `cargo valid`
 
 ### 2. `.valid` path
 
@@ -87,8 +111,10 @@ If you are deciding between the two, use the Rust-first path.
 
 Primary commands:
 
+- `init`
+  Write a minimal `valid.toml` in the current Cargo project
 - `models`
-  Show the model names exported by a registry file
+  Show the model names exported by the configured registry
 - `inspect <model>`
   Show model structure without running verification
 - `readiness <model>`
@@ -104,7 +130,7 @@ Primary commands:
 - `replay <model>`
   Replay an action sequence and return the terminal state
 - `suite`
-  Run `check` for every model exported by a registry file
+  Run `verify` for the configured suite or every model in the registry
 - `clean`
   Remove generated tests and artifact output
 
@@ -115,13 +141,21 @@ Legacy aliases still work:
 Examples:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs inspect counter --json
-cargo run --bin cargo-valid -- readiness iam-access --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs verify counter --json
-cargo run --bin cargo-valid -- verify failing-counter --property=P_FAIL --json
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs suite --json
-cargo run --bin cargo-valid -- clean all --json
+cargo valid init
+cargo valid models
+cargo valid inspect counter
+cargo valid readiness iam-access
+cargo valid verify counter
+cargo valid verify failing-counter --property=P_FAIL --json
+cargo valid suite
+cargo valid clean all
+```
+
+Override the configured registry only when needed:
+
+```sh
+cargo valid --registry examples/practical_use_cases_registry.rs models
+cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 ```
 
 `inspect --json` now includes:
@@ -235,7 +269,7 @@ fn main() {
 Save that as `examples/valid_models.rs` or another registry file, then run:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs models --json
+cargo valid --registry examples/valid_models.rs models
 ```
 
 ## Declarative Transition Mode
@@ -307,12 +341,12 @@ Available strategies:
 Examples:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/valid_models.rs generate-tests counter --strategy=witness --json
-cargo run --bin cargo-valid -- --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard --json
-cargo run --bin cargo-valid -- generate-tests iam-access --strategy=path --json
-cargo run --bin valid -- testgen examples/models/safe_counter.valid --strategy=boundary --json
-cargo run --bin valid -- testgen examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample --json
-cargo run --bin cargo-valid -- replay failing-counter --property=P_FAIL --actions=INC,INC --json
+cargo valid --registry examples/valid_models.rs generate-tests counter --strategy=witness
+cargo valid --registry examples/iam_transition_registry.rs generate-tests iam-access --strategy=guard
+cargo valid generate-tests iam-access --strategy=path
+cargo run --bin valid -- generate-tests examples/models/safe_counter.valid --strategy=boundary
+cargo run --bin valid -- generate-tests examples/models/multi_property.valid --property=P_STRICT --strategy=counterexample
+cargo valid replay failing-counter --property=P_FAIL --actions=INC,INC
 ```
 
 ## Examples In This Repo
@@ -360,12 +394,12 @@ Current suite:
 Quick trial:
 
 ```sh
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs models --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify prod-deploy-safe --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs coverage refund-control --json
-cargo run --bin cargo-valid -- --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path --json
-sh examples/run_practical_suite.sh
+cargo valid --registry examples/practical_use_cases_registry.rs models
+cargo valid --registry examples/practical_use_cases_registry.rs verify prod-deploy-safe
+cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
+cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-control
+cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
+cargo valid --registry examples/practical_use_cases_registry.rs suite
 ```
 
 ## Solver Use
@@ -396,16 +430,16 @@ cargo run --bin valid -- check examples/models/failing_counter.valid \
 Declarative Rust models can use the same adapter path:
 
 ```sh
-cargo run --bin cargo-valid -- check iam-access \
+cargo valid verify iam-access \
   --backend=command \
   --solver-exec sh \
   --solver-arg examples/solvers/mock_command_solver.sh \
   --json
 ```
 
-From another crate root, `cargo valid` also auto-discovers
-`examples/valid_models.rs` or `src/bin/valid_models.rs` when present, so the
-common case can be as short as:
+From another crate root, `cargo valid` auto-discovers `valid.toml` first, then
+falls back to `examples/valid_models.rs` or `src/bin/valid_models.rs` when
+present, so the common case can be as short as:
 
 ```sh
 cargo valid inspect my-model --json

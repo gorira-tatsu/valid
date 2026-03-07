@@ -426,7 +426,10 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     ));
     out.push_str(&format!("    let strategy = \"{}\";\n", vector.strategy));
     if let Some(action_id) = &vector.focus_action_id {
-        out.push_str(&format!("    let focus_action_id = Some(\"{}\");\n", action_id));
+        out.push_str(&format!(
+            "    let focus_action_id = Some(\"{}\");\n",
+            action_id
+        ));
     } else {
         out.push_str("    let focus_action_id: Option<&str> = None;\n");
     }
@@ -492,7 +495,10 @@ pub fn assert_replay_output_json(
     expected_guard_enabled: Option<bool>,
 ) {
     let normalized = body.trim();
-    assert!(normalized.contains("\"status\":\"ok\""), "replay must return ok: {normalized}");
+    assert!(
+        normalized.contains("\"status\":\"ok\""),
+        "replay must return ok: {normalized}"
+    );
     assert!(
         normalized.contains(&format!("\"property_id\":\"{expected_property_id}\"")),
         "replay property_id mismatch: {normalized}"
@@ -619,7 +625,8 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
                 frontier.push_back(index);
                 index
             } else {
-                nodes.iter()
+                nodes
+                    .iter()
                     .position(|node| node.state == next_state)
                     .expect("visited state must be present")
             };
@@ -630,24 +637,32 @@ fn explore_model(model: &ModelIr) -> Result<ModelExploration, String> {
         }
     }
 
-    Ok(ModelExploration { nodes, edges_by_node })
+    Ok(ModelExploration {
+        nodes,
+        edges_by_node,
+    })
 }
 
-fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<TestVector>, String> {
+fn build_model_guard_vectors(
+    model: &ModelIr,
+    property_id: &str,
+) -> Result<Vec<TestVector>, String> {
     let exploration = explore_model(model)?;
     let mut vectors = Vec::new();
     let mut seen = BTreeSet::new();
 
     for action in &model.actions {
-        if let Some((node_index, edge)) = exploration
-            .edges_by_node
-            .iter()
-            .enumerate()
-            .find_map(|(node_index, edges)| {
-                edges.iter()
-                    .find(|edge| edge.action_id == action.action_id)
-                    .map(|edge| (node_index, edge))
-            })
+        if let Some((node_index, edge)) =
+            exploration
+                .edges_by_node
+                .iter()
+                .enumerate()
+                .find_map(|(node_index, edges)| {
+                    edges
+                        .iter()
+                        .find(|edge| edge.action_id == action.action_id)
+                        .map(|edge| (node_index, edge))
+                })
         {
             if let Some(vector) = build_model_vector_for_node(
                 model,
@@ -672,7 +687,11 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
                 let signature = (
                     vector.focus_action_id.clone(),
                     vector.expected_guard_enabled,
-                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|step| step.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -681,17 +700,12 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
             let _ = node_index;
         }
 
-        if let Some((node_index, _)) = exploration
-            .nodes
-            .iter()
-            .enumerate()
-            .find(|(_, node)| {
-                apply_action(model, &node.state, &action.action_id)
-                    .ok()
-                    .flatten()
-                    .is_none()
-            })
-        {
+        if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
+            apply_action(model, &node.state, &action.action_id)
+                .ok()
+                .flatten()
+                .is_none()
+        }) {
             if let Some(vector) = build_model_vector_for_node(
                 model,
                 &exploration.nodes,
@@ -715,7 +729,11 @@ fn build_model_guard_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<T
                 let signature = (
                     vector.focus_action_id.clone(),
                     vector.expected_guard_enabled,
-                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|step| step.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -734,15 +752,17 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
 
     for action in &model.actions {
         let tags = model_transition_tags(model, &action.action_id);
-        let Some((_, edge)) = exploration
-            .edges_by_node
-            .iter()
-            .enumerate()
-            .find_map(|(node_index, edges)| {
-                edges.iter()
-                    .find(|edge| edge.action_id == action.action_id)
-                    .map(|edge| (node_index, edge))
-            })
+        let Some((_, edge)) =
+            exploration
+                .edges_by_node
+                .iter()
+                .enumerate()
+                .find_map(|(node_index, edges)| {
+                    edges
+                        .iter()
+                        .find(|edge| edge.action_id == action.action_id)
+                        .map(|edge| (node_index, edge))
+                })
         else {
             continue;
         };
@@ -762,7 +782,11 @@ fn build_model_path_vectors(model: &ModelIr, property_id: &str) -> Result<Vec<Te
                 let signature = (
                     tag,
                     vector.focus_action_id.clone(),
-                    vector.actions.iter().map(|step| step.action_id.clone()).collect::<Vec<_>>(),
+                    vector
+                        .actions
+                        .iter()
+                        .map(|step| step.action_id.clone())
+                        .collect::<Vec<_>>(),
                 );
                 if seen.insert(signature) {
                     vectors.push(vector);
@@ -835,7 +859,10 @@ fn build_model_random_vectors(
                 .map(|step| step.action_id)
                 .collect::<Vec<_>>()
                 .join(",");
-            (stable_hash_hex(&(model.model_id.clone() + &signature)), index)
+            (
+                stable_hash_hex(&(model.model_id.clone() + &signature)),
+                index,
+            )
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
@@ -857,10 +884,9 @@ fn build_model_random_vectors(
                 None,
                 vec!["deterministic_randomized_sample".to_string()],
             )?;
-            vector.seed = Some(
-                seed.bytes()
-                    .fold(0u64, |acc, byte| acc.wrapping_mul(131).wrapping_add(byte as u64)),
-            );
+            vector.seed = Some(seed.bytes().fold(0u64, |acc, byte| {
+                acc.wrapping_mul(131).wrapping_add(byte as u64)
+            }));
             Some(vector)
         })
         .collect())
@@ -889,9 +915,15 @@ fn build_model_vector_for_node(
         })
         .collect::<Vec<_>>();
     let expected_states = if steps.is_empty() {
-        vec![format!("{:?}", nodes.get(end_index)?.state.as_named_map(model))]
+        vec![format!(
+            "{:?}",
+            nodes.get(end_index)?.state.as_named_map(model)
+        )]
     } else {
-        steps.iter().map(|step| format!("{:?}", step.state_after)).collect()
+        steps
+            .iter()
+            .map(|step| format!("{:?}", step.state_after))
+            .collect()
     };
     let signature = actions
         .iter()
@@ -908,7 +940,9 @@ fn build_model_vector_for_node(
                     + source_kind
                     + strategy
                     + &signature
-                    + &format!("{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"))
+                    + &format!(
+                        "{focus_action_id:?}{focus_field:?}{expected_guard_enabled:?}{notes:?}"
+                    ))
             )
             .replace("sha256:", "")
         ),

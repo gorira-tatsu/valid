@@ -11,11 +11,13 @@ pub mod ir;
 pub mod kernel;
 pub mod modeling;
 pub mod orchestrator;
-pub mod reporter;
+pub mod project;
 pub mod registry;
+pub mod reporter;
 pub mod selfcheck;
 pub mod solver;
 pub mod support;
 pub mod testgen;
+pub mod use_cases;
 
 pub use valid_derive::{ValidAction, ValidState};

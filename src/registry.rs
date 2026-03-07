@@ -7,9 +7,8 @@ use crate::{
     modeling::{
         build_machine_test_vectors_for_strategy, check_machine_outcome,
         check_machine_outcome_for_property, check_machine_outcomes, check_machine_with_adapter,
-        collect_machine_coverage, explain_machine, lower_machine_model,
-        machine_capability_report, property_ids, replay_machine_actions, ActionSpec, StateSpec,
-        VerifiedMachine,
+        collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
+        property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
     solver::AdapterConfig,
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
@@ -143,11 +142,15 @@ fn cmd_check(models: &[RegisteredModel], args: Vec<String>) {
         eprintln!("{message}");
         process::exit(3);
     });
-    let outcome = (model.check)("registry-check", parsed.property_id.as_deref(), adapter.as_ref())
-        .unwrap_or_else(|message| {
-            eprintln!("{message}");
-            process::exit(3);
-        });
+    let outcome = (model.check)(
+        "registry-check",
+        parsed.property_id.as_deref(),
+        adapter.as_ref(),
+    )
+    .unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(3);
+    });
     if parsed.json {
         println!("{}", render_outcome_json(model.name, &outcome));
     } else {
@@ -190,11 +193,14 @@ fn cmd_explain(models: &[RegisteredModel], args: Vec<String>) {
         }
         Err(message) => {
             if parsed.json {
-                println!("{}", render_diagnostics_json(&[crate::support::diagnostics::Diagnostic::new(
-                    crate::support::diagnostics::ErrorCode::SearchError,
-                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                    message,
-                )]));
+                println!(
+                    "{}",
+                    render_diagnostics_json(&[crate::support::diagnostics::Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )])
+                );
             } else {
                 eprintln!("{message}");
             }
@@ -221,12 +227,11 @@ fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
         eprintln!("{message}");
         process::exit(3);
     });
-    let response = (model.orchestrate)("registry-orchestrate", adapter.as_ref()).unwrap_or_else(
-        |message| {
+    let response =
+        (model.orchestrate)("registry-orchestrate", adapter.as_ref()).unwrap_or_else(|message| {
             eprintln!("{message}");
             process::exit(3);
-        },
-    );
+        });
     if parsed.json {
         let body = response
             .runs
@@ -260,10 +265,7 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
     let model = find_model(models, parsed.model.as_deref());
     let response = (model.testgen)(
         parsed.property_id.as_deref(),
-        parsed
-            .strategy
-            .as_deref()
-            .unwrap_or("counterexample"),
+        parsed.strategy.as_deref().unwrap_or("counterexample"),
     );
     if parsed.json {
         println!(
@@ -294,8 +296,7 @@ fn cmd_replay(models: &[RegisteredModel], args: Vec<String>) {
     println!("{response}");
 }
 
-fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse
-{
+fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
     let state_field_details = M::State::state_fields()
         .into_iter()
         .map(|field| InspectStateField {
@@ -318,8 +319,16 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse
             action_id: transition.action_id.to_string(),
             guard: transition.guard.map(str::to_string),
             effect: transition.effect.map(str::to_string),
-            reads: transition.reads.iter().map(|item| item.to_string()).collect(),
-            writes: transition.writes.iter().map(|item| item.to_string()).collect(),
+            reads: transition
+                .reads
+                .iter()
+                .map(|item| item.to_string())
+                .collect(),
+            writes: transition
+                .writes
+                .iter()
+                .map(|item| item.to_string())
+                .collect(),
             path_tags: crate::modeling::decision_path_tags(
                 &transition.path_tags,
                 transition.action_id,
@@ -355,7 +364,10 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse
             testgen_ready: capabilities.testgen_ready,
             reasons: capabilities.reasons.clone(),
         },
-        state_fields: state_field_details.iter().map(|field| field.name.clone()).collect(),
+        state_fields: state_field_details
+            .iter()
+            .map(|field| field.name.clone())
+            .collect(),
         actions: action_details
             .iter()
             .map(|action| action.action_id.clone())
@@ -385,8 +397,7 @@ fn check_machine<M: VerifiedMachine>(
     }
 }
 
-fn explain_machine_entry<M: VerifiedMachine>(request_id: &str) -> Result<ExplainResponse, String>
-{
+fn explain_machine_entry<M: VerifiedMachine>(request_id: &str) -> Result<ExplainResponse, String> {
     explain_machine::<M>(request_id)
 }
 
@@ -403,28 +414,29 @@ fn orchestrate_machine<M: VerifiedMachine>(
             let model = lower_machine_model::<M>()?;
             let base_plan = valid::engine::RunPlan::default();
             let mut traces = Vec::new();
-            let runs = valid::orchestrator::run_all_properties_with_backend(&model, &base_plan, adapter)
-                .into_iter()
-                .map(|run| match run.outcome {
-                    CheckOutcome::Completed(result) => {
-                        if let Some(trace) = result.trace.clone() {
-                            traces.push(trace);
+            let runs =
+                valid::orchestrator::run_all_properties_with_backend(&model, &base_plan, adapter)
+                    .into_iter()
+                    .map(|run| match run.outcome {
+                        CheckOutcome::Completed(result) => {
+                            if let Some(trace) = result.trace.clone() {
+                                traces.push(trace);
+                            }
+                            OrchestratedRunSummary {
+                                property_id: run.property_id,
+                                status: format!("{:?}", result.status),
+                                assurance_level: format!("{:?}", result.assurance_level),
+                                run_id: result.manifest.run_id,
+                            }
                         }
-                        OrchestratedRunSummary {
+                        CheckOutcome::Errored(error) => OrchestratedRunSummary {
                             property_id: run.property_id,
-                            status: format!("{:?}", result.status),
-                            assurance_level: format!("{:?}", result.assurance_level),
-                            run_id: result.manifest.run_id,
-                        }
-                    }
-                    CheckOutcome::Errored(error) => OrchestratedRunSummary {
-                        property_id: run.property_id,
-                        status: "ERROR".to_string(),
-                        assurance_level: format!("{:?}", error.assurance_level),
-                        run_id: error.manifest.run_id,
-                    },
-                })
-                .collect();
+                            status: "ERROR".to_string(),
+                            assurance_level: format!("{:?}", error.assurance_level),
+                            run_id: error.manifest.run_id,
+                        },
+                    })
+                    .collect();
             let aggregate_coverage = if traces.is_empty() {
                 None
             } else {
@@ -457,7 +469,10 @@ fn orchestrate_machine<M: VerifiedMachine>(
     })
 }
 
-fn testgen_machine<M: VerifiedMachine>(property_id: Option<&str>, request_id: &str) -> TestgenResponse {
+fn testgen_machine<M: VerifiedMachine>(
+    property_id: Option<&str>,
+    request_id: &str,
+) -> TestgenResponse {
     let mut vectors = build_machine_test_vectors_for_strategy::<M>(property_id, request_id);
     annotate_registry_replay_targets::<M>(property_id, &mut vectors);
     let generated_files = write_generated_test_files(&vectors).unwrap_or_else(|message| {
@@ -468,7 +483,10 @@ fn testgen_machine<M: VerifiedMachine>(property_id: Option<&str>, request_id: &s
         schema_version: "1.0.0".to_string(),
         request_id: "registry-testgen".to_string(),
         status: "ok".to_string(),
-        vector_ids: vectors.iter().map(|vector| vector.vector_id.clone()).collect(),
+        vector_ids: vectors
+            .iter()
+            .map(|vector| vector.vector_id.clone())
+            .collect(),
         generated_files,
     }
 }
@@ -506,7 +524,9 @@ fn annotate_registry_replay_targets<M: VerifiedMachine>(
         args.push("--file".to_string());
         args.push(file.clone());
         args.push("replay".to_string());
-        args.push(env::var("VALID_REGISTRY_MODEL_NAME").unwrap_or_else(|_| M::model_id().to_string()));
+        args.push(
+            env::var("VALID_REGISTRY_MODEL_NAME").unwrap_or_else(|_| M::model_id().to_string()),
+        );
         let property_id = property_id.unwrap_or(vector.property_id.as_str());
         args.push(format!("--property={property_id}"));
         if let Some(action_id) = &vector.focus_action_id {
@@ -557,10 +577,7 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
         } else if arg == "--solver-exec" {
-            parsed.solver_executable = Some(
-                iter.next()
-                    .unwrap_or_else(|| usage_exit()),
-            );
+            parsed.solver_executable = Some(iter.next().unwrap_or_else(|| usage_exit()));
         } else if arg == "--solver-arg" {
             parsed
                 .solver_args

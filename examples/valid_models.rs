@@ -1,7 +1,4 @@
-use valid::{
-    registry::run_registry_cli,
-    valid_actions, valid_model, valid_models, valid_state,
-};
+use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 
 valid_state! {
     struct State {

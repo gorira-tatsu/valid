@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use std::fs;
-use std::sync::{Mutex, OnceLock};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn cargo_valid_path() -> PathBuf {
@@ -46,6 +46,55 @@ fn unique_temp_project_dir(prefix: &str) -> PathBuf {
         .expect("clock should be monotonic enough")
         .as_nanos();
     std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+}
+
+fn write_autodiscover_fixture(project_dir: &Path, model_name: &str) {
+    fs::create_dir_all(project_dir.join("examples")).expect("temp examples dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"valid-autodiscover-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?} }}\n",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )
+    .expect("temp Cargo.toml");
+    fs::write(
+        project_dir.join("examples").join("valid_models.rs"),
+        format!(
+            r#"use valid::{{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state}};
+
+valid_state! {{
+    struct State {{
+        ready: bool,
+    }}
+}}
+
+valid_actions! {{
+    enum Action {{
+        Enable => "ENABLE" [reads = ["ready"], writes = ["ready"]],
+    }}
+}}
+
+valid_model! {{
+    model AutoDiscoverModel<State, Action>;
+    init [State {{ ready: false }}];
+    transitions {{
+        transition Enable [tags = ["allow_path"]] when |state| state.ready == false => [State {{ ready: true }}];
+    }}
+    properties {{
+        invariant P_READY_EVENTUAL |state| state.ready == false || state.ready == true;
+    }}
+}}
+
+fn main() {{
+    run_registry_cli(valid_models![
+        "{model_name}" => AutoDiscoverModel,
+    ]);
+}}
+"#
+        ),
+    )
+    .expect("temp valid_models example");
 }
 
 #[test]
@@ -227,7 +276,10 @@ fn cargo_valid_testgen_witness_generates_files() {
 fn cargo_valid_clean_removes_generated_and_artifacts() {
     let _guard = cargo_lock().lock().unwrap();
     let temp_root = unique_temp_project_dir("valid-clean");
-    let generated = temp_root.join("tests").join("generated").join("clean-sentinel.rs");
+    let generated = temp_root
+        .join("tests")
+        .join("generated")
+        .join("clean-sentinel.rs");
     let artifact_dir = temp_root.join("artifacts").join("clean-sentinel");
     fs::create_dir_all(generated.parent().unwrap()).expect("generated dir");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
@@ -257,7 +309,11 @@ fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
         .arg("--manifest-path")
         .arg(manifest_path())
         .arg("--file")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("iam_transition_registry.rs"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("testgen")
         .arg("iam-access")
         .arg("--strategy=guard")
@@ -381,7 +437,11 @@ fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
         .arg("--manifest-path")
         .arg(manifest_path())
         .arg("--file")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("iam_enterprise_registry.rs"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_enterprise_registry.rs"),
+        )
         .arg("inspect")
         .arg("iam-enterprise")
         .arg("--json")
@@ -398,50 +458,7 @@ fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
 fn cargo_valid_auto_discovers_external_registry_from_project_root() {
     let _guard = cargo_lock().lock().unwrap();
     let project_dir = unique_temp_project_dir("valid-autodiscover");
-    fs::create_dir_all(project_dir.join("examples")).expect("temp examples dir");
-    fs::write(
-        project_dir.join("Cargo.toml"),
-        format!(
-            "[package]\nname = \"valid-autodiscover-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?} }}\n",
-            env!("CARGO_MANIFEST_DIR")
-        ),
-    )
-    .expect("temp Cargo.toml");
-    fs::write(
-        project_dir.join("examples").join("valid_models.rs"),
-        r#"use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
-
-valid_state! {
-    struct State {
-        ready: bool,
-    }
-}
-
-valid_actions! {
-    enum Action {
-        Enable => "ENABLE" [reads = ["ready"], writes = ["ready"]],
-    }
-}
-
-valid_model! {
-    model AutoDiscoverModel<State, Action>;
-    init [State { ready: false }];
-    transitions {
-        transition Enable [tags = ["allow_path"]] when |state| state.ready == false => [State { ready: true }];
-    }
-    properties {
-        invariant P_READY_EVENTUAL |state| state.ready == false || state.ready == true;
-    }
-}
-
-fn main() {
-    run_registry_cli(valid_models![
-        "auto-discover" => AutoDiscoverModel,
-    ]);
-}
-"#,
-    )
-    .expect("temp valid_models example");
+    write_autodiscover_fixture(&project_dir, "auto-discover");
 
     let output = Command::new(cargo_valid_path())
         .current_dir(&project_dir)
@@ -450,10 +467,101 @@ fn main() {
         .arg("--json")
         .output()
         .expect("cargo-valid autodiscovery should run");
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"model_id\":\"AutoDiscoverModel\""));
     assert!(stdout.contains("\"allow_path\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_init_writes_valid_toml() {
+    let _guard = cargo_lock().lock().unwrap();
+    let project_dir = unique_temp_project_dir("valid-init");
+    fs::create_dir_all(&project_dir).expect("temp project dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        "[package]\nname = \"valid-init-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .expect("temp Cargo.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid init should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body = fs::read_to_string(project_dir.join("valid.toml")).expect("valid.toml must exist");
+    assert!(body.contains("registry = \"examples/valid_models.rs\""));
+    assert!(body.contains("default_backend = \"explicit\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_uses_valid_toml_registry_without_flags() {
+    let _guard = cargo_lock().lock().unwrap();
+    let project_dir = unique_temp_project_dir("valid-project-config");
+    write_autodiscover_fixture(&project_dir, "project-config-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\nsuite_models = [\"project-config-model\"]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&project_dir)
+        .arg("inspect")
+        .arg("project-config-model")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid inspect via valid.toml should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"model_id\":\"AutoDiscoverModel\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_suite_uses_valid_toml_suite_models() {
+    let _guard = cargo_lock().lock().unwrap();
+    let project_dir = unique_temp_project_dir("valid-suite-config");
+    write_autodiscover_fixture(&project_dir, "suite-only-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\nsuite_models = [\"suite-only-model\"]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&project_dir)
+        .arg("suite")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid suite via valid.toml should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"model_id\":\"suite-only-model\""));
+    assert!(!stdout.contains("\"model_id\":\"counter\""));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -493,7 +601,12 @@ fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
         .arg("--solver-exec")
         .arg("sh")
         .arg("--solver-arg")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("solvers").join("mock_cvc5_solver.sh"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("solvers")
+                .join("mock_cvc5_solver.sh"),
+        )
         .arg("--json")
         .output()
         .expect("cargo-valid bundled mock cvc5 check should run");
@@ -511,7 +624,11 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
         .arg("--manifest-path")
         .arg(manifest_path())
         .arg("--file")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("iam_transition_registry.rs"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("iam_transition_registry.rs"),
+        )
         .arg("check")
         .arg("iam-access")
         .arg("--property=P_BILLING_READ_REQUIRES_SESSION")
@@ -519,7 +636,12 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
         .arg("--solver-exec")
         .arg("sh")
         .arg("--solver-arg")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("solvers").join("mock_cvc5_solver.sh"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("solvers")
+                .join("mock_cvc5_solver.sh"),
+        )
         .arg("--json")
         .output()
         .expect("cargo-valid external mock cvc5 check should run");

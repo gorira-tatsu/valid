@@ -227,13 +227,15 @@ pub struct OrchestrateResponse {
 
 pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
     if is_bundled_model_ref(&request.source_name) {
-        return inspect_bundled_model(&request.request_id, &request.source_name).map_err(|message| {
-            vec![Diagnostic::new(
-                crate::support::diagnostics::ErrorCode::SearchError,
-                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                message,
-            )]
-        });
+        return inspect_bundled_model(&request.request_id, &request.source_name).map_err(
+            |message| {
+                vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )]
+            },
+        );
     }
     let model = frontend::compile_model(&request.source)?;
     Ok(InspectResponse {
@@ -314,26 +316,25 @@ pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
 pub fn capabilities_response(
     request: &CapabilitiesRequest,
 ) -> Result<CapabilitiesResponse, String> {
-    let config = match request.backend.as_deref() {
-        None | Some("explicit") => AdapterConfig::Explicit,
-        Some("mock-bmc") => AdapterConfig::MockBmc,
-        Some("smt-cvc5") => AdapterConfig::SmtCvc5 {
-            executable: request
-                .solver_executable
-                .clone()
-                .ok_or_else(|| "solver_executable is required when backend=smt-cvc5".to_string())?,
-            args: request.solver_args.clone(),
-        },
-        Some("command") => AdapterConfig::Command {
-            backend_name: "command".to_string(),
-            executable: request
-                .solver_executable
-                .clone()
-                .ok_or_else(|| "solver_executable is required when backend=command".to_string())?,
-            args: request.solver_args.clone(),
-        },
-        Some(other) => return Err(format!("unsupported backend `{other}`")),
-    };
+    let config =
+        match request.backend.as_deref() {
+            None | Some("explicit") => AdapterConfig::Explicit,
+            Some("mock-bmc") => AdapterConfig::MockBmc,
+            Some("smt-cvc5") => AdapterConfig::SmtCvc5 {
+                executable: request.solver_executable.clone().ok_or_else(|| {
+                    "solver_executable is required when backend=smt-cvc5".to_string()
+                })?,
+                args: request.solver_args.clone(),
+            },
+            Some("command") => AdapterConfig::Command {
+                backend_name: "command".to_string(),
+                executable: request.solver_executable.clone().ok_or_else(|| {
+                    "solver_executable is required when backend=command".to_string()
+                })?,
+                args: request.solver_args.clone(),
+            },
+            Some(other) => return Err(format!("unsupported backend `{other}`")),
+        };
     let capabilities = capabilities_for_config(&config);
     Ok(CapabilitiesResponse {
         schema_version: "1.0.0".to_string(),
@@ -347,8 +348,8 @@ pub fn orchestrate_source(
     request: &OrchestrateRequest,
 ) -> Result<OrchestrateResponse, CheckErrorEnvelope> {
     if is_bundled_model_ref(&request.source_name) {
-        let backend = backend_config_from_orchestrate_request(request).map_err(
-            |message| CheckErrorEnvelope {
+        let backend = backend_config_from_orchestrate_request(request).map_err(|message| {
+            CheckErrorEnvelope {
                 manifest: RunManifest {
                     request_id: request.request_id.clone(),
                     run_id: format!(
@@ -370,33 +371,36 @@ pub fn orchestrate_source(
                     crate::support::diagnostics::DiagnosticSegment::EngineSearch,
                     message,
                 )],
+            }
+        })?;
+        return orchestrate_bundled_model(
+            &request.request_id,
+            &request.source_name,
+            Some(&backend),
+        )
+        .map_err(|message| CheckErrorEnvelope {
+            manifest: RunManifest {
+                request_id: request.request_id.clone(),
+                run_id: format!(
+                    "run-{}",
+                    stable_hash_hex(&request.request_id).replace("sha256:", "")
+                ),
+                schema_version: "1.0.0".to_string(),
+                source_hash: stable_hash_hex(&request.source_name),
+                contract_hash: stable_hash_hex(&request.source_name),
+                engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: crate::engine::BackendKind::Explicit,
+                backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                seed: None,
             },
-        )?;
-        return orchestrate_bundled_model(&request.request_id, &request.source_name, Some(&backend)).map_err(
-            |message| CheckErrorEnvelope {
-                manifest: RunManifest {
-                    request_id: request.request_id.clone(),
-                    run_id: format!(
-                        "run-{}",
-                        stable_hash_hex(&request.request_id).replace("sha256:", "")
-                    ),
-                    schema_version: "1.0.0".to_string(),
-                    source_hash: stable_hash_hex(&request.source_name),
-                    contract_hash: stable_hash_hex(&request.source_name),
-                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                    backend_name: crate::engine::BackendKind::Explicit,
-                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                    seed: None,
-                },
-                status: crate::engine::ErrorStatus::Error,
-                assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                diagnostics: vec![Diagnostic::new(
-                    crate::support::diagnostics::ErrorCode::SearchError,
-                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                    message,
-                )],
-            },
-        );
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        });
     }
     let backend_fallback =
         backend_config_from_orchestrate_request(request).unwrap_or(AdapterConfig::Explicit);
@@ -517,33 +521,32 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
             &request.source_name,
             request.property_id.as_deref(),
             Some(&adapter),
-        ).unwrap_or_else(
-            |message| {
-                CheckOutcome::Errored(CheckErrorEnvelope {
-                    manifest: RunManifest {
-                        request_id: request.request_id.clone(),
-                        run_id: format!(
-                            "run-{}",
-                            stable_hash_hex(&request.request_id).replace("sha256:", "")
-                        ),
-                        schema_version: "1.0.0".to_string(),
-                        source_hash: stable_hash_hex(&request.source_name),
-                        contract_hash: stable_hash_hex(&request.source_name),
-                        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                        backend_name: crate::engine::BackendKind::Explicit,
-                        backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                        seed: None,
-                    },
-                    status: crate::engine::ErrorStatus::Error,
-                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                    diagnostics: vec![Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        message,
-                    )],
-                })
-            },
-        );
+        )
+        .unwrap_or_else(|message| {
+            CheckOutcome::Errored(CheckErrorEnvelope {
+                manifest: RunManifest {
+                    request_id: request.request_id.clone(),
+                    run_id: format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    schema_version: "1.0.0".to_string(),
+                    source_hash: stable_hash_hex(&request.source_name),
+                    contract_hash: stable_hash_hex(&request.source_name),
+                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                    backend_name: crate::engine::BackendKind::Explicit,
+                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                    seed: None,
+                },
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            })
+        });
     }
     let source_hash = stable_hash_hex(&request.source);
     let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
@@ -961,31 +964,30 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             request.property_id.as_deref(),
             &request.strategy,
             bundled_adapter.as_ref(),
-        ).map_err(
-            |message| CheckErrorEnvelope {
-                manifest: RunManifest {
-                    request_id: request.request_id.clone(),
-                    run_id: format!(
-                        "run-{}",
-                        stable_hash_hex(&request.request_id).replace("sha256:", "")
-                    ),
-                    schema_version: "1.0.0".to_string(),
-                    source_hash: stable_hash_hex(&request.source_name),
-                    contract_hash: stable_hash_hex(&request.source_name),
-                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                    backend_name: crate::engine::BackendKind::Explicit,
-                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                    seed: None,
-                },
-                status: crate::engine::ErrorStatus::Error,
-                assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                diagnostics: vec![Diagnostic::new(
-                    crate::support::diagnostics::ErrorCode::SearchError,
-                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                    message,
-                )],
+        )
+        .map_err(|message| CheckErrorEnvelope {
+            manifest: RunManifest {
+                request_id: request.request_id.clone(),
+                run_id: format!(
+                    "run-{}",
+                    stable_hash_hex(&request.request_id).replace("sha256:", "")
+                ),
+                schema_version: "1.0.0".to_string(),
+                source_hash: stable_hash_hex(&request.source_name),
+                contract_hash: stable_hash_hex(&request.source_name),
+                engine_version: env!("CARGO_PKG_VERSION").to_string(),
+                backend_name: crate::engine::BackendKind::Explicit,
+                backend_version: env!("CARGO_PKG_VERSION").to_string(),
+                seed: None,
             },
-        );
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        });
     }
     let outcome = check_source(&CheckRequest {
         request_id: request.request_id.clone(),
@@ -1024,7 +1026,12 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
     let target_property_id = request
         .property_id
         .as_deref()
-        .or_else(|| model.properties.first().map(|property| property.property_id.as_str()))
+        .or_else(|| {
+            model
+                .properties
+                .first()
+                .map(|property| property.property_id.as_str())
+        })
         .unwrap_or("P_SAFE");
     let mut vectors = if request.strategy == "counterexample" {
         traces
@@ -1032,12 +1039,26 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .filter_map(|trace| build_counterexample_vector(trace).ok())
             .collect::<Vec<_>>()
     } else {
-        let mut vectors = build_model_test_vectors_for_strategy(
-            &model,
-            target_property_id,
-            &request.strategy,
-        )
-        .map_err(|message| CheckErrorEnvelope {
+        let mut vectors =
+            build_model_test_vectors_for_strategy(&model, target_property_id, &request.strategy)
+                .map_err(|message| CheckErrorEnvelope {
+                    manifest: result.manifest.clone(),
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )],
+                })?;
+        if vectors.is_empty() && matches!(request.strategy.as_str(), "transition" | "witness") {
+            vectors = build_synthetic_witness_vectors(&model, target_property_id);
+        }
+        vectors
+    };
+    annotate_model_replay_targets(&request.source_name, target_property_id, &mut vectors);
+    let generated_files =
+        write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
             manifest: result.manifest.clone(),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
@@ -1047,26 +1068,6 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
                 message,
             )],
         })?;
-        if vectors.is_empty() && matches!(request.strategy.as_str(), "transition" | "witness") {
-            vectors = build_synthetic_witness_vectors(&model, target_property_id);
-        }
-        vectors
-    };
-    annotate_model_replay_targets(
-        &request.source_name,
-        target_property_id,
-        &mut vectors,
-    );
-    let generated_files = write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
-        manifest: result.manifest.clone(),
-        status: crate::engine::ErrorStatus::Error,
-        assurance_level: crate::engine::AssuranceLevel::Incomplete,
-        diagnostics: vec![Diagnostic::new(
-            crate::support::diagnostics::ErrorCode::SearchError,
-            crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-            message,
-        )],
-    })?;
     Ok(TestgenResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request.request_id.clone(),
@@ -1226,7 +1227,8 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{}}}",
             escape_json(&field.name),
             escape_json(&field.rust_type),
-            field.range
+            field
+                .range
                 .as_ref()
                 .map(|range| format!("\"{}\"", escape_json(range)))
                 .unwrap_or_else(|| "null".to_string())
@@ -1288,7 +1290,10 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
 pub fn render_inspect_text(response: &InspectResponse) -> String {
     let mut out = String::new();
     out.push_str(&format!("model_id: {}\n", response.model_id));
-    out.push_str(&format!("machine_ir_ready: {}\n", response.machine_ir_ready));
+    out.push_str(&format!(
+        "machine_ir_ready: {}\n",
+        response.machine_ir_ready
+    ));
     if let Some(error) = &response.machine_ir_error {
         out.push_str(&format!("machine_ir_error: {}\n", error));
     }
@@ -1308,7 +1313,10 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             response.capabilities.reasons.join(", ")
         ));
     }
-    out.push_str(&format!("state_fields: {}\n", response.state_fields.join(", ")));
+    out.push_str(&format!(
+        "state_fields: {}\n",
+        response.state_fields.join(", ")
+    ));
     out.push_str(&format!("actions: {}\n", response.actions.join(", ")));
     out.push_str(&format!("properties: {}\n", response.properties.join(", ")));
     if !response.state_field_details.is_empty() {
@@ -1419,7 +1427,8 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
             code: "missing_action_metadata".to_string(),
             message: "some actions do not declare reads/writes metadata".to_string(),
             suggestion: Some(
-                "add reads=[...] and writes=[...] to improve explain, coverage, and testgen".to_string(),
+                "add reads=[...] and writes=[...] to improve explain, coverage, and testgen"
+                    .to_string(),
             ),
         });
     }
@@ -1460,7 +1469,10 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
             ),
         });
     }
-    let status = if findings.iter().any(|finding| finding.severity == "warn" || finding.severity == "error") {
+    let status = if findings
+        .iter()
+        .any(|finding| finding.severity == "warn" || finding.severity == "error")
+    {
         "warn"
     } else {
         "ok"
@@ -1723,7 +1735,10 @@ mod tests {
         assert!(response.capabilities.reasons.is_empty());
         assert_eq!(response.properties, vec!["P_SAFE"]);
         assert_eq!(response.state_field_details[0].name, "x");
-        assert_eq!(response.state_field_details[0].range.as_deref(), Some("0..=7"));
+        assert_eq!(
+            response.state_field_details[0].range.as_deref(),
+            Some("0..=7")
+        );
         assert_eq!(response.property_details[0].kind, "Invariant");
         assert!(response.transition_details.is_empty());
         validate_inspect_response(&response).unwrap();
@@ -2060,7 +2075,9 @@ fn backend_config_from_orchestrate_request(
 fn backend_kind_for_config(config: &AdapterConfig) -> crate::engine::BackendKind {
     match config {
         AdapterConfig::Explicit => crate::engine::BackendKind::Explicit,
-        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => crate::engine::BackendKind::MockBmc,
+        AdapterConfig::MockBmc | AdapterConfig::Command { .. } => {
+            crate::engine::BackendKind::MockBmc
+        }
         AdapterConfig::SmtCvc5 { .. } => crate::engine::BackendKind::SmtCvc5,
     }
 }

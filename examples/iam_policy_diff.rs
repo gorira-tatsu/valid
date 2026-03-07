@@ -1,10 +1,7 @@
-#[path = "../tests/support/authz.rs"]
-mod authz;
-
-use authz::{
+use valid::modeling::Finite;
+use valid::use_cases::authz::{
     find_newly_allowed_requests, Matcher, PolicyDomain, PolicyEffect, PolicySet, PolicyStatement,
 };
-use valid::modeling::Finite;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum Principal {

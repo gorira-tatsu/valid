@@ -1,6 +1,4 @@
-use crate::{
-    ir::{BinaryOp, ExprIr, FieldType, ModelIr, PropertyKind, UnaryOp, Value},
-};
+use crate::ir::{BinaryOp, ExprIr, FieldType, ModelIr, PropertyKind, UnaryOp, Value};
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -108,7 +106,9 @@ pub fn build_invariant_bmc_query(
     }
 
     if depth > 0 && model.actions.is_empty() {
-        return Err("SMT adapter cannot build a transition query for a model without actions".to_string());
+        return Err(
+            "SMT adapter cannot build a transition query for a model without actions".to_string(),
+        );
     }
 
     let mut smtlib = String::new();
@@ -375,8 +375,12 @@ mod tests {
         )
         .unwrap();
         let query = build_invariant_bmc_query(&model, &["P_SAFE".to_string()], 1).unwrap();
-        assert!(query.check_smtlib.contains("(or (= enabled_0 false) (<= x_0 1))"));
-        assert!(query.check_smtlib.contains("(not (or (= enabled_1 true) (<= x_1 7)))"));
+        assert!(query
+            .check_smtlib
+            .contains("(or (= enabled_0 false) (<= x_0 1))"));
+        assert!(query
+            .check_smtlib
+            .contains("(not (or (= enabled_1 true) (<= x_1 7)))"));
     }
 
     #[test]
