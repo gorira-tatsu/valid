@@ -22,6 +22,10 @@ path = "packages/valid/src/bin/valid.rs"
 name = "cargo-valid"
 path = "packages/valid/src/bin/cargo-valid.rs"
 
+[[bin]]
+name = "valid-mcp"
+path = "packages/valid/src/bin/valid-mcp.rs"
+
 [[example]]
 name = "practical_use_cases_registry"
 path = "benchmarks/registries/practical_use_cases_registry.rs"
@@ -37,4 +41,6 @@ path = "benchmarks/registries/iam_enterprise_registry.rs"
 [dependencies]
 valid_derive = { path = "packages/valid_derive" }
 regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 varisat = { version = "0.2", optional = true }
