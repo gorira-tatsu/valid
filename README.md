@@ -117,6 +117,8 @@ Primary commands:
   Show the model names exported by the configured registry
 - `inspect <model>`
   Show model structure without running verification
+- `graph <model>`
+  Render a Mermaid diagram for the model structure
 - `readiness <model>`
   Report capability-based migration findings and analysis-readiness gaps
 - `verify <model>`
@@ -144,6 +146,7 @@ Examples:
 cargo valid init
 cargo valid models
 cargo valid inspect counter
+cargo valid graph counter
 cargo valid readiness iam-access
 cargo valid verify counter
 cargo valid verify failing-counter --property=P_FAIL --json
@@ -156,6 +159,7 @@ Override the configured registry only when needed:
 ```sh
 cargo valid --registry examples/practical_use_cases_registry.rs models
 cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
+cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
 ```
 
 `inspect --json` now includes:
@@ -240,7 +244,7 @@ valid_actions! {
 }
 
 valid_model! {
-    model CounterModel;
+    model CounterModel<State, Action>;
     init [State { x: 0, locked: false }];
     step |state, action| {
         match action {
@@ -265,6 +269,9 @@ fn main() {
     ]);
 }
 ```
+
+Prefer the explicit `model Name<State, Action>;` form. It produces better
+macro diagnostics than the old shorthand and is now the supported path.
 
 Save that as `examples/valid_models.rs` or another registry file, then run:
 
@@ -313,6 +320,12 @@ decision path such as `allow_path`, `deny_path`, `boundary_path`, or
 If a model uses only `step`, `inspect` will usually report capability reasons
 such as `opaque_step_closure` or `missing_declarative_transitions`. That is the
 intended migration signal toward declarative transitions when the model grows.
+
+`graph` uses the same inspect metadata and emits Mermaid `flowchart` output, so
+you can paste it directly into Mermaid Live, GitHub Markdown, or docs.
+For `step`-only models, the graph now explicitly marks the model as
+`explicit-only / opaque-step` instead of pretending it has declarative
+transition structure.
 
 ## Test Generation
 

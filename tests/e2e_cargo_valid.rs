@@ -150,6 +150,38 @@ fn cargo_valid_inspects_registered_model() {
 }
 
 #[test]
+fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("graph")
+        .arg("iam-access")
+        .output()
+        .expect("cargo-valid graph should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("flowchart LR"));
+    assert!(stdout.contains("IamAccessModel"));
+    assert!(stdout.contains("ATTACH_BOUNDARY"));
+    assert!(stdout.contains("P_BILLING_READ_REQUIRES_SESSION"));
+}
+
+#[test]
+fn cargo_valid_graph_marks_step_models_as_explicit_only() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("graph")
+        .arg("counter")
+        .output()
+        .expect("cargo-valid graph should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("explicit-only / opaque-step"));
+    assert!(stdout.contains("opaque_step_closure"));
+    assert!(stdout.contains("transition internals hidden"));
+    assert!(!stdout.contains("transition_INC_0"));
+}
+
+#[test]
 fn cargo_valid_checks_registered_model() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())

@@ -651,27 +651,6 @@ macro_rules! valid_action_spec {
 #[macro_export]
 macro_rules! valid_model {
     (
-        model $model:ident;
-        init [$($init_state:expr),* $(,)?];
-        transitions {
-            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];)+
-        }
-        properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
-        }
-    ) => {
-        $crate::valid_model! {
-            model $model<State, Action>;
-            init [$($init_state),*];
-            transitions {
-                $(transition $transition_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$state_ctor { $($field : $update_expr),* }];)+
-            }
-            properties {
-                $(invariant $property |$holds_state| $holds_expr;)+
-            }
-        }
-    };
-    (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
@@ -749,27 +728,6 @@ macro_rules! valid_model {
                         }
                     ),+
                 ]
-            }
-        }
-    };
-    (
-        model $model:ident;
-        init [$($init_state:expr),* $(,)?];
-        transitions {
-            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
-        }
-        properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
-        }
-    ) => {
-        $crate::valid_model! {
-            model $model<State, Action>;
-            init [$($init_state),*];
-            transitions {
-                $(transition $transition_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state),*];)+
-            }
-            properties {
-                $(invariant $property |$holds_state| $holds_expr;)+
             }
         }
     };
@@ -854,23 +812,6 @@ macro_rules! valid_model {
         &[]
     };
     (
-        model $model:ident;
-        init [$($init_state:expr),* $(,)?];
-        step |$state:ident, $action:ident| $step_body:block
-        properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
-        }
-    ) => {
-        $crate::valid_model! {
-            model $model<State, Action>;
-            init [$($init_state),*];
-            step |$state, $action| $step_body
-            properties {
-                $(invariant $property |$holds_state| $holds_expr;)+
-            }
-        }
-    };
-    (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         step |$state:ident, $action:ident| $step_body:block
@@ -922,6 +863,15 @@ macro_rules! valid_model {
                 invariant $property |$holds_state| $holds_expr;
             }
         }
+    };
+    (
+        model $model:ident;
+        $($rest:tt)*
+    ) => {
+        compile_error!("valid_model! requires explicit state/action types. Use `model Name<State, Action>;`.");
+    };
+    ($($rest:tt)*) => {
+        compile_error!("invalid valid_model! syntax. Expected `model Name<State, Action>; init [...]; ...`.");
     };
 }
 
@@ -2282,7 +2232,7 @@ mod tests {
     }
 
     crate::valid_model! {
-        model CounterModel;
+        model CounterModel<State, Action>;
         init [State {
             x: 0,
             locked: false,
@@ -2311,7 +2261,7 @@ mod tests {
     }
 
     crate::valid_model! {
-        model FailingCounterModel;
+        model FailingCounterModel<State, Action>;
         init [State {
             x: 0,
             locked: false,

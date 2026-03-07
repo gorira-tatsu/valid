@@ -10,6 +10,7 @@ use crate::{
         collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
         property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
+    reporter::render_model_mermaid,
     solver::AdapterConfig,
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
 };
@@ -67,6 +68,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
     match command.as_str() {
         "list" => cmd_list(&models, remaining),
         "inspect" => cmd_inspect(&models, remaining),
+        "graph" => cmd_graph(&models, remaining),
         "lint" => cmd_lint(&models, remaining),
         "check" => cmd_check(&models, remaining),
         "explain" => cmd_explain(&models, remaining),
@@ -82,6 +84,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
 fn normalize_command(command: &str) -> String {
     match command {
         "models" => "list",
+        "diagram" => "graph",
         "readiness" => "lint",
         "verify" => "check",
         "generate-tests" => "testgen",
@@ -116,6 +119,17 @@ fn cmd_inspect(models: &[RegisteredModel], args: Vec<String>) {
         println!("{}", render_inspect_json(&response));
     } else {
         print!("{}", render_inspect_text(&response));
+    }
+}
+
+fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
+    let parsed = parse_args(args);
+    let model = find_model(models, parsed.model.as_deref());
+    let response = (model.inspect)("registry-graph");
+    match parsed.format.as_deref().unwrap_or("mermaid") {
+        "json" => println!("{}", render_inspect_json(&response)),
+        "text" => print!("{}", render_inspect_text(&response)),
+        _ => println!("{}", render_model_mermaid(&response)),
     }
 }
 
@@ -556,6 +570,7 @@ struct ParsedArgs {
     json: bool,
     model: Option<String>,
     strategy: Option<String>,
+    format: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -570,6 +585,8 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
     while let Some(arg) = iter.next() {
         if arg == "--json" {
             parsed.json = true;
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            parsed.format = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--strategy=") {
             parsed.strategy = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--property=") {
@@ -636,6 +653,6 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
     process::exit(3);
 }

@@ -148,6 +148,22 @@ fn inspect_includes_metadata_details() {
 }
 
 #[test]
+fn cli_graph_renders_mermaid_for_valid_model() {
+    let safe = repo_path("examples/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&safe)
+        .output()
+        .expect("graph should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("flowchart LR"));
+    assert!(stdout.contains("SafeCounter"));
+    assert!(stdout.contains("Inc"));
+    assert!(stdout.contains("P_SAFE"));
+}
+
+#[test]
 fn lint_reports_clean_valid_models() {
     let source = read_fixture("examples/models/safe_counter.valid");
     let response = lint_source(&InspectRequest {

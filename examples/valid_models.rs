@@ -16,7 +16,7 @@ valid_actions! {
 }
 
 valid_model! {
-    model CounterModel;
+    model CounterModel<State, Action>;
     init [State {
         x: 0,
         locked: false,
@@ -45,7 +45,7 @@ valid_model! {
 }
 
 valid_model! {
-    model FailingCounterModel;
+    model FailingCounterModel<State, Action>;
     init [State {
         x: 0,
         locked: false,

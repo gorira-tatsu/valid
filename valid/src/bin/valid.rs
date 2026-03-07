@@ -22,7 +22,7 @@ use valid::{
         render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts,
     },
     frontend::compile_model,
-    reporter::{render_trace_mermaid, render_trace_sequence_mermaid},
+    reporter::{render_model_mermaid, render_trace_mermaid, render_trace_sequence_mermaid},
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::render_replay_json,
 };
@@ -34,6 +34,7 @@ fn main() {
     match command.as_str() {
         "check" => cmd_check(args.collect()),
         "inspect" => cmd_inspect(args.collect()),
+        "graph" => cmd_graph(args.collect()),
         "lint" => cmd_lint(args.collect()),
         "capabilities" => cmd_capabilities(args.collect()),
         "explain" => cmd_explain(args.collect()),
@@ -47,7 +48,7 @@ fn main() {
         "clean" => cmd_clean(args.collect()),
         "selfcheck" => cmd_selfcheck(),
         _ => {
-            eprintln!("usage: valid <inspect|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck> ...");
+            eprintln!("usage: valid <inspect|graph|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck> ...");
             process::exit(3);
         }
     }
@@ -55,6 +56,7 @@ fn main() {
 
 fn normalize_command(command: &str) -> String {
     match command {
+        "diagram" => "graph",
         "readiness" => "lint",
         "verify" => "check",
         "generate-tests" => "testgen",
@@ -234,6 +236,39 @@ fn cmd_inspect(args: Vec<String>) {
         }
         Err(diagnostics) => {
             if parsed.json {
+                println!("{}", render_diagnostics_json(&diagnostics));
+            } else {
+                print_diagnostics(&diagnostics);
+            }
+            process::exit(3);
+        }
+    }
+}
+
+fn cmd_graph(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid graph <model-file> [--format=mermaid|text|json]",
+        |_arg, _parsed| false,
+    );
+    let source = if is_bundled_model_ref(&parsed.path) {
+        String::new()
+    } else {
+        read_source(&parsed.path)
+    };
+    let request = InspectRequest {
+        request_id: "req-local-graph".to_string(),
+        source_name: parsed.path.clone(),
+        source,
+    };
+    match inspect_source(&request) {
+        Ok(response) => match parsed.format.as_deref().unwrap_or("mermaid") {
+            "json" => println!("{}", render_inspect_json(&response)),
+            "text" => print!("{}", render_inspect_text(&response)),
+            _ => println!("{}", render_model_mermaid(&response)),
+        },
+        Err(diagnostics) => {
+            if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
                 println!("{}", render_diagnostics_json(&diagnostics));
             } else {
                 print_diagnostics(&diagnostics);
@@ -452,22 +487,18 @@ fn cmd_testgen(args: Vec<String>) {
 }
 
 fn cmd_trace(args: Vec<String>) {
-    let mut format = "mermaid-state".to_string();
     let parsed = parse_common_args_with(
         args,
         "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |arg, options| {
-            if let Some(value) = arg.strip_prefix("--format=") {
-                options.extra = Some(value.to_string());
-                true
-            } else {
-                false
-            }
+            let _ = (arg, options);
+            false
         },
     );
-    if let Some(extra) = parsed.extra {
-        format = extra;
-    }
+    let format = parsed
+        .format
+        .clone()
+        .unwrap_or_else(|| "mermaid-state".to_string());
     let source = read_source(&parsed.path);
     let outcome = check_source(&CheckRequest {
         request_id: "req-local-trace".to_string(),
@@ -686,6 +717,7 @@ struct ParsedArgs {
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
+    format: Option<String>,
     property_id: Option<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
@@ -712,6 +744,8 @@ where
     while let Some(arg) = iter.next() {
         if arg == "--json" {
             parsed.json = true;
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            parsed.format = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--property=") {

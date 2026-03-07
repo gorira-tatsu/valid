@@ -16,6 +16,7 @@ use valid::{
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
     project::{load_project_config, render_project_config_template},
+    reporter::render_model_mermaid,
 };
 
 fn main() {
@@ -38,6 +39,7 @@ fn main() {
         json: parsed.json,
         model: parsed.model,
         strategy: parsed.strategy,
+        format: parsed.format,
         property_id: parsed.property_id,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -50,6 +52,7 @@ fn main() {
     match parsed.command.as_str() {
         "list" => cmd_list(local_args),
         "inspect" => cmd_inspect(local_args),
+        "graph" => cmd_graph(local_args),
         "lint" => cmd_lint(local_args),
         "check" => cmd_check(local_args),
         "all" => cmd_all(local_args),
@@ -67,7 +70,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
 }
 
 fn run_external_registry(parsed: CliArgs) -> ! {
@@ -98,6 +101,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
             command: "check".to_string(),
             model: Some(model.clone()),
             strategy: None,
+            format: parsed.format.clone(),
             property_id: None,
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
@@ -161,6 +165,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(strategy) = &parsed.strategy {
         command.arg(format!("--strategy={strategy}"));
     }
+    if let Some(format) = &parsed.format {
+        command.arg(format!("--format={format}"));
+    }
     if let Some(property_id) = &parsed.property_id {
         command.arg(format!("--property={property_id}"));
     }
@@ -190,6 +197,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         command: "list".to_string(),
         model: None,
         strategy: None,
+        format: None,
         property_id: None,
         backend: None,
         solver_executable: None,
@@ -292,6 +300,34 @@ fn cmd_inspect(parsed: ParsedArgs) {
         }
         Err(diagnostics) => {
             if parsed.json {
+                println!("{}", render_diagnostics_json(&diagnostics));
+            } else {
+                for diagnostic in diagnostics {
+                    eprintln!("{}", diagnostic.message);
+                }
+            }
+            process::exit(3);
+        }
+    }
+}
+
+fn cmd_graph(parsed: ParsedArgs) {
+    let model = parsed.model.unwrap_or_else(|| {
+        usage_exit("usage: cargo valid graph <model> [--format=mermaid|text|json]")
+    });
+    let request = InspectRequest {
+        request_id: "cargo-valid-graph".to_string(),
+        source_name: normalized_model_ref(&model),
+        source: String::new(),
+    };
+    match inspect_source(&request) {
+        Ok(response) => match parsed.format.as_deref().unwrap_or("mermaid") {
+            "json" => println!("{}", render_inspect_json(&response)),
+            "text" => print!("{}", render_inspect_text(&response)),
+            _ => println!("{}", render_model_mermaid(&response)),
+        },
+        Err(diagnostics) => {
+            if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
                 println!("{}", render_diagnostics_json(&diagnostics));
             } else {
                 for diagnostic in diagnostics {
@@ -589,6 +625,7 @@ struct ParsedArgs {
     json: bool,
     model: Option<String>,
     strategy: Option<String>,
+    format: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -607,6 +644,7 @@ struct CliArgs {
     command: String,
     model: Option<String>,
     strategy: Option<String>,
+    format: Option<String>,
     property_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -636,6 +674,9 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             "--json" => parsed.json = true,
             _ if arg.starts_with("--strategy=") => {
                 parsed.strategy = Some(arg.trim_start_matches("--strategy=").to_string())
+            }
+            _ if arg.starts_with("--format=") => {
+                parsed.format = Some(arg.trim_start_matches("--format=").to_string())
             }
             _ if arg.starts_with("--property=") => {
                 parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())
@@ -671,6 +712,7 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
 fn normalize_command(command: &str) -> String {
     match command {
         "models" => "list",
+        "diagram" => "graph",
         "readiness" => "lint",
         "verify" => "check",
         "suite" => "all",

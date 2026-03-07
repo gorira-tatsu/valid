@@ -27,7 +27,7 @@ valid_actions! {
 }
 
 valid_model! {
-    model CounterModel;
+    model CounterModel<State, Action>;
     init [State { x: 0, locked: false }];
     step |state, action| { /* transition logic */ }
     properties {
@@ -42,6 +42,9 @@ run_registry_cli(valid_models![
 ]);
 ```
 
+Use the explicit `model Name<State, Action>;` form. It keeps `rust-analyzer`
+and macro diagnostics much saner than the old shorthand.
+
 Project-first flow:
 
 ```sh
@@ -49,6 +52,7 @@ cargo install --path .
 cargo valid init
 cargo valid models
 cargo valid inspect counter
+cargo valid graph counter
 cargo valid readiness counter
 cargo valid verify failing-counter
 cargo valid generate-tests counter --strategy=witness
@@ -69,6 +73,7 @@ Command meanings:
 
 - `models`: show the model names exported by the registry file
 - `inspect <model>`: show the model shape without verifying it
+- `graph <model>`: render a Mermaid diagram for the model shape
 - `readiness <model>`: show capability-based migration hints and readiness findings
 - `verify <model>`: verify one model
 - `replay <model>`: replay an explicit action sequence and inspect the terminal state
