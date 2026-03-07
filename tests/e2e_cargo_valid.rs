@@ -13,6 +13,12 @@ fn cargo_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+fn cargo_guard() -> std::sync::MutexGuard<'static, ()> {
+    cargo_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn manifest_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")
 }
@@ -111,7 +117,7 @@ fn main() {{
 
 #[test]
 fn cargo_valid_lists_registered_models() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("models")
         .arg("--json")
@@ -125,7 +131,7 @@ fn cargo_valid_lists_registered_models() {
 
 #[test]
 fn cargo_subcommand_style_prefix_is_accepted() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("valid")
         .arg("models")
@@ -143,7 +149,7 @@ fn cargo_subcommand_style_prefix_is_accepted() {
 
 #[test]
 fn cargo_valid_registry_flag_alias_works() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -158,7 +164,7 @@ fn cargo_valid_registry_flag_alias_works() {
 
 #[test]
 fn cargo_valid_inspects_registered_model() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -182,7 +188,7 @@ fn cargo_valid_inspects_registered_model() {
 
 #[test]
 fn cargo_valid_inspects_fizzbuzz_as_solver_ready() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(fizzbuzz_registry_file())
@@ -201,7 +207,7 @@ fn cargo_valid_inspects_fizzbuzz_as_solver_ready() {
 
 #[test]
 fn cargo_valid_inspects_grouped_saas_registry() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(saas_registry_file())
@@ -220,7 +226,7 @@ fn cargo_valid_inspects_grouped_saas_registry() {
 
 #[test]
 fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -242,7 +248,7 @@ fn cargo_valid_graph_renders_mermaid_for_bundled_model() {
 
 #[test]
 fn cargo_valid_graph_supports_dot_and_svg_formats() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let dot_output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(saas_registry_file())
@@ -272,7 +278,7 @@ fn cargo_valid_graph_supports_dot_and_svg_formats() {
 
 #[test]
 fn cargo_valid_graph_marks_step_models_as_explicit_only() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -290,7 +296,7 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
 
 #[test]
 fn cargo_valid_checks_registered_model() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -308,7 +314,7 @@ fn cargo_valid_checks_registered_model() {
 
 #[test]
 fn cargo_valid_verifies_fizzbuzz_declaratively() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(fizzbuzz_registry_file())
@@ -327,7 +333,7 @@ fn cargo_valid_verifies_fizzbuzz_declaratively() {
 
 #[test]
 fn cargo_valid_verifies_grouped_saas_regression() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(saas_registry_file())
@@ -346,7 +352,7 @@ fn cargo_valid_verifies_grouped_saas_regression() {
 
 #[test]
 fn cargo_valid_reports_fizzbuzz_coverage_and_generates_strictness_metadata() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let coverage = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(fizzbuzz_registry_file())
@@ -385,7 +391,7 @@ fn cargo_valid_reports_fizzbuzz_coverage_and_generates_strictness_metadata() {
 
 #[test]
 fn cargo_valid_lints_registered_model_with_migration_hints() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -403,7 +409,7 @@ fn cargo_valid_lints_registered_model_with_migration_hints() {
 
 #[test]
 fn cargo_valid_migrate_surfaces_transition_snippets() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -421,7 +427,7 @@ fn cargo_valid_migrate_surfaces_transition_snippets() {
 
 #[test]
 fn cargo_valid_migrate_can_write_snippets_to_file() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output_path = std::env::temp_dir().join(format!(
         "valid-migrate-{}.rs",
         SystemTime::now()
@@ -448,7 +454,7 @@ fn cargo_valid_migrate_can_write_snippets_to_file() {
 
 #[test]
 fn cargo_valid_migrate_check_marks_step_models_for_manual_review() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -468,7 +474,7 @@ fn cargo_valid_migrate_check_marks_step_models_for_manual_review() {
 
 #[test]
 fn cargo_valid_migrate_check_passes_for_declarative_models() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(saas_registry_file())
@@ -488,7 +494,7 @@ fn cargo_valid_migrate_check_passes_for_declarative_models() {
 
 #[test]
 fn cargo_valid_explain_includes_review_metadata() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(saas_registry_file())
@@ -507,7 +513,7 @@ fn cargo_valid_explain_includes_review_metadata() {
 
 #[test]
 fn cargo_valid_lists_example_models() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -525,7 +531,7 @@ fn cargo_valid_lists_example_models() {
 
 #[test]
 fn cargo_valid_checks_example_model() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -543,7 +549,7 @@ fn cargo_valid_checks_example_model() {
 
 #[test]
 fn cargo_valid_lists_example_models_from_file() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -561,7 +567,7 @@ fn cargo_valid_lists_example_models_from_file() {
 
 #[test]
 fn cargo_valid_checks_all_example_models_from_file() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -580,7 +586,7 @@ fn cargo_valid_checks_all_example_models_from_file() {
 
 #[test]
 fn cargo_valid_testgen_witness_generates_files() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -603,7 +609,7 @@ fn cargo_valid_testgen_witness_generates_files() {
 
 #[test]
 fn cargo_valid_clean_removes_generated_and_artifacts() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let temp_root = unique_temp_project_dir("valid-clean");
     let generated = temp_root.join("generated-tests").join("clean-sentinel.rs");
     let artifact_dir = temp_root.join("artifacts").join("clean-sentinel");
@@ -630,7 +636,7 @@ fn cargo_valid_clean_removes_generated_and_artifacts() {
 
 #[test]
 fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -659,7 +665,7 @@ fn cargo_valid_testgen_guard_generates_files_for_registry_file() {
 
 #[test]
 fn cargo_valid_testgen_path_generates_tagged_files() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -685,7 +691,7 @@ fn cargo_valid_testgen_path_generates_tagged_files() {
 
 #[test]
 fn cargo_valid_check_can_target_specific_property() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(example_registry_file())
@@ -702,7 +708,7 @@ fn cargo_valid_check_can_target_specific_property() {
 
 #[test]
 fn cargo_valid_external_registry_can_use_command_backend() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -730,7 +736,7 @@ fn cargo_valid_external_registry_can_use_command_backend() {
 
 #[test]
 fn cargo_valid_inspects_bundled_declarative_model() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -757,7 +763,7 @@ fn cargo_valid_inspects_bundled_declarative_model() {
 
 #[test]
 fn cargo_valid_lints_declarative_model_cleanly() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -778,7 +784,7 @@ fn cargo_valid_lints_declarative_model_cleanly() {
 
 #[test]
 fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -803,11 +809,12 @@ fn cargo_valid_enterprise_registry_supports_or_and_eq_lowering() {
 
 #[test]
 fn cargo_valid_auto_discovers_external_registry_from_project_root() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let project_dir = unique_temp_project_dir("valid-autodiscover");
     write_autodiscover_fixture(&project_dir, "auto-discover");
 
     let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
         .current_dir(&project_dir)
         .arg("inspect")
         .arg("auto-discover")
@@ -828,7 +835,7 @@ fn cargo_valid_auto_discovers_external_registry_from_project_root() {
 
 #[test]
 fn cargo_valid_init_writes_valid_toml() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let project_dir = unique_temp_project_dir("valid-init");
     fs::create_dir_all(&project_dir).expect("temp project dir");
     fs::write(
@@ -838,6 +845,7 @@ fn cargo_valid_init_writes_valid_toml() {
     .expect("temp Cargo.toml");
 
     let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
         .current_dir(&project_dir)
         .arg("init")
         .arg("--json")
@@ -869,7 +877,7 @@ fn cargo_valid_init_writes_valid_toml() {
 
 #[test]
 fn cargo_valid_project_first_mode_requires_registry_or_valid_toml() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let project_dir = unique_temp_project_dir("valid-project-first");
     fs::create_dir_all(&project_dir).expect("temp project dir");
     fs::write(
@@ -879,6 +887,7 @@ fn cargo_valid_project_first_mode_requires_registry_or_valid_toml() {
     .expect("temp Cargo.toml");
 
     let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
         .current_dir(&project_dir)
         .arg("models")
         .output()
@@ -892,7 +901,7 @@ fn cargo_valid_project_first_mode_requires_registry_or_valid_toml() {
 
 #[test]
 fn cargo_valid_uses_valid_toml_registry_without_flags() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let project_dir = unique_temp_project_dir("valid-project-config");
     write_autodiscover_fixture(&project_dir, "project-config-model");
     fs::write(
@@ -902,6 +911,7 @@ fn cargo_valid_uses_valid_toml_registry_without_flags() {
     .expect("valid.toml");
 
     let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
         .current_dir(&project_dir)
         .arg("inspect")
         .arg("project-config-model")
@@ -921,7 +931,7 @@ fn cargo_valid_uses_valid_toml_registry_without_flags() {
 
 #[test]
 fn cargo_valid_suite_uses_valid_toml_suite_models() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let project_dir = unique_temp_project_dir("valid-suite-config");
     write_autodiscover_fixture(&project_dir, "suite-only-model");
     fs::write(
@@ -931,6 +941,7 @@ fn cargo_valid_suite_uses_valid_toml_suite_models() {
     .expect("valid.toml");
 
     let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
         .current_dir(&project_dir)
         .arg("suite")
         .arg("--json")
@@ -950,7 +961,7 @@ fn cargo_valid_suite_uses_valid_toml_suite_models() {
 
 #[test]
 fn cargo_valid_benchmark_uses_project_config_targets() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
         .arg("benchmark")
@@ -971,7 +982,7 @@ fn cargo_valid_benchmark_uses_project_config_targets() {
 
 #[test]
 fn cargo_valid_benchmark_can_record_and_compare_baselines() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let baseline_dir = std::env::temp_dir().join(format!(
         "valid-bench-baselines-{}",
         SystemTime::now()
@@ -1022,7 +1033,7 @@ fn cargo_valid_benchmark_can_record_and_compare_baselines() {
 
 #[test]
 fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -1052,7 +1063,7 @@ fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
 
 #[test]
 fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(
@@ -1086,7 +1097,7 @@ fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
 
 #[test]
 fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--manifest-path")
         .arg(manifest_path())
@@ -1122,7 +1133,7 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
 
 #[test]
 fn cargo_valid_bundled_declarative_testgen_can_use_command_backend() {
-    let _guard = cargo_lock().lock().unwrap();
+    let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
         .arg("--registry")
         .arg(

@@ -1,3 +1,20 @@
+/*
+実務ユースケース集
+
+目的:
+  - 承認、例外アクセス、返金統制、輸出統制のような実務フローをまとめて benchmark する
+  - example より少し重いが、まだ人間が読める registry を保つ
+
+含まれるモデル:
+  - prod-deploy-safe
+  - breakglass-access-regression
+  - refund-control
+  - data-export-control
+
+最初に試すコマンド:
+  cargo valid --registry benchmarks/registries/practical_use_cases_registry.rs models
+  cargo valid --registry benchmarks/registries/practical_use_cases_registry.rs suite
+*/
 use valid::{registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidState};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, ValidState)]

@@ -1,3 +1,22 @@
+/*
+IAM 風アクセス評価例
+
+目的:
+  - declarative `transitions` と path tags を使った solver-ready 例を示す
+  - embedded SAT / SMT / command backend で扱いやすい bool 中心モデルを用意する
+
+含まれるモデル:
+  - iam-access
+    Billing read は boundary と session の両方を要求する安全な仕様
+
+主な性質:
+  - P_BILLING_READ_REQUIRES_BOUNDARY
+  - P_BILLING_READ_REQUIRES_SESSION
+
+最初に試すコマンド:
+  cargo valid --registry examples/iam_transition_registry.rs inspect iam-access
+  cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION
+*/
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 
 valid_state! {

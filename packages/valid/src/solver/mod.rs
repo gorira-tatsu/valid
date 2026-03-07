@@ -1,6 +1,7 @@
 //! Solver capability descriptions and adapter traits.
 
 pub mod smt;
+pub mod varisat;
 
 use crate::{
     engine::{
@@ -19,7 +20,10 @@ use crate::{
 };
 use std::process::Command;
 
-use self::smt::{run_bounded_invariant_check, SmtCliDialect, SmtSolveStatus};
+use self::{
+    smt::{run_bounded_invariant_check, SmtCliDialect, SmtSolveStatus},
+    varisat::{run_bounded_invariant_check_varisat, VarisatSolveStatus},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityMatrix {
@@ -51,6 +55,7 @@ pub struct Cvc5Adapter {
     pub executable: String,
     pub args: Vec<String>,
 }
+pub struct VarisatAdapter;
 pub struct CommandSolverAdapter {
     pub backend_name: String,
     pub executable: String,
@@ -113,6 +118,7 @@ pub enum AdapterConfig {
         executable: String,
         args: Vec<String>,
     },
+    SatVarisat,
     Command {
         backend_name: String,
         executable: String,
@@ -146,6 +152,7 @@ pub fn capabilities_for_config(config: &AdapterConfig) -> CapabilityMatrix {
             args: args.clone(),
         }
         .capabilities(),
+        AdapterConfig::SatVarisat => VarisatAdapter.capabilities(),
         AdapterConfig::Command {
             backend_name,
             executable,
@@ -182,6 +189,12 @@ pub fn run_with_adapter(
                 executable: executable.clone(),
                 args: args.clone(),
             };
+            let plan = adapter.build_plan(model, run_plan)?;
+            let raw = adapter.run(model, &plan)?;
+            adapter.normalize(model, run_plan, raw)
+        }
+        AdapterConfig::SatVarisat => {
+            let adapter = VarisatAdapter;
             let plan = adapter.build_plan(model, run_plan)?;
             let raw = adapter.run(model, &plan)?;
             adapter.normalize(model, run_plan, raw)
@@ -486,6 +499,108 @@ impl SolverAdapter for Cvc5Adapter {
             }
             RawSolverResult::Explicit(_) => {
                 Err("smt-cvc5 adapter cannot normalize explicit results".to_string())
+            }
+        }
+    }
+}
+
+impl SolverAdapter for VarisatAdapter {
+    fn backend_kind(&self) -> BackendKind {
+        BackendKind::SatVarisat
+    }
+
+    fn capabilities(&self) -> CapabilityMatrix {
+        CapabilityMatrix {
+            backend_name: "sat-varisat".to_string(),
+            supports_explicit: false,
+            supports_bmc: true,
+            supports_certificate: false,
+            supports_trace: true,
+            supports_witness: true,
+            selfcheck_compatible: true,
+        }
+    }
+
+    fn build_plan(&self, _model: &ModelIr, run_plan: &RunPlan) -> Result<SolverRunPlan, String> {
+        let target_property_ids = match &run_plan.property_selection {
+            crate::engine::PropertySelection::ExactlyOne(id) => vec![id.clone()],
+        };
+        Ok(SolverRunPlan {
+            run_id: format!("{}-varisat", run_plan.manifest.run_id),
+            backend: BackendKind::SatVarisat,
+            target_property_ids,
+            horizon: run_plan
+                .search_bounds
+                .max_depth
+                .map(|value| value as u32)
+                .or(Some(16)),
+            encoded_model_hash: format!("varisat:{}", run_plan.manifest.source_hash),
+            strategy: run_plan.strategy,
+            resource_limits: run_plan.resource_limits.clone(),
+            detect_deadlocks: run_plan.detect_deadlocks,
+        })
+    }
+
+    fn run(&self, model: &ModelIr, plan: &SolverRunPlan) -> Result<RawSolverResult, String> {
+        let horizon = plan.horizon.unwrap_or(16) as usize;
+        match run_bounded_invariant_check_varisat(model, &plan.target_property_ids, horizon)? {
+            VarisatSolveStatus::Sat(actions) => {
+                Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                    status: "FAIL".to_string(),
+                    actions,
+                    assurance_level: Some("BOUNDED".to_string()),
+                    reason_code: Some("VARISAT_COUNTEREXAMPLE".to_string()),
+                    summary: Some(format!(
+                        "varisat found a counterexample within depth {}",
+                        horizon
+                    )),
+                    unknown_reason: None,
+                    raw_output: "sat".to_string(),
+                }))
+            }
+            VarisatSolveStatus::Unsat => Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                status: "PASS".to_string(),
+                actions: Vec::new(),
+                assurance_level: Some("BOUNDED".to_string()),
+                reason_code: Some("VARISAT_BOUNDED_NO_COUNTEREXAMPLE".to_string()),
+                summary: Some(format!(
+                    "varisat found no counterexample within depth {}",
+                    horizon
+                )),
+                unknown_reason: None,
+                raw_output: "unsat".to_string(),
+            })),
+            VarisatSolveStatus::Unknown => Ok(RawSolverResult::Protocol(CommandProtocolResult {
+                status: "UNKNOWN".to_string(),
+                actions: Vec::new(),
+                assurance_level: Some("INCOMPLETE".to_string()),
+                reason_code: Some("VARISAT_UNKNOWN".to_string()),
+                summary: Some("varisat returned unknown".to_string()),
+                unknown_reason: Some("ENGINE_ABORTED".to_string()),
+                raw_output: "unknown".to_string(),
+            })),
+        }
+    }
+
+    fn normalize(
+        &self,
+        model: &ModelIr,
+        run_plan: &RunPlan,
+        raw: RawSolverResult,
+    ) -> Result<NormalizedRunResult, String> {
+        match raw {
+            RawSolverResult::Protocol(protocol) => {
+                let mut normalized = normalize_protocol_result(model, run_plan, protocol)?;
+                rebase_normalized_outcome(
+                    &mut normalized.outcome,
+                    run_plan,
+                    BackendKind::SatVarisat,
+                    "embedded".to_string(),
+                );
+                Ok(normalized)
+            }
+            RawSolverResult::Explicit(_) => {
+                Err("sat-varisat adapter cannot normalize explicit results".to_string())
             }
         }
     }

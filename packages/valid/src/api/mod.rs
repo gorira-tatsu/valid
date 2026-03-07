@@ -94,6 +94,7 @@ pub struct InspectTransitionUpdate {
 pub struct InspectProperty {
     pub property_id: String,
     pub kind: String,
+    pub expr: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -385,6 +386,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .map(|property| InspectProperty {
                 property_id: property.property_id.clone(),
                 kind: format!("{:?}", property.kind),
+                expr: Some(render_expr_ir(&property.expr)),
             })
             .collect(),
     })
@@ -407,6 +409,7 @@ pub fn capabilities_response(
                 })?,
                 args: request.solver_args.clone(),
             },
+            Some("sat-varisat") => AdapterConfig::SatVarisat,
             Some("command") => AdapterConfig::Command {
                 backend_name: "command".to_string(),
                 executable: request.solver_executable.clone().ok_or_else(|| {
@@ -1410,9 +1413,14 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"property_id\":\"{}\",\"kind\":\"{}\"}}",
+            "{{\"property_id\":\"{}\",\"kind\":\"{}\",\"expr\":{}}}",
             escape_json(&property.property_id),
-            escape_json(&property.kind)
+            escape_json(&property.kind),
+            property
+                .expr
+                .as_ref()
+                .map(|expr| format!("\"{}\"", escape_json(expr)))
+                .unwrap_or_else(|| "null".to_string())
         ));
     }
     out.push_str("]}");
@@ -1498,6 +1506,16 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             for update in &transition.updates {
                 out.push_str(&format!("  update {} := {}\n", update.field, update.expr));
             }
+        }
+    }
+    if !response.property_details.is_empty() {
+        out.push_str("property_details:\n");
+        for property in &response.property_details {
+            out.push_str(&format!("- {}: {}", property.property_id, property.kind));
+            if let Some(expr) = &property.expr {
+                out.push_str(&format!(" expr={expr}"));
+            }
+            out.push('\n');
         }
     }
     out
@@ -2712,6 +2730,7 @@ fn backend_config_from_request(request: &CheckRequest) -> Result<AdapterConfig, 
     match request.backend.as_deref() {
         None | Some("explicit") => Ok(AdapterConfig::Explicit),
         Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("sat-varisat") => Ok(AdapterConfig::SatVarisat),
         Some("smt-cvc5") => {
             let executable = request
                 .solver_executable
@@ -2743,6 +2762,7 @@ fn backend_config_from_orchestrate_request(
     match request.backend.as_deref() {
         None | Some("explicit") => Ok(AdapterConfig::Explicit),
         Some("mock-bmc") => Ok(AdapterConfig::MockBmc),
+        Some("sat-varisat") => Ok(AdapterConfig::SatVarisat),
         Some("smt-cvc5") => {
             let executable = request
                 .solver_executable
@@ -2775,12 +2795,14 @@ fn backend_kind_for_config(config: &AdapterConfig) -> crate::engine::BackendKind
             crate::engine::BackendKind::MockBmc
         }
         AdapterConfig::SmtCvc5 { .. } => crate::engine::BackendKind::SmtCvc5,
+        AdapterConfig::SatVarisat => crate::engine::BackendKind::SatVarisat,
     }
 }
 
 fn backend_version_for_config(config: &AdapterConfig) -> String {
     match config {
         AdapterConfig::Command { .. } | AdapterConfig::SmtCvc5 { .. } => "external".to_string(),
+        AdapterConfig::SatVarisat => env!("CARGO_PKG_VERSION").to_string(),
         _ => env!("CARGO_PKG_VERSION").to_string(),
     }
 }

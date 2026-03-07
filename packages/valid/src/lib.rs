@@ -22,4 +22,4 @@ pub mod support;
 pub mod testgen;
 
 pub use modeling::{contains, iff, implies, insert, is_empty, remove, xor, FiniteEnumSet};
-pub use valid_derive::{valid_model, ValidAction, ValidEnum, ValidState};
+pub use valid_derive::{ValidAction, ValidEnum, ValidState};

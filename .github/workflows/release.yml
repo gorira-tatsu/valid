@@ -1,0 +1,36 @@
+name: release-binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build release binaries with embedded SAT backend
+        run: cargo build --release --features varisat-backend
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp target/release/valid dist/
+          cp target/release/cargo-valid dist/
+          tar -czf valid-${{ runner.os }}.tar.gz -C dist valid cargo-valid
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: valid-${{ runner.os }}
+          path: valid-${{ runner.os }}.tar.gz

@@ -531,6 +531,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         .map(|property| InspectProperty {
             property_id: property.property_id.to_string(),
             kind: format!("{:?}", property.property_kind),
+            expr: property.expr.map(str::to_string),
         })
         .collect::<Vec<_>>();
     let capabilities = machine_capability_report::<M>();
@@ -823,6 +824,7 @@ fn adapter_from_parsed_args(parsed: &ParsedArgs) -> Result<Option<AdapterConfig>
     match parsed.backend.as_deref() {
         None | Some("explicit") => Ok(None),
         Some("mock-bmc") => Ok(Some(AdapterConfig::MockBmc)),
+        Some("sat-varisat") => Ok(Some(AdapterConfig::SatVarisat)),
         Some("smt-cvc5") => Ok(Some(AdapterConfig::SmtCvc5 {
             executable: parsed
                 .solver_executable
@@ -945,6 +947,6 @@ fn registry_migration_output_path(model: &str, requested: &str) -> String {
 }
 
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
     process::exit(3);
 }

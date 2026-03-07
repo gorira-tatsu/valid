@@ -634,6 +634,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "Invariant".to_string(),
+                expr: None,
             }],
         };
         let mermaid = render_model_mermaid(&inspect);
@@ -694,6 +695,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "Invariant".to_string(),
+                expr: None,
             }],
         };
         let dot = render_model_dot(&inspect);
@@ -754,6 +756,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "Invariant".to_string(),
+                expr: None,
             }],
         };
         let mermaid = render_model_mermaid(&inspect);

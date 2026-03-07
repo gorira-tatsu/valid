@@ -1,3 +1,18 @@
+/*
+エンタープライズ規模ベンチマーク例
+
+目的:
+  - bounded u16/u32、enum、Option<enum> を含む少し重い registry を benchmark 用に用意する
+  - access review と export governance を性能回帰の基準にする
+
+含まれるモデル:
+  - access-review-scale
+  - quota-guardrail-regression
+
+最初に試すコマンド:
+  cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs benchmark access-review-scale --repeat=5
+  cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5
+*/
 use valid::{
     registry::run_registry_cli, valid_model, valid_models, ValidAction, ValidEnum, ValidState,
 };

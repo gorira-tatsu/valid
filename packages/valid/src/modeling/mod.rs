@@ -870,7 +870,7 @@ macro_rules! valid_action_spec {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __valid_model_internal {
+macro_rules! valid_model {
     (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
@@ -889,7 +889,7 @@ macro_rules! __valid_model_internal {
             $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
         }
     ) => {
-        $crate::__valid_model_internal! {
+        $crate::valid_model! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             transitions {
@@ -922,7 +922,7 @@ macro_rules! __valid_model_internal {
             $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
         }
     ) => {
-        $crate::__valid_model_internal! {
+        $crate::valid_model! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             transitions {
@@ -1000,7 +1000,7 @@ macro_rules! __valid_model_internal {
                                 effect: stringify!($state_ctor { $($field: $update_expr),* }),
                                 reads: descriptor.reads,
                                 writes: descriptor.writes,
-                                path_tags: $crate::__valid_model_internal!(@path_tags $($($path_tag),*)?),
+                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
                                 updates: &[
                                     $(
                                         $crate::modeling::TransitionUpdateDescriptor {
@@ -1079,7 +1079,7 @@ macro_rules! __valid_model_internal {
                                 effect: stringify!([$($next_state),*]),
                                 reads: descriptor.reads,
                                 writes: descriptor.writes,
-                                path_tags: $crate::__valid_model_internal!(@path_tags $($($path_tag),*)?),
+                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
                                 updates: &[],
                             }
                         }
@@ -1138,7 +1138,7 @@ macro_rules! __valid_model_internal {
         step |$state:ident, $action:ident| $step_body:block
         invariant |$holds_state:ident| $holds_expr:expr;
     ) => {
-        $crate::__valid_model_internal! {
+        $crate::valid_model! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             step |$state, $action| $step_body
@@ -2603,12 +2603,14 @@ fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
         AdapterConfig::Explicit => BackendKind::Explicit,
         AdapterConfig::MockBmc | AdapterConfig::Command { .. } => BackendKind::MockBmc,
         AdapterConfig::SmtCvc5 { .. } => BackendKind::SmtCvc5,
+        AdapterConfig::SatVarisat => BackendKind::SatVarisat,
     }
 }
 
 fn backend_version_for_adapter(adapter: &AdapterConfig) -> String {
     match adapter {
         AdapterConfig::Explicit | AdapterConfig::MockBmc => env!("CARGO_PKG_VERSION").to_string(),
+        AdapterConfig::SatVarisat => env!("CARGO_PKG_VERSION").to_string(),
         AdapterConfig::SmtCvc5 { .. } | AdapterConfig::Command { .. } => "external".to_string(),
     }
 }
@@ -2857,7 +2859,7 @@ mod tests {
         }
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model CounterModel<State, Action>;
         init [State {
             x: 0,
@@ -2886,7 +2888,7 @@ mod tests {
         }
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model FailingCounterModel<State, Action>;
         init [State {
             x: 0,
@@ -3119,7 +3121,7 @@ mod tests {
         }
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model AccessModel<AccessState, AccessAction>;
         init [AccessState {
             attached: false,
@@ -3185,7 +3187,7 @@ mod tests {
         assert_eq!(model.actions[0].updates[0].field, "attached");
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model ReviewStageModel<EnumState, AttachedAction>;
         init [EnumState {
             review_stage: ReviewStage::Draft,
@@ -3223,7 +3225,7 @@ mod tests {
         ));
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model OptionalReviewStageModel<OptionalEnumState, AttachedAction>;
         init [OptionalEnumState {
             review_stage: None,
@@ -3372,7 +3374,7 @@ mod tests {
         }
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model RoleSetModel<RoleSetState, RoleSetAction>;
         init [RoleSetState {
             roles: FiniteEnumSet::empty(),
@@ -3407,7 +3409,7 @@ mod tests {
         }
     }
 
-    valid_derive::valid_model! {
+    crate::valid_model! {
         model BranchModel<BranchState, BranchAction>;
         init [BranchState {
             x: 0,

@@ -72,7 +72,7 @@ fn normalize_command(command: &str) -> String {
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     let request = CheckRequest {
@@ -114,7 +114,7 @@ fn cmd_check(args: Vec<String>) {
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     match explain_source(&CheckRequest {
@@ -151,7 +151,7 @@ fn cmd_explain(args: Vec<String>) {
 fn cmd_minimize(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid minimize <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid minimize <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     match minimize_source(&MinimizeRequest {
@@ -310,7 +310,7 @@ fn cmd_lint(args: Vec<String>) {
 fn cmd_capabilities(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid capabilities [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid capabilities [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |_arg, _parsed| false,
     );
     let request = CapabilitiesRequest {
@@ -419,7 +419,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let strategy = parsed
         .extra
@@ -505,7 +505,7 @@ fn cmd_testgen(args: Vec<String>) {
 fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |arg, options| {
             let _ = (arg, options);
             false
@@ -615,7 +615,7 @@ fn cmd_replay(args: Vec<String>) {
 fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid orchestrate <model-file> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid orchestrate <model-file> [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let source = read_source(&parsed.path);
     let request = OrchestrateRequest {
@@ -681,7 +681,7 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <model-file> [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     if is_bundled_model_ref(&parsed.path) {
         let report = coverage_bundled_model(&parsed.path).unwrap_or_else(|message| {

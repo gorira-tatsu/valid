@@ -97,7 +97,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -259,6 +259,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     let target = resolve_external_target(parsed);
     let mut command = Command::new("cargo");
     command.arg("run");
+    if matches!(parsed.backend.as_deref(), Some("sat-varisat")) {
+        command.arg("--features").arg("varisat-backend");
+    }
     if let Some(manifest_path) = target.manifest_path {
         command.arg("--manifest-path").arg(manifest_path);
     }
@@ -680,7 +683,7 @@ fn cmd_migrate(parsed: ParsedArgs) {
 }
 
 fn cmd_check(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid check <model> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let inspect_request = InspectRequest {
         request_id: "cargo-valid-check-preflight".to_string(),
         source_name: normalized_model_ref(&model),
@@ -768,7 +771,7 @@ fn cmd_coverage(parsed: ParsedArgs) {
 }
 
 fn cmd_orchestrate(parsed: ParsedArgs) {
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid orchestrate <model> [--json] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid orchestrate <model> [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]"));
     let request = OrchestrateRequest {
         request_id: "cargo-valid-orchestrate".to_string(),
         source_name: normalized_model_ref(&model),

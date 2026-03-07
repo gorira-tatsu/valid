@@ -36,7 +36,7 @@ crate::valid_actions! {
     }
 }
 
-valid_derive::valid_model! {
+crate::valid_model! {
     model CounterModel<State, Action>;
     init [State {
         x: 0,
@@ -65,7 +65,7 @@ valid_derive::valid_model! {
     }
 }
 
-valid_derive::valid_model! {
+crate::valid_model! {
     model FailingCounterModel<State, Action>;
     init [State {
         x: 0,
@@ -109,7 +109,7 @@ crate::valid_actions! {
     }
 }
 
-valid_derive::valid_model! {
+crate::valid_model! {
     model IamAccessModel<AccessState, AccessAction>;
     init [AccessState {
         boundary_attached: false,
@@ -516,6 +516,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
         .map(|property| InspectProperty {
             property_id: property.property_id.to_string(),
             kind: format!("{:?}", property.property_kind),
+            expr: property.expr.map(str::to_string),
         })
         .collect::<Vec<_>>();
     let capabilities = machine_capability_report::<M>();

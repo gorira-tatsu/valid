@@ -15,6 +15,9 @@ the primary one.
 
 User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md).
+Installation and packaging guidance lives in
+[docs/install.md](./docs/install.md), and the clean-architecture overview lives
+in [docs/architecture.md](./docs/architecture.md).
 
 The product story is now:
 
@@ -30,6 +33,7 @@ The product story is now:
 - Report action and guard coverage
 - Generate Rust test files from counterexamples and witnesses
 - Run Rust-defined models through `cargo-valid`
+- Run a pure-Rust embedded SAT path through `sat-varisat`
 - Run a bounded `smt-cvc5` path for the current MVP subset
 - Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
 
@@ -44,6 +48,15 @@ The product story is now:
 
 ## Quick Start
 
+There are two user stories:
+
+- `binary user`
+  install a prebuilt binary and use `valid` for `.valid` compatibility flows
+- `Rust model author`
+  install with Cargo and use `cargo valid` against Rust registries
+
+If you want details, read [docs/install.md](./docs/install.md).
+
 Run the full test suite:
 
 ```sh
@@ -53,7 +66,7 @@ cargo test -q
 Initialize a project once:
 
 ```sh
-cargo install --path .
+cargo install --path . --features varisat-backend
 cargo valid init
 ```
 
@@ -135,6 +148,8 @@ Use this for new work.
 - Export models through `run_registry_cli(valid_models![...])`
 - Add `valid.toml`
 - Run them with `cargo valid`
+- This path requires a Rust toolchain because `cargo valid` compiles the
+  registry target
 
 ### 2. `.valid` path
 
@@ -144,6 +159,19 @@ Use this for compatibility fixtures and frontend/kernel tests.
 - Run it with the `valid` binary
 
 If you are deciding between the two, use the Rust-first path.
+
+## Install Modes
+
+- Prebuilt binary
+  easiest distribution path; recommended for operators and reviewers
+- `cargo install --path . --features varisat-backend`
+  recommended for authors working on Rust DSL registries
+- Docker
+  useful for CI and isolated local runs
+
+The embedded SAT backend is optional at compile time. The release workflow
+builds binaries with `varisat-backend` enabled, while source installs can
+choose the feature set explicitly.
 
 ## Command Guide
 
@@ -219,6 +247,18 @@ cargo valid --registry examples/saas_multi_tenant_registry.rs graph tenant-isola
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs verify quota-guardrail-regression
 ```
+
+## Packaging Notes
+
+If you are distributing `valid` to non-Rust users:
+
+- ship prebuilt `valid` and `cargo-valid` binaries
+- document that `.valid` compatibility mode works without Rust DSL authoring
+- document that Rust registry projects still require `cargo` because their
+  models are compiled on demand
+
+This is why the repository keeps solver integrations behind adapters and keeps
+the install guide separate from the DSL guide.
 
 `inspect --json` now includes:
 

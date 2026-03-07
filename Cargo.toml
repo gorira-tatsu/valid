@@ -3,6 +3,10 @@ name = "valid"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+varisat-backend = ["dep:varisat"]
+
 [workspace]
 members = ["packages/valid_derive"]
 
@@ -32,3 +36,4 @@ path = "benchmarks/registries/iam_enterprise_registry.rs"
 
 [dependencies]
 valid_derive = { path = "packages/valid_derive" }
+varisat = { version = "0.2", optional = true }

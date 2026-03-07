@@ -1,3 +1,20 @@
+/*
+最小カウンタ例
+
+目的:
+  - Rust DSL の最小構成を読むための入口にする
+  - `step` モデルと declarative モデルの違いを説明する前の最小 fixture にする
+
+含まれるモデル:
+  - counter
+    ロック中は増えず、x は常に 0..=3 に収まる
+  - failing-counter
+    わざと弱い不変条件を置き、反例・explain・testgen の入口にする
+
+最初に試すコマンド:
+  cargo valid --registry examples/valid_models.rs inspect counter
+  cargo valid --registry examples/valid_models.rs verify failing-counter
+*/
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 
 valid_state! {

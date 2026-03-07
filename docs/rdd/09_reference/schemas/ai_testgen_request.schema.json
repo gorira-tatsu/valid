@@ -10,7 +10,7 @@
     "strategy": { "type": "string", "minLength": 1 },
     "backend": {
       "type": ["string", "null"],
-      "enum": ["explicit", "mock-bmc", "smt-cvc5", "command", null]
+      "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command", null]
     },
     "solver_executable": { "type": ["string", "null"] },
     "solver_args": { "type": "array", "items": { "type": "string" } }

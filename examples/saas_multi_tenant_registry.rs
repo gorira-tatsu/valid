@@ -1,3 +1,25 @@
+/*
+SaaS マルチテナント隔離例
+
+目的:
+  - テナント隔離、shared service、entitlement 付与を grouped transitions で書く
+  - SaaS / multi-tenant サービス保証の最小読解例にする
+
+含まれるモデル:
+  - tenant-isolation-safe
+    review 済みの shared search だけを許可し、cross-tenant access を起こさない
+  - tenant-isolation-regression
+    review を飛ばした例外経路を許し、隔離破りの反例を返す
+
+主な性質:
+  - P_SHARED_SEARCH_REQUIRES_REVIEW
+  - P_EXPORT_API_REQUIRES_ENTERPRISE
+  - P_NO_CROSS_TENANT_ACCESS
+
+最初に試すコマンド:
+  cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe
+  cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
+*/
 use valid::{
     contains, insert, registry::run_registry_cli, valid_actions, valid_model, valid_models,
     valid_state, FiniteEnumSet, ValidEnum,

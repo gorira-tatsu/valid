@@ -42,6 +42,7 @@ pub enum BackendKind {
     Explicit,
     MockBmc,
     SmtCvc5,
+    SatVarisat,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

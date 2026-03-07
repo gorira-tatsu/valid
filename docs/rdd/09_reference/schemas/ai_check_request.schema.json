@@ -10,7 +10,7 @@
     "property_id": { "type": ["string", "null"] },
     "backend": {
       "type": ["string", "null"],
-      "enum": ["explicit", "mock-bmc", "smt-cvc5", "command", null]
+      "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command", null]
     },
     "solver_executable": { "type": ["string", "null"] },
     "solver_args": {

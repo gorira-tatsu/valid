@@ -18,6 +18,13 @@ path is:
 The DSL is intentionally embedded in Rust rather than being a standalone
 language file format.
 
+That means:
+
+- Rust registry authoring requires a Rust toolchain
+- the DSL is designed to feel natural in `rust-analyzer`
+- procedural-macro diagnostics and `cargo valid readiness` are part of the
+  authoring experience, not just the runtime experience
+
 ## Canonical Modeling Path
 
 There are two ways to describe behavior:
@@ -136,6 +143,19 @@ The metadata is used by:
 If you omit `reads` or `writes`, the model can still run, but diagnostics and
 generated artifacts become weaker.
 
+## IDE Notes
+
+Current guidance for a smoother IDE experience:
+
+- always write `model Name<State, Action>;`
+- prefer declarative `transitions` over `step`
+- use `cargo valid readiness <model>` when `rust-analyzer` diagnostics are
+  ambiguous
+- keep examples and registries small enough that transition intent is obvious
+
+`valid_model!` uses a procedural-macro front-end specifically to improve
+diagnostics and keep parser errors closer to the DSL surface.
+
 ## Model Definition
 
 The model itself is declared with `valid_model!`.
@@ -225,6 +245,11 @@ like FizzBuzz can stay on the solver-ready path instead of falling back to
 `on Action { ... }` is currently grouping sugar. It does not yet provide
 `otherwise` / `else if` semantics; each `when` still lowers to an ordinary
 guarded transition for that action.
+
+Grouped `on Action { ... }` syntax is the preferred surface form when several
+guarded branches belong to the same action. It keeps the source readable while
+preserving a flat canonical IR for coverage, explain, test generation, and
+solver lowering.
 
 ### Tags
 

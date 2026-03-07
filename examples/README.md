@@ -3,6 +3,13 @@
 `examples/` is intentionally small. It only contains user-facing Rust DSL
 registries that are easy to read and debug.
 
+Every example should start with a `/* ... */` block comment that explains:
+
+- what business rule or finite-state contract is being modeled
+- which properties are expected to pass or fail
+- which command to run first
+- why the example exists
+
 Current examples:
 
 - `valid_models.rs`

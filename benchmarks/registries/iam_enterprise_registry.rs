@@ -1,3 +1,19 @@
+/*
+IAM エンタープライズ例
+
+目的:
+  - boundary, session, MFA, SCP, explicit deny を合わせた IAM 風 access model を置く
+  - OR 条件や deny 優先の policy-path を確認する benchmark fixture にする
+
+主な性質:
+  - P_BILLING_READ_REQUIRES_SESSION
+  - P_BILLING_READ_REQUIRES_BOUNDARY_OR_MFA
+  - P_DENY_BLOCKS_ACCESS
+
+最初に試すコマンド:
+  cargo valid --registry benchmarks/registries/iam_enterprise_registry.rs inspect iam-enterprise
+  cargo valid --registry benchmarks/registries/iam_enterprise_registry.rs verify iam-enterprise --property=P_DENY_BLOCKS_ACCESS
+*/
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 
 valid_state! {
