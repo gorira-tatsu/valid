@@ -71,38 +71,32 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on AttachAliceAlpha {
-            [tags = ["membership_path", "tenant_isolation_path"]]
-            when |state| !rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
-            => [TenantRelationState {
-                memberships: rel_insert(state.memberships, Member::Alice, Tenant::Alpha),
-                plans: state.plans,
-                export_enabled: state.export_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on UpgradeAlphaEnterprise {
-            [tags = ["entitlement_path", "allow_path"]]
-            when |state| !map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
-            => [TenantRelationState {
-                memberships: state.memberships,
-                plans: map_put(state.plans, Tenant::Alpha, Plan::Enterprise),
-                export_enabled: state.export_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on EnableAlphaExport {
-            [tags = ["allow_path", "membership_path", "tenant_isolation_path"]]
-            when |state|
-                rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
-                && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
-            => [TenantRelationState {
-                memberships: state.memberships,
-                plans: state.plans,
-                export_enabled: true,
-                cross_tenant_access: false,
-            }];
-        }
+        transition AttachAliceAlpha [tags = ["membership_path", "tenant_isolation_path"]]
+        when |state| !rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
+        => [TenantRelationState {
+            memberships: rel_insert(state.memberships, Member::Alice, Tenant::Alpha),
+            plans: state.plans,
+            export_enabled: state.export_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition UpgradeAlphaEnterprise [tags = ["entitlement_path", "allow_path"]]
+        when |state| !map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
+        => [TenantRelationState {
+            memberships: state.memberships,
+            plans: map_put(state.plans, Tenant::Alpha, Plan::Enterprise),
+            export_enabled: state.export_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition EnableAlphaExport [tags = ["allow_path", "membership_path", "tenant_isolation_path"]]
+        when |state|
+            rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
+            && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
+        => [TenantRelationState {
+            memberships: state.memberships,
+            plans: state.plans,
+            export_enabled: true,
+            cross_tenant_access: false,
+        }];
     }
     properties {
         invariant P_EXPORT_REQUIRES_MEMBERSHIP |state|
@@ -123,16 +117,14 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on EnableCrossTenantExport {
-            [tags = ["exception_path", "tenant_isolation_path"]]
-            when |state| map_contains_entry(state.plans, Tenant::Beta, Plan::Enterprise)
-            => [TenantRelationState {
-                memberships: state.memberships,
-                plans: state.plans,
-                export_enabled: true,
-                cross_tenant_access: true,
-            }];
-        }
+        transition EnableCrossTenantExport [tags = ["exception_path", "tenant_isolation_path"]]
+        when |state| map_contains_entry(state.plans, Tenant::Beta, Plan::Enterprise)
+        => [TenantRelationState {
+            memberships: state.memberships,
+            plans: state.plans,
+            export_enabled: true,
+            cross_tenant_access: true,
+        }];
     }
     properties {
         invariant P_EXPORT_REQUIRES_MEMBERSHIP |state|

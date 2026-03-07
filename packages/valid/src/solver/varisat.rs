@@ -265,8 +265,7 @@ impl<'a> CnfEncoder<'a> {
                                     left_index,
                                     right_index,
                                 );
-                                self.solver
-                                    .add_clause(&[if present { lit } else { !lit }]);
+                                self.solver.add_clause(&[if present { lit } else { !lit }]);
                             }
                         }
                     }
@@ -288,8 +287,7 @@ impl<'a> CnfEncoder<'a> {
                                     key_index,
                                     value_index,
                                 );
-                                self.solver
-                                    .add_clause(&[if present { lit } else { !lit }]);
+                                self.solver.add_clause(&[if present { lit } else { !lit }]);
                             }
                         }
                     }
@@ -532,21 +530,14 @@ impl<'a> CnfEncoder<'a> {
                         right_index as usize,
                     )
                 }
-                BinaryOp::RelationIntersects => {
-                    self.encode_relation_intersects(step, left, right)
-                }
+                BinaryOp::RelationIntersects => self.encode_relation_intersects(step, left, right),
                 BinaryOp::MapContainsKey => {
                     let key_index = extract_enum_index_from_expr(right, expr)? as usize;
                     self.encode_map_contains_key(step, left, key_index)
                 }
                 BinaryOp::MapContainsEntry => {
                     let (key_index, value_index) = extract_pair_indexes(right, expr)?;
-                    self.encode_map_slot_check(
-                        step,
-                        left,
-                        key_index as usize,
-                        value_index as usize,
-                    )
+                    self.encode_map_slot_check(step, left, key_index as usize, value_index as usize)
                 }
                 _ => Err(format!(
                     "backend=sat-varisat does not support `{op:?}` as a boolean expression"
@@ -739,7 +730,9 @@ impl<'a> CnfEncoder<'a> {
                 } = ty
                 {
                     let slot_count = left_variants.len() * right_variants.len();
-                    Ok(EncodedValue::Relation(self.uint_to_bit_lits(*bits, slot_count)))
+                    Ok(EncodedValue::Relation(
+                        self.uint_to_bit_lits(*bits, slot_count),
+                    ))
                 } else {
                     unreachable!()
                 }
@@ -768,7 +761,8 @@ impl<'a> CnfEncoder<'a> {
                 let EncodedValue::Relation(mut slots) = base else {
                     return Err("expected relation".to_string());
                 };
-                let idx = relation_slot_index(target_left as usize, target_right as usize, right_len);
+                let idx =
+                    relation_slot_index(target_left as usize, target_right as usize, right_len);
                 if idx < slots.len() {
                     slots[idx] = self.bool_const(true);
                 }
@@ -789,7 +783,8 @@ impl<'a> CnfEncoder<'a> {
                 let EncodedValue::Relation(mut slots) = base else {
                     return Err("expected relation".to_string());
                 };
-                let idx = relation_slot_index(target_left as usize, target_right as usize, right_len);
+                let idx =
+                    relation_slot_index(target_left as usize, target_right as usize, right_len);
                 if idx < slots.len() {
                     slots[idx] = self.bool_const(false);
                 }
@@ -816,7 +811,10 @@ impl<'a> CnfEncoder<'a> {
                     _ => unreachable!(),
                 };
                 Ok(self.bool_const(relation_literal_contains(
-                    *bits, right_len, left_index, right_index,
+                    *bits,
+                    right_len,
+                    left_index,
+                    right_index,
                 )))
             }
             ExprIr::FieldRef(field_id) => {
@@ -868,18 +866,10 @@ impl<'a> CnfEncoder<'a> {
                 let mut overlaps = Vec::new();
                 for left_index in 0..left_variants.len() {
                     for right_index in 0..right_variants.len() {
-                        let a = self.encode_relation_slot_check(
-                            step,
-                            left,
-                            left_index,
-                            right_index,
-                        )?;
-                        let b = self.encode_relation_slot_check(
-                            step,
-                            right,
-                            left_index,
-                            right_index,
-                        )?;
+                        let a =
+                            self.encode_relation_slot_check(step, left, left_index, right_index)?;
+                        let b =
+                            self.encode_relation_slot_check(step, right, left_index, right_index)?;
                         overlaps.push(self.bool_and(a, b));
                     }
                 }
@@ -982,7 +972,10 @@ impl<'a> CnfEncoder<'a> {
                     _ => unreachable!(),
                 };
                 Ok(self.bool_const(relation_literal_contains(
-                    *bits, value_len, key_index, value_index,
+                    *bits,
+                    value_len,
+                    key_index,
+                    value_index,
                 )))
             }
             ExprIr::FieldRef(field_id) => {

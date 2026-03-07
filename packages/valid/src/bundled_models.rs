@@ -37,7 +37,7 @@ crate::valid_actions! {
     }
 }
 
-crate::valid_model! {
+crate::valid_step_model! {
     model CounterModel<State, Action>;
     init [State {
         x: 0,
@@ -66,7 +66,7 @@ crate::valid_model! {
     }
 }
 
-crate::valid_model! {
+crate::valid_step_model! {
     model FailingCounterModel<State, Action>;
     init [State {
         x: 0,

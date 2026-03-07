@@ -69,78 +69,66 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on OnboardTenant {
-            [tags = ["growth_path"]]
-            when |state| state.tenant_count < 8
-            => [TenantState {
-                tenant_count: state.tenant_count + 1,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on UpgradeEnterprise {
-            [tags = ["entitlement_path", "allow_path"]]
-            when |state| state.plan != TenantPlan::Enterprise
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: TenantPlan::Enterprise,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on ReviewIsolation {
-            [tags = ["approval_path", "governance_path"]]
-            when |state| state.isolation_reviewed == false
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: true,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on GrantExportApi {
-            [tags = ["allow_path", "entitlement_path"]]
-            when |state| state.plan == TenantPlan::Enterprise && !contains(state.entitlements, Feature::ExportApi)
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: insert(state.entitlements, Feature::ExportApi),
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on EnableSharedSearch {
-            [tags = ["allow_path", "approval_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled == false && state.isolation_reviewed && state.tenant_count >= 2
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: true,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on ServeCrossTenantQuery {
-            [tags = ["allow_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled && state.isolation_reviewed
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: false,
-            }];
-        }
+        transition OnboardTenant [tags = ["growth_path"]]
+        when |state| state.tenant_count < 8
+        => [TenantState {
+            tenant_count: state.tenant_count + 1,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition UpgradeEnterprise [tags = ["entitlement_path", "allow_path"]]
+        when |state| state.plan != TenantPlan::Enterprise
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: TenantPlan::Enterprise,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition ReviewIsolation [tags = ["approval_path", "governance_path"]]
+        when |state| state.isolation_reviewed == false
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: true,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition GrantExportApi [tags = ["allow_path", "entitlement_path"]]
+        when |state| state.plan == TenantPlan::Enterprise && !contains(state.entitlements, Feature::ExportApi)
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: insert(state.entitlements, Feature::ExportApi),
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition EnableSharedSearch [tags = ["allow_path", "approval_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled == false && state.isolation_reviewed && state.tenant_count >= 2
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: true,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition ServeCrossTenantQuery [tags = ["allow_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled && state.isolation_reviewed
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: false,
+        }];
     }
     properties {
         invariant P_SHARED_SEARCH_REQUIRES_REVIEW |state|
@@ -163,52 +151,49 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on EnableSharedSearch {
-            [tags = ["allow_path", "approval_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled == false && state.isolation_reviewed
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: true,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
+        transition EnableSharedSearch [tags = ["allow_path", "approval_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled == false && state.isolation_reviewed
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: true,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
 
-            [tags = ["exception_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled == false && state.plan == TenantPlan::Enterprise && state.isolation_reviewed == false
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: true,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on ServeCrossTenantQuery {
-            [tags = ["deny_path", "exception_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled && state.isolation_reviewed == false
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: true,
-            }];
+        transition EnableSharedSearch [tags = ["exception_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled == false && state.plan == TenantPlan::Enterprise && state.isolation_reviewed == false
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: true,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
 
-            [tags = ["allow_path", "tenant_isolation_path"]]
-            when |state| state.shared_search_enabled && state.isolation_reviewed
-            => [TenantState {
-                tenant_count: state.tenant_count,
-                plan: state.plan,
-                entitlements: state.entitlements,
-                isolation_reviewed: state.isolation_reviewed,
-                shared_search_enabled: state.shared_search_enabled,
-                cross_tenant_access: false,
-            }];
-        }
+        transition ServeCrossTenantQuery [tags = ["deny_path", "exception_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled && state.isolation_reviewed == false
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: true,
+        }];
+
+        transition ServeCrossTenantQuery [tags = ["allow_path", "tenant_isolation_path"]]
+        when |state| state.shared_search_enabled && state.isolation_reviewed
+        => [TenantState {
+            tenant_count: state.tenant_count,
+            plan: state.plan,
+            entitlements: state.entitlements,
+            isolation_reviewed: state.isolation_reviewed,
+            shared_search_enabled: state.shared_search_enabled,
+            cross_tenant_access: false,
+        }];
     }
     properties {
         invariant P_SHARED_SEARCH_REQUIRES_REVIEW |state|

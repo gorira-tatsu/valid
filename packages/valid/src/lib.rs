@@ -9,9 +9,13 @@ pub mod benchmark;
 pub mod bundled_models;
 pub mod cli;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
+pub mod conformance;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod contract;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod coverage;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+pub mod doc;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod engine;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]

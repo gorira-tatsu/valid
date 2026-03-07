@@ -1075,7 +1075,7 @@ pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityRepor
 fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment {
     let mut codes = BTreeSet::new();
     let mut unsupported_features = BTreeSet::new();
-#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+    #[cfg(any(debug_assertions, feature = "verification-runtime"))]
     for field in &model.state_fields {
         if matches!(field.ty, FieldType::String { .. }) {
             codes.insert("string_fields_require_explicit_backend".to_string());
@@ -1126,7 +1126,7 @@ fn collect_solver_subset_reasons_from_expr(
     reasons: &mut BTreeSet<String>,
     unsupported_features: &mut BTreeSet<String>,
 ) {
-#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+    #[cfg(any(debug_assertions, feature = "verification-runtime"))]
     match expr {
         ExprIr::Literal(Value::String(_)) => {
             reasons.insert("string_literals_require_explicit_backend".to_string());
@@ -1737,40 +1737,154 @@ macro_rules! valid_action_spec {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! valid_model {
-    (
-        model $model:ident<$state_ty:ty, $action_ty:ty>;
-        init [$($init_state:expr),* $(,)?];
-        transitions {
-            $(
-                on $group_action:ident {
-                    $(
-                        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-                        when |$guard_state:ident| $guard_expr:expr
-                        => [$($next_state:tt)+];
-                    )+
-                }
-            )+
-        }
-        properties {
-            $($property_tokens:tt)+
-        }
-    ) => {
-        $crate::valid_model! {
-            model $model<$state_ty, $action_ty>;
-            init [$($init_state),*];
-            transitions {
-                $(
-                    $(
-                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state)+];
-                    )+
-                )+
-            }
-            properties {
-                $($property_tokens)+
-            }
-        }
+macro_rules! valid_model_transition_push {
+    ($next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]) => {
+        $next_states.push($state_ctor {
+            $($field: $update_expr,)*
+            ..$rest_state.clone()
+        });
     };
+    ($next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]) => {
+        compile_error!(
+            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
+        );
+    };
+    ($next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]) => {
+        $next_states.push($state_ctor { $($field: $update_expr),* });
+    };
+    ($next_states:ident, [$($next_state:expr),* $(,)?]) => {
+        $next_states.extend(vec![$($next_state),*]);
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! valid_model_path_tags {
+    ($($path_tag:literal),*) => {
+        &[$($path_tag),*]
+    };
+    () => {
+        &[]
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! valid_model_transition_descriptor {
+    (
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!($state_ctor { $($field: $update_expr,)* ..$rest_state }),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model_path_tags!($($($path_tag),*)?),
+            updates: &[
+                $(
+                    $crate::modeling::TransitionUpdateDescriptor {
+                        field: stringify!($field),
+                        expr: stringify!($update_expr),
+                    }
+                ),*
+            ],
+        }
+    }};
+    (
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]
+    ) => {{
+        compile_error!(
+            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
+        );
+    }};
+    (
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!($state_ctor { $($field: $update_expr),* }),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model_path_tags!($($($path_tag),*)?),
+            updates: &[
+                $(
+                    $crate::modeling::TransitionUpdateDescriptor {
+                        field: stringify!($field),
+                        expr: stringify!($update_expr),
+                    }
+                ),*
+            ],
+        }
+    }};
+    (
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$($next_state:expr),* $(,)?]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!([$($next_state),*]),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model_path_tags!($($($path_tag),*)?),
+            updates: &[],
+        }
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! valid_model_push_properties {
+    ($properties:ident [$model:ident] [$state_ty:ty]; invariant $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::invariant_expr(
+            stringify!($property),
+            Some(stringify!($holds_expr)),
+            |$holds_state: &$state_ty| $holds_expr,
+        ));
+        $crate::valid_model_push_properties!($properties [$model] [$state_ty]; $($rest)*);
+    };
+    ($properties:ident [$model:ident] [$state_ty:ty]; deadlock_freedom $property:ident; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::deadlock_freedom(
+            stringify!($property),
+            |state: &$state_ty| !<$model as $crate::modeling::ModelSpec>::enabled_actions(state).is_empty(),
+        ));
+        $crate::valid_model_push_properties!($properties [$model] [$state_ty]; $($rest)*);
+    };
+    ($properties:ident [$model:ident] [$state_ty:ty];) => {};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! valid_model {
     (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
@@ -1801,7 +1915,7 @@ macro_rules! valid_model {
                     if matches!(action, <$action_ty>::$transition_action) {
                         let $guard_state = state;
                         if $guard_expr {
-                            $crate::valid_model!(@transition_push next_states, [$($next_state)+]);
+                            $crate::valid_model_transition_push!(next_states, [$($next_state)+]);
                         }
                     }
                 )+
@@ -1810,15 +1924,14 @@ macro_rules! valid_model {
 
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
                 let mut properties = Vec::new();
-                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
+                $crate::valid_model_push_properties!(properties [$model] [$state_ty]; $($property_tokens)+);
                 properties
             }
 
             fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
                 vec![
                     $(
-                        $crate::valid_model!(
-                            @transition_descriptor
+                        $crate::valid_model_transition_descriptor!(
                             [$action_ty]
                             $transition_action
                             $( [ tags = [$($path_tag),*] ] )?
@@ -1830,137 +1943,28 @@ macro_rules! valid_model {
             }
         }
     };
-    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]) => {
-        $next_states.push($state_ctor {
-            $($field: $update_expr,)*
-            ..$rest_state.clone()
-        });
-    };
-    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]) => {
-        compile_error!(
-            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
-        );
-    };
-    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]) => {
-        $next_states.push($state_ctor { $($field: $update_expr),* });
-    };
-    (@transition_push $next_states:ident, [$($next_state:expr),* $(,)?]) => {
-        $next_states.extend(vec![$($next_state),*]);
+    (
+        model $model:ident<$state_ty:ty, $action_ty:ty>;
+        init [$($init_state:expr),* $(,)?];
+        step |$state:ident, $action:ident| $step_body:block
+        $($rest:tt)*
+    ) => {
+        compile_error!("step models must use `valid_step_model!`; `valid_model!` only accepts `transitions { ... }`.");
     };
     (
-        @transition_descriptor
-        [$action_ty:ty]
-        $transition_action:ident
-        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-        |$guard_state:ident| $guard_expr:expr
-        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]
-    ) => {{
-        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
-            stringify!($transition_action)
-        );
-        $crate::modeling::TransitionDescriptor {
-            action_variant: descriptor.variant,
-            action_id: descriptor.action_id,
-            guard: stringify!($guard_expr),
-            effect: stringify!($state_ctor { $($field: $update_expr,)* ..$rest_state }),
-            reads: descriptor.reads,
-            writes: descriptor.writes,
-            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
-            updates: &[
-                $(
-                    $crate::modeling::TransitionUpdateDescriptor {
-                        field: stringify!($field),
-                        expr: stringify!($update_expr),
-                    }
-                ),*
-            ],
-        }
-    }};
-    (
-        @transition_descriptor
-        [$action_ty:ty]
-        $transition_action:ident
-        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-        |$guard_state:ident| $guard_expr:expr
-        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]
-    ) => {{
-        compile_error!(
-            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
-        );
-    }};
-    (
-        @transition_descriptor
-        [$action_ty:ty]
-        $transition_action:ident
-        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-        |$guard_state:ident| $guard_expr:expr
-        => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]
-    ) => {{
-        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
-            stringify!($transition_action)
-        );
-        $crate::modeling::TransitionDescriptor {
-            action_variant: descriptor.variant,
-            action_id: descriptor.action_id,
-            guard: stringify!($guard_expr),
-            effect: stringify!($state_ctor { $($field: $update_expr),* }),
-            reads: descriptor.reads,
-            writes: descriptor.writes,
-            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
-            updates: &[
-                $(
-                    $crate::modeling::TransitionUpdateDescriptor {
-                        field: stringify!($field),
-                        expr: stringify!($update_expr),
-                    }
-                ),*
-            ],
-        }
-    }};
-    (
-        @transition_descriptor
-        [$action_ty:ty]
-        $transition_action:ident
-        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-        |$guard_state:ident| $guard_expr:expr
-        => [$($next_state:expr),* $(,)?]
-    ) => {{
-        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
-            stringify!($transition_action)
-        );
-        $crate::modeling::TransitionDescriptor {
-            action_variant: descriptor.variant,
-            action_id: descriptor.action_id,
-            guard: stringify!($guard_expr),
-            effect: stringify!([$($next_state),*]),
-            reads: descriptor.reads,
-            writes: descriptor.writes,
-            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
-            updates: &[],
-        }
-    }};
-    (@path_tags $($path_tag:literal),*) => {
-        &[$($path_tag),*]
+        model $model:ident;
+        $($rest:tt)*
+    ) => {
+        compile_error!("valid_model! requires explicit state/action types. Use `model Name<State, Action>;`.");
     };
-    (@path_tags) => {
-        &[]
+    ($($rest:tt)*) => {
+        compile_error!("invalid valid_model! syntax. Expected `model Name<State, Action>; init [...]; ...`.");
     };
-    (@push_properties $properties:ident [$model:ident] [$state_ty:ty]; invariant $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
-        $properties.push($crate::modeling::ModelProperty::invariant_expr(
-            stringify!($property),
-            Some(stringify!($holds_expr)),
-            |$holds_state: &$state_ty| $holds_expr,
-        ));
-        $crate::valid_model!(@push_properties $properties [$model] [$state_ty]; $($rest)*);
-    };
-    (@push_properties $properties:ident [$model:ident] [$state_ty:ty]; deadlock_freedom $property:ident; $($rest:tt)*) => {
-        $properties.push($crate::modeling::ModelProperty::deadlock_freedom(
-            stringify!($property),
-            |state: &$state_ty| !<$model as $crate::modeling::ModelSpec>::enabled_actions(state).is_empty(),
-        ));
-        $crate::valid_model!(@push_properties $properties [$model] [$state_ty]; $($rest)*);
-    };
-    (@push_properties $properties:ident [$model:ident] [$state_ty:ty];) => {};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! valid_step_model {
     (
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
@@ -1987,7 +1991,7 @@ macro_rules! valid_model {
 
             fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
                 let mut properties = Vec::new();
-                $crate::valid_model!(@push_properties properties [$model] [$state_ty]; $($property_tokens)+);
+                $crate::valid_model_push_properties!(properties [$model] [$state_ty]; $($property_tokens)+);
                 properties
             }
         }
@@ -1999,7 +2003,7 @@ macro_rules! valid_model {
         step |$state:ident, $action:ident| $step_body:block
         invariant |$holds_state:ident| $holds_expr:expr;
     ) => {
-        $crate::valid_model! {
+        $crate::valid_step_model! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             step |$state, $action| $step_body
@@ -2015,7 +2019,7 @@ macro_rules! valid_model {
         step |$state:ident, $action:ident| $step_body:block
         deadlock_freedom;
     ) => {
-        $crate::valid_model! {
+        $crate::valid_step_model! {
             model $model<$state_ty, $action_ty>;
             init [$($init_state),*];
             step |$state, $action| $step_body
@@ -2028,10 +2032,10 @@ macro_rules! valid_model {
         model $model:ident;
         $($rest:tt)*
     ) => {
-        compile_error!("valid_model! requires explicit state/action types. Use `model Name<State, Action>;`.");
+        compile_error!("valid_step_model! requires explicit state/action types. Use `model Name<State, Action>;`.");
     };
     ($($rest:tt)*) => {
-        compile_error!("invalid valid_model! syntax. Expected `model Name<State, Action>; init [...]; ...`.");
+        compile_error!("invalid valid_step_model! syntax. Expected `model Name<State, Action>; init [...]; step |state, action| { ... } ...`.");
     };
 }
 
@@ -2463,6 +2467,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                     action_label: edge.action.action_label(),
                 }],
                 initial_state: Some(edge.state_before.snapshot()),
+                expected_observations: vec![edge.state_after.snapshot()],
                 expected_states: vec![format!("{:?}", edge.state_after.snapshot())],
                 property_id: property.property_id.to_string(),
                 minimized: false,
@@ -2860,6 +2865,14 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         seed: None,
         actions,
         initial_state: Some(nodes.first()?.state.snapshot()),
+        expected_observations: if trace.is_empty() {
+            vec![nodes.get(end_index)?.state.snapshot()]
+        } else {
+            trace
+                .iter()
+                .map(|step| step.state_after.snapshot())
+                .collect()
+        },
         expected_states,
         property_id: property_id.to_string(),
         minimized: false,
@@ -2998,6 +3011,12 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
                         )
                     })?,
                 crate::ir::PropertyKind::DeadlockFreedom => ExprIr::Literal(Value::Bool(true)),
+                crate::ir::PropertyKind::Temporal => {
+                    return Err(format!(
+                        "machine property `{}` uses temporal operators that are not yet representable in the Rust-first modeling frontend",
+                        property.property_id
+                    ))
+                }
             };
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
@@ -3828,6 +3847,10 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                 crate::ir::PropertyKind::DeadlockFreedom => {
                     "no deadlock state found in the reachable state space".to_string()
                 }
+                crate::ir::PropertyKind::Temporal => {
+                    "temporal property is not supported in the Rust-first modeling frontend"
+                        .to_string()
+                }
             },
             None,
         ),
@@ -3839,6 +3862,9 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                     crate::ir::PropertyKind::Invariant => "PROPERTY_VIOLATED".to_string(),
                     crate::ir::PropertyKind::Reachability => "TARGET_REACHED".to_string(),
                     crate::ir::PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED".to_string(),
+                    crate::ir::PropertyKind::Temporal => {
+                        "TEMPORAL_PROPERTY_UNSUPPORTED".to_string()
+                    }
                 }),
                 match &property_kind {
                     crate::ir::PropertyKind::Invariant => {
@@ -3849,6 +3875,10 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                     }
                     crate::ir::PropertyKind::DeadlockFreedom => {
                         "deadlock detected in reachable state space".to_string()
+                    }
+                    crate::ir::PropertyKind::Temporal => {
+                        "temporal property is not supported in the Rust-first modeling frontend"
+                            .to_string()
                     }
                 },
                 Some(trace),
@@ -4233,11 +4263,11 @@ fn build_evidence_trace<M: VerifiedMachine>(
 mod tests {
     use super::{
         action_descriptors, build_machine_test_vectors, check_machine, check_machine_outcome,
-        check_machine_outcomes, check_machine_with_adapter, collect_machine_coverage, contains,
-        explain_machine, iff, implies, insert, is_empty, len, lower_machine_expr,
-        lower_machine_expr_with_enums, lower_machine_model, machine_capability_report,
-        machine_transition_ir, property_ids, regex_match, remove, state_field_descriptors,
-        transition_descriptors, xor, FiniteEnumSet, ModelingRunStatus, ModelingState, StateSpec,
+        check_machine_outcomes, collect_machine_coverage, contains, explain_machine, iff, implies,
+        insert, is_empty, len, lower_machine_expr, lower_machine_expr_with_enums,
+        lower_machine_model, machine_capability_report, machine_transition_ir, property_ids,
+        regex_match, remove, state_field_descriptors, transition_descriptors, xor, FiniteEnumSet,
+        ModelingRunStatus, ModelingState, StateSpec,
     };
     use crate::{
         engine::{CheckOutcome, PropertySelection, RunPlan, RunStatus},
@@ -4262,7 +4292,7 @@ mod tests {
         }
     }
 
-    crate::valid_model! {
+    crate::valid_step_model! {
         model CounterModel<State, Action>;
         init [State {
             x: 0,
@@ -4291,7 +4321,7 @@ mod tests {
         }
     }
 
-    crate::valid_model! {
+    crate::valid_step_model! {
         model FailingCounterModel<State, Action>;
         init [State {
             x: 0,
@@ -4613,21 +4643,15 @@ mod tests {
             archived: false,
         }];
         transitions {
-            on Approve {
-                [tags = ["approval_path"]]
-                when |state| state.approved == false => [SpreadState {
-                    approved: true,
-                    ..state
-                }];
-            }
-            on Archive {
-                [tags = ["archive_path"]]
-                when |state| state.approved && state.archived == false => [SpreadState {
-                    note: "archived".to_string(),
-                    approved: state.approved,
-                    archived: true,
-                }];
-            }
+            transition Approve [tags = ["approval_path"]] when |state| state.approved == false => [SpreadState {
+                approved: true,
+                ..state
+            }];
+            transition Archive [tags = ["archive_path"]] when |state| state.approved && state.archived == false => [SpreadState {
+                note: "archived".to_string(),
+                approved: state.approved,
+                archived: true,
+            }];
         }
         properties {
             invariant P_ARCHIVE_REQUIRES_APPROVAL |state| state.archived == false || state.approved;
@@ -5024,16 +5048,14 @@ mod tests {
             even: true,
         }];
         transitions {
-            on Step {
-                [tags = ["even_path"]] when |state| state.x < 3 && (state.x + 1) % 2 == 0 => [BranchState {
-                    x: state.x + 1,
-                    even: true,
-                }];
-                [tags = ["odd_path"]] when |state| state.x < 3 && (state.x + 1) % 2 != 0 => [BranchState {
-                    x: state.x + 1,
-                    even: false,
-                }];
-            }
+            transition Step [tags = ["even_path"]] when |state| state.x < 3 && (state.x + 1) % 2 == 0 => [BranchState {
+                x: state.x + 1,
+                even: true,
+            }];
+            transition Step [tags = ["odd_path"]] when |state| state.x < 3 && (state.x + 1) % 2 != 0 => [BranchState {
+                x: state.x + 1,
+                even: false,
+            }];
         }
         properties {
             invariant P_BRANCH_BOUND |state| state.x <= 3;
@@ -5299,15 +5321,12 @@ mod tests {
             compliant: false,
         }];
         transitions {
-            on SetStrongPassword {
-                [tags = ["password_policy_path", "allow_path"]]
-                when |state| state.password_set == false
-                => [PasswordState {
-                    password: "Str0ngPass!".to_string(),
-                    password_set: true,
-                    compliant: true,
-                }];
-            }
+            transition SetStrongPassword [tags = ["password_policy_path", "allow_path"]] when |state| state.password_set == false
+            => [PasswordState {
+                password: "Str0ngPass!".to_string(),
+                password_set: true,
+                compliant: true,
+            }];
         }
         properties {
             invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|
@@ -5331,15 +5350,12 @@ mod tests {
             compliant: false,
         }];
         transitions {
-            on SetWeakPassword {
-                [tags = ["password_policy_path", "regression_path"]]
-                when |state| state.password_set == false
-                => [PasswordState {
-                    password: "password".to_string(),
-                    password_set: true,
-                    compliant: true,
-                }];
-            }
+            transition SetWeakPassword [tags = ["password_policy_path", "regression_path"]] when |state| state.password_set == false
+            => [PasswordState {
+                password: "password".to_string(),
+                password_set: true,
+                compliant: true,
+            }];
         }
         properties {
             invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|

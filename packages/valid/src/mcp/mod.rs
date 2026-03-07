@@ -20,12 +20,12 @@ use crate::{
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json},
     frontend::compile_model,
+    ir::Path,
     kernel::{eval::eval_expr, replay::replay_actions, transition::apply_action},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
     },
-    ir::Path,
     testgen::render_replay_json,
 };
 

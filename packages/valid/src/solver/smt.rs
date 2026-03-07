@@ -520,6 +520,12 @@ fn render_expr_with_expected_type(
                 "SMT adapter does not yet support string length expressions; use explicit backend"
                     .to_string(),
             ),
+            UnaryOp::TemporalAlways
+            | UnaryOp::TemporalEventually
+            | UnaryOp::TemporalNext => Err(
+                "SMT adapter does not yet support temporal expressions; use explicit backend"
+                    .to_string(),
+            ),
         },
         ExprIr::Binary { op, left, right } => match op {
             BinaryOp::StringContains => Err(
@@ -528,6 +534,10 @@ fn render_expr_with_expected_type(
             ),
             BinaryOp::RegexMatch => Err(
                 "SMT adapter does not yet support regex_match expressions; use explicit backend"
+                    .to_string(),
+            ),
+            BinaryOp::TemporalUntil => Err(
+                "SMT adapter does not yet support temporal expressions; use explicit backend"
                     .to_string(),
             ),
             BinaryOp::RelationContains => {

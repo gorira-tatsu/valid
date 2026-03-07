@@ -51,15 +51,13 @@ valid_model! {
         compliant: false,
     }];
     transitions {
-        on SetStrongPassword {
-            [tags = ["password_policy_path", "allow_path"]]
-            when |state| state.password_set == false
-            => [PasswordState {
-                password: "Str0ngPass!".to_string(),
-                password_set: true,
-                compliant: true,
-            }];
-        }
+        transition SetStrongPassword [tags = ["password_policy_path", "allow_path"]]
+        when |state| state.password_set == false
+        => [PasswordState {
+            password: "Str0ngPass!".to_string(),
+            password_set: true,
+            compliant: true,
+        }];
     }
     properties {
         invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|
@@ -85,15 +83,13 @@ valid_model! {
         compliant: false,
     }];
     transitions {
-        on SetWeakPassword {
-            [tags = ["password_policy_path", "regression_path"]]
-            when |state| state.password_set == false
-            => [PasswordState {
-                password: "password".to_string(),
-                password_set: true,
-                compliant: true,
-            }];
-        }
+        transition SetWeakPassword [tags = ["password_policy_path", "regression_path"]]
+        when |state| state.password_set == false
+        => [PasswordState {
+            password: "password".to_string(),
+            password_set: true,
+            compliant: true,
+        }];
     }
     properties {
         invariant P_PASSWORD_POLICY_MATCHES_FLAG |state|

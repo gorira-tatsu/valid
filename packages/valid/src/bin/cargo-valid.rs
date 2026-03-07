@@ -27,6 +27,10 @@ use valid::{
         ProgressReporter, Surface,
     },
     coverage::{render_coverage_json, render_coverage_text},
+    doc::{
+        check_doc, default_doc_path, generate_doc, render_doc_check_json, render_doc_check_text,
+        render_doc_json, render_doc_text, write_doc,
+    },
     evidence::{render_outcome_json, render_outcome_text},
     project::{
         load_project_config, render_project_config_template, render_registry_source_template,
@@ -106,6 +110,7 @@ fn main() {
         "list" => cmd_list(local_args),
         "inspect" => cmd_inspect(local_args),
         "graph" => cmd_graph(local_args),
+        "doc" => cmd_doc(local_args),
         "lint" => cmd_lint(local_args),
         "benchmark" => cmd_benchmark(local_args),
         "migrate" => cmd_migrate(local_args),
@@ -125,7 +130,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -582,6 +587,78 @@ fn cmd_graph(parsed: ParsedArgs) {
         Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics),
     }
     progress.finish(ExitCode::Success);
+}
+
+fn cmd_doc(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("doc", parsed.progress_json);
+    progress.start(None);
+    let model = parsed.model.unwrap_or_else(|| {
+        usage_exit("usage: cargo valid doc <model> [--json] [--write[=<path>]] [--check]")
+    });
+    let request = InspectRequest {
+        request_id: "cargo-valid-doc".to_string(),
+        source_name: normalized_model_ref(&model),
+        source: String::new(),
+    };
+    match inspect_source(&request) {
+        Ok(response) => {
+            let mermaid = render_model_mermaid_with_view(&response, GraphView::Overview);
+            let source_hash = stable_hash_hex(&model);
+            let contract_hash = stable_hash_hex(&format!(
+                "{}|{}|{}|{}",
+                response.model_id,
+                response.state_fields.join(","),
+                response.actions.join(","),
+                response.properties.join(",")
+            ));
+            let generated = generate_doc(&response, mermaid, source_hash, contract_hash);
+            let output_path = parsed
+                .write_path
+                .clone()
+                .filter(|path| !path.is_empty())
+                .unwrap_or_else(|| default_doc_path(&generated.model_id));
+            if parsed.check {
+                let existing = fs::read_to_string(&output_path).ok();
+                let report = check_doc(output_path.clone(), existing.as_deref(), &generated);
+                let code = if report.status == "unchanged" {
+                    ExitCode::Success
+                } else {
+                    ExitCode::Unknown
+                };
+                if parsed.json {
+                    println!("{}", render_doc_check_json(&report));
+                } else {
+                    print!("{}", render_doc_check_text(&report));
+                }
+                progress.finish(code);
+                process::exit(code.code());
+            }
+            if parsed.write_path.is_some() {
+                if let Err(message) = write_doc(&output_path, &generated) {
+                    message_exit("doc", parsed.json, &message, None);
+                }
+            }
+            if parsed.json {
+                println!(
+                    "{}",
+                    render_doc_json(
+                        &generated,
+                        parsed.write_path.as_ref().map(|_| output_path.as_str())
+                    )
+                );
+            } else {
+                print!(
+                    "{}",
+                    render_doc_text(
+                        &generated,
+                        parsed.write_path.as_ref().map(|_| output_path.as_str())
+                    )
+                );
+            }
+            progress.finish(ExitCode::Success);
+        }
+        Err(diagnostics) => diagnostics_exit("doc", parsed.json, &diagnostics),
+    }
 }
 
 fn cmd_lint(parsed: ParsedArgs) {
@@ -1060,7 +1137,7 @@ struct CliArgs {
     command: String,
     model: Option<String>,
     extra_positionals: Vec<String>,
-seed: Option<u64>,
+    seed: Option<u64>,
     repeat: usize,
     baseline_mode: Option<String>,
     threshold_percent: Option<u32>,

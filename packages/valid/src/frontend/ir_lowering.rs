@@ -106,19 +106,19 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
     let mut properties = Vec::new();
     for property in &parsed.properties {
         match lower_property_kind(&property.kind) {
-            Some(PropertyKind::Invariant) | Some(PropertyKind::Reachability) => {
-                match lower_expr(&property.expr) {
-                    Some(expr) => properties.push(PropertyIr {
-                        property_id: property.name.clone(),
-                        kind: PropertyKind::parse(&property.kind).unwrap(),
-                        expr,
-                    }),
-                    None => errors.push(lowering_error(
-                        format!("unsupported property expression `{}`", property.expr),
-                        property.line,
-                    )),
-                }
-            }
+            Some(PropertyKind::Invariant)
+            | Some(PropertyKind::Reachability)
+            | Some(PropertyKind::Temporal) => match lower_expr(&property.expr) {
+                Some(expr) => properties.push(PropertyIr {
+                    property_id: property.name.clone(),
+                    kind: PropertyKind::parse(&property.kind).unwrap(),
+                    expr,
+                }),
+                None => errors.push(lowering_error(
+                    format!("unsupported property expression `{}`", property.expr),
+                    property.line,
+                )),
+            },
             Some(PropertyKind::DeadlockFreedom) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
                 kind: PropertyKind::DeadlockFreedom,
@@ -253,6 +253,31 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
                 op: crate::ir::UnaryOp::Not,
                 expr: Box::new(both),
             }),
+        });
+    }
+    if let Some([inner]) = function_args(trimmed, "always") {
+        return Some(ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalAlways,
+            expr: Box::new(lower_expr(inner.trim())?),
+        });
+    }
+    if let Some([inner]) = function_args(trimmed, "eventually") {
+        return Some(ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalEventually,
+            expr: Box::new(lower_expr(inner.trim())?),
+        });
+    }
+    if let Some([inner]) = function_args(trimmed, "next") {
+        return Some(ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalNext,
+            expr: Box::new(lower_expr(inner.trim())?),
+        });
+    }
+    if let Some([left, right]) = function_args(trimmed, "until") {
+        return Some(ExprIr::Binary {
+            op: BinaryOp::TemporalUntil,
+            left: Box::new(lower_expr(left.trim())?),
+            right: Box::new(lower_expr(right.trim())?),
         });
     }
     if let Some(rest) = trimmed.strip_prefix('!') {
@@ -621,5 +646,22 @@ property P_OPEN:
             model.properties[0].expr,
             crate::ir::ExprIr::Literal(crate::ir::Value::Bool(true))
         );
+    }
+
+    #[test]
+    fn lowers_temporal_properties() {
+        let source = r#"
+model DoorControl
+state:
+  open: bool
+init:
+  open = false
+property P_TEMP:
+  temporal: until(!open, open == true)
+"#;
+        let model = compile_model(source).expect("compile");
+        assert_eq!(model.properties[0].kind, crate::ir::PropertyKind::Temporal);
+        let debug = format!("{:?}", model.properties[0].expr);
+        assert!(debug.contains("TemporalUntil"));
     }
 }

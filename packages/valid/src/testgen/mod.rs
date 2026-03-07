@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     evidence::{EvidenceKind, EvidenceTrace},
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, Value},
@@ -14,13 +16,13 @@ use crate::{
     support::{artifact::generated_test_path, hash::stable_hash_hex, io::write_text_file},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplayTarget {
     pub runner: String,
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestVector {
     pub schema_version: String,
     pub vector_id: String,
@@ -31,8 +33,13 @@ pub struct TestVector {
     pub strategy: String,
     pub generator_version: String,
     pub seed: Option<u64>,
+    #[serde(default)]
     pub actions: Vec<VectorActionStep>,
+    #[serde(default)]
     pub initial_state: Option<BTreeMap<String, Value>>,
+    #[serde(default)]
+    pub expected_observations: Vec<BTreeMap<String, Value>>,
+    #[serde(default)]
     pub expected_states: Vec<String>,
     pub property_id: String,
     pub minimized: bool,
@@ -40,13 +47,17 @@ pub struct TestVector {
     pub focus_field: Option<String>,
     pub expected_guard_enabled: Option<bool>,
     pub expected_property_holds: Option<bool>,
+    #[serde(default)]
     pub expected_path: Path,
+    #[serde(default)]
     pub expected_path_tags: Vec<String>,
+    #[serde(default)]
     pub notes: Vec<String>,
+    #[serde(default)]
     pub replay_target: Option<ReplayTarget>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorActionStep {
     pub index: usize,
     pub action_id: String,
@@ -104,6 +115,11 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         .iter()
         .map(|step| format!("{:?}", step.state_after))
         .collect::<Vec<_>>();
+    let expected_observations = trace
+        .steps
+        .iter()
+        .map(|step| step.state_after.clone())
+        .collect::<Vec<_>>();
     let expected_path = trace_path(trace);
     let expected_path_tags = path_tags_or_empty(&expected_path);
     Ok(TestVector {
@@ -117,6 +133,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
         initial_state: trace.steps.first().map(|step| step.state_before.clone()),
+        expected_observations,
         actions,
         expected_states,
         property_id: trace.property_id.clone(),
@@ -666,6 +683,14 @@ pub fn assert_replay_output_json(
     }
 }
 
+pub fn render_test_vector_json(vector: &TestVector) -> Result<String, String> {
+    serde_json::to_string(vector).map_err(|err| format!("failed to serialize test vector: {err}"))
+}
+
+pub fn parse_test_vector_json(body: &str) -> Result<TestVector, String> {
+    serde_json::from_str(body).map_err(|err| format!("failed to parse test vector json: {err}"))
+}
+
 pub fn render_replay_json(
     property_id: &str,
     action_ids: &[String],
@@ -1137,6 +1162,14 @@ fn build_model_vector_for_node(
             .map(|step| format!("{:?}", step.state_after))
             .collect()
     };
+    let expected_observations = if steps.is_empty() {
+        vec![nodes.get(end_index)?.state.as_named_map(model)]
+    } else {
+        steps
+            .iter()
+            .map(|step| step.state_after.clone())
+            .collect::<Vec<_>>()
+    };
     let signature = actions
         .iter()
         .map(|step| step.action_id.clone())
@@ -1182,6 +1215,7 @@ fn build_model_vector_for_node(
         seed: None,
         actions,
         initial_state: Some(nodes.first()?.state.as_named_map(model)),
+        expected_observations,
         expected_states,
         property_id: property_id.to_string(),
         minimized: false,

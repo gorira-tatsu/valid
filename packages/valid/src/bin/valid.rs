@@ -23,11 +23,16 @@ use valid::{
         render_commands_text, render_schema_json, usage_diagnostic, BatchResult, ExitCode,
         ProgressReporter, Surface,
     },
+    conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
         snapshot_model, write_lock_file,
     },
     coverage::{collect_coverage, render_coverage_json, render_coverage_text},
+    doc::{
+        check_doc, default_doc_path, generate_doc, render_doc_check_json, render_doc_check_text,
+        render_doc_json, render_doc_text, write_doc,
+    },
     engine::CheckOutcome,
     evidence::{render_outcome_json, render_outcome_text, write_outcome_artifacts},
     frontend::compile_model,
@@ -47,6 +52,7 @@ fn main() {
         "check" => cmd_check(remaining),
         "inspect" => cmd_inspect(remaining),
         "graph" => cmd_graph(remaining),
+        "doc" => cmd_doc(remaining),
         "lint" => cmd_lint(remaining),
         "capabilities" => cmd_capabilities(remaining),
         "explain" => cmd_explain(remaining),
@@ -57,6 +63,7 @@ fn main() {
         "testgen" => cmd_testgen(remaining),
         "replay" => cmd_replay(remaining),
         "coverage" => cmd_coverage(remaining),
+        "conformance" => cmd_conformance(remaining),
         "clean" => cmd_clean(remaining),
         "selfcheck" => cmd_selfcheck(remaining),
         "commands" => cmd_commands(remaining),
@@ -66,7 +73,7 @@ fn main() {
             usage_exit(
                 "valid",
                 detect_json_flag(&remaining),
-                "usage: valid <inspect|graph|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck|commands|schema|batch> ...",
+                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|clean|selfcheck|commands|schema|batch> ...",
             );
         }
     }
@@ -270,6 +277,91 @@ fn cmd_graph(args: Vec<String>) {
             _ => println!("{}", render_model_mermaid_with_view(&response, view)),
         },
         Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics, None),
+    }
+    progress.finish(ExitCode::Success);
+}
+
+fn cmd_doc(args: Vec<String>) {
+    let parsed = parse_common_args(
+        args,
+        "usage: valid doc <model-file> [--json] [--progress=json] [--write[=<path>]] [--check]",
+    );
+    let progress = ProgressReporter::new("doc", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "doc", parsed.json);
+    let request = InspectRequest {
+        request_id: "req-local-doc".to_string(),
+        source_name: parsed.path.clone(),
+        source: source.clone(),
+    };
+    let inspect = inspect_source(&request).unwrap_or_else(|diagnostics| {
+        diagnostics_exit("doc", parsed.json, &diagnostics, None);
+    });
+    let mermaid = render_model_mermaid_with_view(&inspect, GraphView::Overview);
+    let source_hash = if source.is_empty() {
+        valid::support::hash::stable_hash_hex(&inspect.model_id)
+    } else {
+        valid::support::hash::stable_hash_hex(&source)
+    };
+    let contract_hash = if source.is_empty() {
+        valid::support::hash::stable_hash_hex(&format!(
+            "{}|{}|{}|{}",
+            inspect.model_id,
+            inspect.state_fields.join(","),
+            inspect.actions.join(","),
+            inspect.properties.join(",")
+        ))
+    } else {
+        match compile_model(&source) {
+            Ok(model) => snapshot_model(&model).contract_hash,
+            Err(diagnostics) => diagnostics_exit("doc", parsed.json, &diagnostics, None),
+        }
+    };
+    let generated = generate_doc(&inspect, mermaid, source_hash, contract_hash);
+    let output_path = parsed
+        .write_path
+        .clone()
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| default_doc_path(&generated.model_id));
+
+    if parsed.check {
+        let existing = fs::read_to_string(&output_path).ok();
+        let report = check_doc(output_path.clone(), existing.as_deref(), &generated);
+        let code = if report.status == "unchanged" {
+            ExitCode::Success
+        } else {
+            ExitCode::Unknown
+        };
+        if parsed.json {
+            println!("{}", render_doc_check_json(&report));
+        } else {
+            print!("{}", render_doc_check_text(&report));
+        }
+        progress.finish(code);
+        process::exit(code.code());
+    }
+
+    if parsed.write_path.is_some() {
+        if let Err(message) = write_doc(&output_path, &generated) {
+            message_exit("doc", parsed.json, &message, None);
+        }
+    }
+    if parsed.json {
+        println!(
+            "{}",
+            render_doc_json(
+                &generated,
+                parsed.write_path.as_ref().map(|_| output_path.as_str())
+            )
+        );
+    } else {
+        print!(
+            "{}",
+            render_doc_text(
+                &generated,
+                parsed.write_path.as_ref().map(|_| output_path.as_str())
+            )
+        );
     }
     progress.finish(ExitCode::Success);
 }
@@ -683,6 +775,80 @@ fn cmd_replay(args: Vec<String>) {
     progress.finish(ExitCode::Success);
 }
 
+fn cmd_conformance(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid conformance <model-file> --runner <path> [--runner-arg <arg>] [--json] [--progress=json] [--property=<id>] [--actions=a,b,c]",
+        |arg, parsed| {
+            if let Some(value) = arg.strip_prefix("--actions=") {
+                parsed.actions = value
+                    .split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(|item| item.to_string())
+                    .collect();
+                true
+            } else if let Some(value) = arg.strip_prefix("--runner=") {
+                parsed.runner = Some(value.to_string());
+                true
+            } else {
+                false
+            }
+        },
+    );
+    let progress = ProgressReporter::new("conformance", parsed.progress_json);
+    progress.start(None);
+    let runner = parsed.runner.clone().unwrap_or_else(|| {
+        usage_exit(
+            "conformance",
+            parsed.json,
+            "usage: valid conformance <model-file> --runner <path> [--runner-arg <arg>] [--json] [--progress=json] [--property=<id>] [--actions=a,b,c]",
+        )
+    });
+    let source = read_source(&parsed.path, "conformance", parsed.json);
+    let model = compile_model(&source).unwrap_or_else(|diagnostics| {
+        diagnostics_exit("conformance", parsed.json, &diagnostics, None)
+    });
+    let vector = build_vector_from_actions(&model, parsed.property_id.as_deref(), &parsed.actions)
+        .unwrap_or_else(|message| message_exit("conformance", parsed.json, &message, None));
+    let report = run_conformance(&vector, &runner, &parsed.runner_args)
+        .unwrap_or_else(|message| message_exit("conformance", parsed.json, &message, None));
+    if parsed.json {
+        println!(
+            "{}",
+            render_conformance_report_json(&report).unwrap_or_else(|message| message_exit(
+                "conformance",
+                true,
+                &message,
+                None
+            ))
+        );
+    } else {
+        println!("vector_id: {}", report.vector_id);
+        println!("runner: {}", report.runner);
+        println!("status: {}", report.status);
+        println!("mismatch_count: {}", report.mismatch_count);
+        for mismatch in &report.observation_mismatches {
+            println!(
+                "step {} expected {:?} actual {:?}",
+                mismatch.index, mismatch.expected, mismatch.actual
+            );
+        }
+        if report.expected_property_holds != report.actual_property_holds {
+            println!(
+                "property_holds expected {:?} actual {:?}",
+                report.expected_property_holds, report.actual_property_holds
+            );
+        }
+    }
+    let exit_code = if report.status == "PASS" {
+        ExitCode::Success
+    } else {
+        ExitCode::Fail
+    };
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
+}
+
 fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
@@ -809,7 +975,11 @@ struct ParsedArgs {
     property_id: Option<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
+    runner: Option<String>,
+    runner_args: Vec<String>,
     extra: Option<String>,
+    write_path: Option<String>,
+    check: bool,
 }
 
 fn parse_common_args(args: Vec<String>, usage: &str) -> ParsedArgs {
@@ -853,6 +1023,12 @@ where
             parsed.seed = Some(parse_seed_arg(value, usage));
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
+        } else if arg == "--write" {
+            parsed.write_path = Some(String::new());
+        } else if let Some(value) = arg.strip_prefix("--write=") {
+            parsed.write_path = Some(value.to_string());
+        } else if arg == "--check" {
+            parsed.check = true;
         } else if arg == "--seed" {
             parsed.seed = Some(parse_seed_arg(
                 &iter.next().unwrap_or_else(|| {
@@ -868,6 +1044,11 @@ where
             );
         } else if arg == "--solver-arg" {
             parsed.solver_args.push(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
+        } else if arg == "--runner-arg" {
+            parsed.runner_args.push(
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );

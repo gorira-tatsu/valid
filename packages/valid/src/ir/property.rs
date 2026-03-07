@@ -13,6 +13,7 @@ pub enum PropertyKind {
     Invariant,
     Reachability,
     DeadlockFreedom,
+    Temporal,
 }
 
 impl PropertyKind {
@@ -21,6 +22,7 @@ impl PropertyKind {
             "invariant" => Some(Self::Invariant),
             "reachability" => Some(Self::Reachability),
             "deadlock_freedom" => Some(Self::DeadlockFreedom),
+            "temporal" => Some(Self::Temporal),
             _ => None,
         }
     }
@@ -30,6 +32,7 @@ impl PropertyKind {
             Self::Invariant => "invariant",
             Self::Reachability => "reachability",
             Self::DeadlockFreedom => "deadlock_freedom",
+            Self::Temporal => "temporal",
         }
     }
 }

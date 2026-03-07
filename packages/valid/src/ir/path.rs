@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::ir::{
     ActionIr, Decision, DecisionKind, DecisionOutcome, DecisionPoint, ExprIr, UpdateIr,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Path {
     pub decisions: Vec<Decision>,
 }

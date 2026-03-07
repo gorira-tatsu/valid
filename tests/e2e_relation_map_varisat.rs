@@ -91,50 +91,46 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on GrantMembership {
-            when |state| rel_intersects(state.pending, state.pending)
-            => [RelationMapState {
-                memberships: rel_insert(state.memberships, Member::Alice, Tenant::Alpha),
-                pending: rel_remove(state.pending, Member::Alice, Tenant::Alpha),
-                plans: state.plans,
-                export_enabled: state.export_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on UpgradeAlpha {
-            when |state|
-                map_contains_key(state.plans, Tenant::Alpha)
-                && !map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
-            => [RelationMapState {
-                memberships: state.memberships,
-                pending: state.pending,
-                plans: map_put(state.plans, Tenant::Alpha, Plan::Enterprise),
-                export_enabled: state.export_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on RetireBeta {
-            when |state| map_contains_entry(state.plans, Tenant::Beta, Plan::Free)
-            => [RelationMapState {
-                memberships: state.memberships,
-                pending: state.pending,
-                plans: map_remove(state.plans, Tenant::Beta),
-                export_enabled: state.export_enabled,
-                cross_tenant_access: state.cross_tenant_access,
-            }];
-        }
-        on EnableExport {
-            when |state|
-                rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
-                && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
-            => [RelationMapState {
-                memberships: state.memberships,
-                pending: state.pending,
-                plans: state.plans,
-                export_enabled: true,
-                cross_tenant_access: false,
-            }];
-        }
+        transition GrantMembership
+        when |state| rel_intersects(state.pending, state.pending)
+        => [RelationMapState {
+            memberships: rel_insert(state.memberships, Member::Alice, Tenant::Alpha),
+            pending: rel_remove(state.pending, Member::Alice, Tenant::Alpha),
+            plans: state.plans,
+            export_enabled: state.export_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition UpgradeAlpha
+        when |state|
+            map_contains_key(state.plans, Tenant::Alpha)
+            && !map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
+        => [RelationMapState {
+            memberships: state.memberships,
+            pending: state.pending,
+            plans: map_put(state.plans, Tenant::Alpha, Plan::Enterprise),
+            export_enabled: state.export_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition RetireBeta
+        when |state| map_contains_entry(state.plans, Tenant::Beta, Plan::Free)
+        => [RelationMapState {
+            memberships: state.memberships,
+            pending: state.pending,
+            plans: map_remove(state.plans, Tenant::Beta),
+            export_enabled: state.export_enabled,
+            cross_tenant_access: state.cross_tenant_access,
+        }];
+        transition EnableExport
+        when |state|
+            rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
+            && map_contains_entry(state.plans, Tenant::Alpha, Plan::Enterprise)
+        => [RelationMapState {
+            memberships: state.memberships,
+            pending: state.pending,
+            plans: state.plans,
+            export_enabled: true,
+            cross_tenant_access: false,
+        }];
     }
     properties {
         invariant P_NO_CROSS_TENANT_ACCESS |state| state.cross_tenant_access == false;
@@ -151,18 +147,17 @@ valid_model! {
         cross_tenant_access: false,
     }];
     transitions {
-        on OpenLeak {
-            when |state|
-                map_contains_key(state.plans, Tenant::Beta)
-                && !rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
-            => [RelationMapState {
-                memberships: state.memberships,
-                pending: state.pending,
-                plans: state.plans,
-                export_enabled: true,
-                cross_tenant_access: true,
-            }];
-        }
+        transition OpenLeak
+        when |state|
+            map_contains_key(state.plans, Tenant::Beta)
+            && !rel_contains(state.memberships, Member::Alice, Tenant::Alpha)
+        => [RelationMapState {
+            memberships: state.memberships,
+            pending: state.pending,
+            plans: state.plans,
+            export_enabled: true,
+            cross_tenant_access: true,
+        }];
     }
     properties {
         invariant P_NO_CROSS_TENANT_ACCESS |state| state.cross_tenant_access == false;

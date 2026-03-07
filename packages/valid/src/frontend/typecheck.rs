@@ -60,7 +60,7 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
 
     for property in &resolved.parsed.properties {
         match property.kind.as_str() {
-            "invariant" | "reachability" => {
+            "invariant" | "reachability" | "temporal" => {
                 if property.expr.is_empty() {
                     errors.push(type_error(
                         format!("{} property requires a boolean expression", property.kind),
@@ -197,5 +197,21 @@ property P_LIVE: deadlock_freedom
         let parsed = parse_model(source).expect("parse");
         let resolved = resolve_model(parsed).expect("resolve");
         typecheck_model(resolved).expect("deadlock_freedom should typecheck");
+    }
+
+    #[test]
+    fn accepts_temporal_properties() {
+        let source = r#"
+model DoorControl
+state:
+  open: bool
+init:
+  open = false
+property P_TEMP:
+  temporal: eventually(open == true)
+"#;
+        let parsed = parse_model(source).expect("parse");
+        let resolved = resolve_model(parsed).expect("resolve");
+        typecheck_model(resolved).expect("temporal properties should typecheck");
     }
 }

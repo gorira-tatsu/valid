@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     time::Instant,
 };
 
@@ -106,7 +106,8 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         note: Some("initial state".to_string()),
     }];
     let mut frontier = VecDeque::from([0usize]);
-    let mut visited = HashSet::from([initial]);
+    let mut visited = HashMap::from([(initial, 0usize)]);
+    let mut edges = vec![Vec::new()];
     let mut explored_transitions = 0usize;
     let mut bounded_frontier_cut = false;
 
@@ -138,29 +139,34 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
                         bounded_frontier_cut = true;
                         continue;
                     }
-                    if visited.insert(next_state.clone()) {
-                        if let Some(UnknownReason::StateLimitReached) =
-                            resource_limits_hit(&plan.resource_limits, visited.len(), start)
-                        {
-                            return Ok(unknown_result(
-                                model,
-                                plan,
-                                &nodes,
-                                explored_transitions,
-                                UnknownReason::StateLimitReached,
-                            ));
-                        }
-                        let child_index = nodes.len();
-                        nodes.push(NodeRecord {
-                            state: next_state,
-                            depth: node.depth + 1,
-                            parent: Some(node_index),
-                            via_action_index: Some(action_index),
-                            via_action: Some(action.action_id.clone()),
-                            note: None,
-                        });
-                        frontier.push_back(child_index);
+                    if let Some(existing_index) = visited.get(&next_state).copied() {
+                        edges[node_index].push(existing_index);
+                        continue;
                     }
+                    let child_index = nodes.len();
+                    visited.insert(next_state.clone(), child_index);
+                    if let Some(UnknownReason::StateLimitReached) =
+                        resource_limits_hit(&plan.resource_limits, visited.len(), start)
+                    {
+                        return Ok(unknown_result(
+                            model,
+                            plan,
+                            &nodes,
+                            explored_transitions,
+                            UnknownReason::StateLimitReached,
+                        ));
+                    }
+                    nodes.push(NodeRecord {
+                        state: next_state,
+                        depth: node.depth + 1,
+                        parent: Some(node_index),
+                        via_action_index: Some(action_index),
+                        via_action: Some(action.action_id.clone()),
+                        note: None,
+                    });
+                    edges.push(Vec::new());
+                    edges[node_index].push(child_index);
+                    frontier.push_back(child_index);
                 }
                 None => continue,
             }
@@ -176,6 +182,18 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
     } else {
         AssuranceLevel::Complete
     };
+
+    if matches!(property.kind, PropertyKind::Temporal) {
+        return temporal_result(
+            model,
+            plan,
+            property,
+            &nodes,
+            &edges,
+            explored_transitions,
+            assurance,
+        );
+    }
 
     Ok(ExplicitRunResult {
         manifest: plan.manifest.clone(),
@@ -226,12 +244,11 @@ fn property_triggered(
     state: &MachineState,
     property: &PropertyIr,
 ) -> Result<bool, Diagnostic> {
-    let value = property_value(model, state, property)?;
-    Ok(match property.kind {
-        PropertyKind::Invariant => !value,
-        PropertyKind::Reachability => value,
-        PropertyKind::DeadlockFreedom => false,
-    })
+    match property.kind {
+        PropertyKind::Invariant => Ok(!property_value(model, state, property)?),
+        PropertyKind::Reachability => Ok(property_value(model, state, property)?),
+        PropertyKind::DeadlockFreedom | PropertyKind::Temporal => Ok(false),
+    }
 }
 
 fn property_value(
@@ -250,6 +267,227 @@ fn property_value(
             ),
         )
         .with_help("keep lowered properties boolean regardless of property kind")),
+    }
+}
+
+fn temporal_result(
+    model: &ModelIr,
+    plan: &RunPlan,
+    property: &PropertyIr,
+    nodes: &[NodeRecord],
+    edges: &[Vec<usize>],
+    explored_transitions: usize,
+    assurance: AssuranceLevel,
+) -> Result<ExplicitRunResult, Diagnostic> {
+    let truth = temporal_truth_set(model, nodes, edges, &property.expr)?;
+    if truth.first().copied().unwrap_or(false) {
+        return Ok(ExplicitRunResult {
+            manifest: plan.manifest.clone(),
+            status: RunStatus::Pass,
+            assurance_level: assurance,
+            property_result: PropertyResult {
+                property_id: property.property_id.clone(),
+                property_kind: property.kind,
+                status: RunStatus::Pass,
+                assurance_level: assurance,
+                reason_code: Some(pass_reason_code(property.kind, assurance).to_string()),
+                unknown_reason: None,
+                terminal_state_id: None,
+                evidence_id: None,
+                summary: pass_summary(property, assurance),
+            },
+            explored_states: nodes.len(),
+            explored_transitions,
+            trace: None,
+        });
+    }
+
+    let failing_index = temporal_failure_index(model, nodes, edges, &property.expr, 0)?;
+    Ok(fail_result(model, plan, property, nodes, failing_index))
+}
+
+fn temporal_truth_set(
+    model: &ModelIr,
+    nodes: &[NodeRecord],
+    edges: &[Vec<usize>],
+    expr: &crate::ir::ExprIr,
+) -> Result<Vec<bool>, Diagnostic> {
+    match expr {
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalAlways,
+            expr,
+        } => {
+            let inner = temporal_truth_set(model, nodes, edges, expr)?;
+            let mut set = inner.clone();
+            loop {
+                let mut changed = false;
+                for index in 0..nodes.len() {
+                    let holds = inner[index] && edges[index].iter().all(|child| set[*child]);
+                    if set[index] != holds {
+                        set[index] = holds;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            Ok(set)
+        }
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalEventually,
+            expr,
+        } => {
+            let target = temporal_truth_set(model, nodes, edges, expr)?;
+            let mut set = target.clone();
+            loop {
+                let mut changed = false;
+                for index in 0..nodes.len() {
+                    let holds = target[index]
+                        || (!edges[index].is_empty()
+                            && edges[index].iter().all(|child| set[*child]));
+                    if set[index] != holds {
+                        set[index] = holds;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            Ok(set)
+        }
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalNext,
+            expr,
+        } => {
+            let inner = temporal_truth_set(model, nodes, edges, expr)?;
+            Ok((0..nodes.len())
+                .map(|index| {
+                    !edges[index].is_empty() && edges[index].iter().all(|child| inner[*child])
+                })
+                .collect())
+        }
+        crate::ir::ExprIr::Binary {
+            op: crate::ir::BinaryOp::TemporalUntil,
+            left,
+            right,
+        } => {
+            let left_set = temporal_truth_set(model, nodes, edges, left)?;
+            let right_set = temporal_truth_set(model, nodes, edges, right)?;
+            let mut set = right_set.clone();
+            loop {
+                let mut changed = false;
+                for index in 0..nodes.len() {
+                    let holds = right_set[index]
+                        || (left_set[index]
+                            && !edges[index].is_empty()
+                            && edges[index].iter().all(|child| set[*child]));
+                    if set[index] != holds {
+                        set[index] = holds;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            Ok(set)
+        }
+        _ => nodes
+            .iter()
+            .map(|node| match eval_expr(model, &node.state, expr)? {
+                Value::Bool(value) => Ok(value),
+                _ => Err(Diagnostic::new(
+                    ErrorCode::EvalError,
+                    DiagnosticSegment::EngineSearch,
+                    "temporal state predicate did not evaluate to bool",
+                )),
+            })
+            .collect(),
+    }
+}
+
+fn temporal_failure_index(
+    model: &ModelIr,
+    nodes: &[NodeRecord],
+    edges: &[Vec<usize>],
+    expr: &crate::ir::ExprIr,
+    start: usize,
+) -> Result<usize, Diagnostic> {
+    let truth = temporal_truth_set(model, nodes, edges, expr)?;
+    match expr {
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalAlways,
+            expr,
+        } => {
+            let inner = temporal_truth_set(model, nodes, edges, expr)?;
+            if !inner[start] {
+                return temporal_failure_index(model, nodes, edges, expr, start);
+            }
+            if let Some(child) = edges[start].iter().copied().find(|child| !truth[*child]) {
+                if child == start {
+                    return Ok(start);
+                }
+                return temporal_failure_index(model, nodes, edges, expr, child);
+            }
+            Ok(start)
+        }
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalEventually,
+            expr: inner,
+        } => {
+            let target = temporal_truth_set(model, nodes, edges, inner)?;
+            if target[start] {
+                return Ok(start);
+            }
+            if let Some(child) = edges[start].iter().copied().find(|child| !truth[*child]) {
+                if child == start {
+                    return Ok(start);
+                }
+                return temporal_failure_index(model, nodes, edges, expr, child);
+            }
+            Ok(start)
+        }
+        crate::ir::ExprIr::Unary {
+            op: crate::ir::UnaryOp::TemporalNext,
+            expr: inner,
+        } => {
+            let inner_truth = temporal_truth_set(model, nodes, edges, inner)?;
+            if let Some(child) = edges[start]
+                .iter()
+                .copied()
+                .find(|child| !inner_truth[*child])
+            {
+                if child == start {
+                    return Ok(start);
+                }
+                return temporal_failure_index(model, nodes, edges, inner, child);
+            }
+            Ok(start)
+        }
+        crate::ir::ExprIr::Binary {
+            op: crate::ir::BinaryOp::TemporalUntil,
+            left,
+            right,
+        } => {
+            let left_truth = temporal_truth_set(model, nodes, edges, left)?;
+            let right_truth = temporal_truth_set(model, nodes, edges, right)?;
+            if right_truth[start] {
+                return Ok(start);
+            }
+            if !left_truth[start] {
+                return temporal_failure_index(model, nodes, edges, left, start);
+            }
+            if let Some(child) = edges[start].iter().copied().find(|child| !truth[*child]) {
+                if child == start {
+                    return Ok(start);
+                }
+                return temporal_failure_index(model, nodes, edges, expr, child);
+            }
+            Ok(start)
+        }
+        _ => Ok(start),
     }
 }
 
@@ -487,6 +725,7 @@ fn property_evidence_kind(kind: PropertyKind) -> EvidenceKind {
         PropertyKind::Invariant => EvidenceKind::Counterexample,
         PropertyKind::Reachability => EvidenceKind::Witness,
         PropertyKind::DeadlockFreedom => EvidenceKind::Counterexample,
+        PropertyKind::Temporal => EvidenceKind::Counterexample,
     }
 }
 
@@ -495,6 +734,7 @@ fn fail_reason_code(kind: PropertyKind) -> &'static str {
         PropertyKind::Invariant => "PROPERTY_FAILED",
         PropertyKind::Reachability => "TARGET_REACHED",
         PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED",
+        PropertyKind::Temporal => "TEMPORAL_PROPERTY_FAILED",
     }
 }
 
@@ -506,6 +746,8 @@ fn pass_reason_code(kind: PropertyKind, assurance: AssuranceLevel) -> &'static s
         (PropertyKind::Reachability, _) => "TARGET_UNREACHABLE",
         (PropertyKind::DeadlockFreedom, AssuranceLevel::Bounded) => "BOUNDED_SPACE_EXHAUSTED",
         (PropertyKind::DeadlockFreedom, _) => "COMPLETE_SPACE_EXHAUSTED",
+        (PropertyKind::Temporal, AssuranceLevel::Bounded) => "TEMPORAL_BOUND_EXHAUSTED",
+        (PropertyKind::Temporal, _) => "TEMPORAL_PROPERTY_PROVED_ON_REACHABLE_GRAPH",
     }
 }
 
@@ -521,6 +763,10 @@ fn fail_summary(property: &PropertyIr) -> String {
         ),
         PropertyKind::DeadlockFreedom => format!(
             "deadlock found for `{}` during explicit exploration",
+            property.property_id
+        ),
+        PropertyKind::Temporal => format!(
+            "temporal property `{}` failed during explicit exploration",
             property.property_id
         ),
     }
@@ -546,6 +792,12 @@ fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
         (PropertyKind::DeadlockFreedom, _) => {
             "no deadlock state found in the reachable state space".to_string()
         }
+        (PropertyKind::Temporal, AssuranceLevel::Bounded) => {
+            "temporal property held within the configured exploration bound".to_string()
+        }
+        (PropertyKind::Temporal, _) => {
+            "temporal property held on the explored reachable graph".to_string()
+        }
     }
 }
 
@@ -554,6 +806,7 @@ fn fail_note(kind: PropertyKind) -> &'static str {
         PropertyKind::Invariant => "property violated",
         PropertyKind::Reachability => "reachability target reached",
         PropertyKind::DeadlockFreedom => "deadlock reached",
+        PropertyKind::Temporal => "temporal property violated",
     }
 }
 
@@ -876,5 +1129,94 @@ mod tests {
             panic!("expected completed")
         };
         assert_eq!(result.status, RunStatus::Pass);
+    }
+
+    #[test]
+    fn temporal_eventually_fails_when_goal_is_not_forced() {
+        let model = ModelIr {
+            model_id: "TemporalEventually".to_string(),
+            state_fields: vec![
+                StateField {
+                    id: "x".to_string(),
+                    name: "x".to_string(),
+                    ty: FieldType::BoundedU8 { min: 0, max: 1 },
+                    span: SourceSpan { line: 1, column: 1 },
+                },
+                StateField {
+                    id: "stuck".to_string(),
+                    name: "stuck".to_string(),
+                    ty: FieldType::Bool,
+                    span: SourceSpan { line: 1, column: 1 },
+                },
+            ],
+            init: vec![
+                InitAssignment {
+                    field: "x".to_string(),
+                    value: Value::UInt(0),
+                    span: SourceSpan { line: 1, column: 1 },
+                },
+                InitAssignment {
+                    field: "stuck".to_string(),
+                    value: Value::Bool(false),
+                    span: SourceSpan { line: 1, column: 1 },
+                },
+            ],
+            actions: vec![
+                ActionIr {
+                    action_id: "Reach".to_string(),
+                    label: "Reach".to_string(),
+                    reads: vec!["x".to_string()],
+                    writes: vec!["x".to_string()],
+                    path_tags: vec!["write_path".to_string()],
+                    guard: ExprIr::Unary {
+                        op: crate::ir::UnaryOp::Not,
+                        expr: Box::new(ExprIr::FieldRef("stuck".to_string())),
+                    },
+                    updates: vec![UpdateIr {
+                        field: "x".to_string(),
+                        value: ExprIr::Literal(Value::UInt(1)),
+                    }],
+                },
+                ActionIr {
+                    action_id: "Loop".to_string(),
+                    label: "Loop".to_string(),
+                    reads: vec!["x".to_string()],
+                    writes: vec!["x".to_string()],
+                    path_tags: vec!["write_path".to_string()],
+                    guard: ExprIr::Literal(Value::Bool(true)),
+                    updates: vec![UpdateIr {
+                        field: "x".to_string(),
+                        value: ExprIr::FieldRef("x".to_string()),
+                    }],
+                },
+            ],
+            properties: vec![PropertyIr {
+                property_id: "P_EVENTUAL".to_string(),
+                kind: PropertyKind::Temporal,
+                expr: ExprIr::Unary {
+                    op: crate::ir::UnaryOp::TemporalEventually,
+                    expr: Box::new(ExprIr::Binary {
+                        op: BinaryOp::Equal,
+                        left: Box::new(ExprIr::FieldRef("x".to_string())),
+                        right: Box::new(ExprIr::Literal(Value::UInt(1))),
+                    }),
+                },
+            }],
+        };
+        let outcome = check_explicit(
+            &model,
+            &RunPlan {
+                property_selection: PropertySelection::ExactlyOne("P_EVENTUAL".to_string()),
+                ..RunPlan::default()
+            },
+        );
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed")
+        };
+        assert_eq!(result.status, RunStatus::Fail);
+        assert_eq!(
+            result.property_result.reason_code.as_deref(),
+            Some("TEMPORAL_PROPERTY_FAILED")
+        );
     }
 }

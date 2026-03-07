@@ -228,6 +228,28 @@ fn multi_property_testgen_can_target_specific_property() {
 }
 
 #[test]
+fn cli_conformance_compares_runner_output_to_spec() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("conformance")
+        .arg(&safe)
+        .arg("--property=P_SAFE")
+        .arg("--actions=Inc")
+        .arg("--runner=/bin/sh")
+        .arg("--runner-arg")
+        .arg("-c")
+        .arg("--runner-arg")
+        .arg("cat >/dev/null; printf '%s' '{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"observations\":[{\"x\":1}],\"property_holds\":true}'")
+        .arg("--json")
+        .output()
+        .expect("conformance should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"PASS\""));
+    assert!(stdout.contains("\"mismatch_count\":0"));
+}
+
+#[test]
 fn parse_and_type_errors_are_visible_via_api() {
     let parse_diagnostics = inspect_source(&InspectRequest {
         request_id: "req-test-parse".to_string(),

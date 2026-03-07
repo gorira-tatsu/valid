@@ -1,19 +1,21 @@
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DecisionKind {
     Guard,
     StateUpdate,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DecisionOutcome {
     GuardTrue,
     GuardFalse,
     UpdateApplied,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionPoint {
     pub decision_id: String,
     pub action_id: String,
@@ -25,7 +27,7 @@ pub struct DecisionPoint {
     pub path_tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Decision {
     pub point: DecisionPoint,
     pub outcome: DecisionOutcome,

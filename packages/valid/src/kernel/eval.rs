@@ -25,6 +25,12 @@ pub fn eval_expr(
                 (UnaryOp::StringLen, Value::String(value)) => {
                     Ok(Value::UInt(value.chars().count() as u64))
                 }
+                (
+                    UnaryOp::TemporalAlways | UnaryOp::TemporalEventually | UnaryOp::TemporalNext,
+                    _,
+                ) => Err(eval_error(
+                    "temporal operators require graph-level evaluation".to_string(),
+                )),
                 _ => Err(eval_error("invalid unary operand type".to_string())),
             }
         }
@@ -164,6 +170,9 @@ pub fn eval_expr(
                 (BinaryOp::Or, Value::Bool(left), Value::Bool(right)) => {
                     Ok(Value::Bool(left || right))
                 }
+                (BinaryOp::TemporalUntil, _, _) => Err(eval_error(
+                    "temporal operators require graph-level evaluation".to_string(),
+                )),
                 _ => Err(eval_error("invalid binary operand types".to_string())),
             }
         }
@@ -258,6 +267,7 @@ fn field_type_for_expr<'a>(model: &'a ModelIr, expr: &ExprIr) -> Option<&'a Fiel
             | BinaryOp::RelationRemove
             | BinaryOp::MapPut
             | BinaryOp::MapRemoveKey => field_type_for_expr(model, left),
+            BinaryOp::TemporalUntil => None,
             _ => None,
         },
         _ => None,

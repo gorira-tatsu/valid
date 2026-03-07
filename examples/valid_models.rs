@@ -15,7 +15,9 @@
   cargo valid --registry examples/valid_models.rs inspect counter
   cargo valid --registry examples/valid_models.rs verify failing-counter
 */
-use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
+use valid::{
+    registry::run_registry_cli, valid_actions, valid_models, valid_state, valid_step_model,
+};
 
 valid_state! {
     struct State {
@@ -32,7 +34,7 @@ valid_actions! {
     }
 }
 
-valid_model! {
+valid_step_model! {
     model CounterModel<State, Action>;
     init [State {
         x: 0,
@@ -61,7 +63,7 @@ valid_model! {
     }
 }
 
-valid_model! {
+valid_step_model! {
     model FailingCounterModel<State, Action>;
     init [State {
         x: 0,

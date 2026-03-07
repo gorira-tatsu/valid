@@ -1,6 +1,6 @@
 use crate::ir::value::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprIr {
     Literal(Value),
     FieldRef(String),
@@ -15,14 +15,17 @@ pub enum ExprIr {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Not,
     SetIsEmpty,
     StringLen,
+    TemporalAlways,
+    TemporalEventually,
+    TemporalNext,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -48,4 +51,5 @@ pub enum BinaryOp {
     NotEqual,
     And,
     Or,
+    TemporalUntil,
 }

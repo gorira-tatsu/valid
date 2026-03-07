@@ -21,6 +21,10 @@ use crate::{
         snapshot_model, write_lock_file, ContractSnapshot,
     },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
+    doc::{
+        check_doc, default_doc_path, generate_doc, render_doc_check_json, render_doc_check_text,
+        render_doc_json, render_doc_text, write_doc,
+    },
     engine::CheckOutcome,
     evidence::{render_outcome_json, render_outcome_text},
     modeling::{
@@ -47,10 +51,12 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
 const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]";
+const DOC_USAGE: &str =
+    "usage: <registry-bin> doc <model> [--json] [--progress=json] [--write[=<path>]] [--check]";
 const LINT_USAGE: &str = "usage: <registry-bin> lint <model> [--json] [--progress=json]";
 const BENCHMARK_USAGE: &str = "usage: <registry-bin> benchmark <model> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
 const MIGRATE_USAGE: &str =
@@ -117,6 +123,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "list" => cmd_list(&models, remaining),
         "inspect" => cmd_inspect(&models, remaining),
         "graph" => cmd_graph(&models, remaining),
+        "doc" => cmd_doc(&models, remaining),
         "lint" => cmd_lint(&models, remaining),
         "benchmark" => cmd_benchmark(&models, remaining),
         "migrate" => cmd_migrate(&models, remaining),
@@ -206,6 +213,72 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
         "dot" => println!("{}", render_model_dot_with_view(&response, view)),
         "svg" => println!("{}", render_model_svg_with_view(&response, view)),
         _ => println!("{}", render_model_mermaid_with_view(&response, view)),
+    }
+    progress.finish(ExitCode::Success);
+}
+
+fn cmd_doc(models: &[RegisteredModel], args: Vec<String>) {
+    let parsed = parse_args(args, "doc", DOC_USAGE);
+    let progress = ProgressReporter::new("doc", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "doc",
+        parsed.json,
+        DOC_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
+    let inspect = (model.inspect)("registry-doc");
+    let mermaid = render_model_mermaid_with_view(&inspect, GraphView::Overview);
+    let contract = (model.contract_snapshot)().unwrap_or_else(|message| {
+        message_exit("doc", parsed.json, &message, Some(DOC_USAGE));
+    });
+    let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract.contract_hash));
+    let generated = generate_doc(&inspect, mermaid, source_hash, contract.contract_hash);
+    let output_path = parsed
+        .write_path
+        .clone()
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| default_doc_path(&generated.model_id));
+
+    if parsed.check {
+        let existing = fs::read_to_string(&output_path).ok();
+        let report = check_doc(output_path.clone(), existing.as_deref(), &generated);
+        let code = if report.status == "unchanged" {
+            ExitCode::Success
+        } else {
+            ExitCode::Unknown
+        };
+        if parsed.json {
+            println!("{}", render_doc_check_json(&report));
+        } else {
+            print!("{}", render_doc_check_text(&report));
+        }
+        progress.finish(code);
+        process::exit(code.code());
+    }
+
+    if parsed.write_path.is_some() {
+        if let Err(message) = write_doc(&output_path, &generated) {
+            message_exit("doc", parsed.json, &message, Some(DOC_USAGE));
+        }
+    }
+    if parsed.json {
+        println!(
+            "{}",
+            render_doc_json(
+                &generated,
+                parsed.write_path.as_ref().map(|_| output_path.as_str())
+            )
+        );
+    } else {
+        print!(
+            "{}",
+            render_doc_text(
+                &generated,
+                parsed.write_path.as_ref().map(|_| output_path.as_str())
+            )
+        );
     }
     progress.finish(ExitCode::Success);
 }

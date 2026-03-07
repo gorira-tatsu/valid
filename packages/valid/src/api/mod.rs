@@ -467,7 +467,7 @@ pub(crate) fn property_kind_label(kind: &PropertyKind) -> &'static str {
 
 fn property_expr_for_inspect(property: &crate::ir::PropertyIr) -> Option<String> {
     match property.kind {
-        PropertyKind::Invariant | PropertyKind::Reachability => {
+        PropertyKind::Invariant | PropertyKind::Reachability | PropertyKind::Temporal => {
             Some(render_expr_ir(&property.expr))
         }
         PropertyKind::DeadlockFreedom => None,
@@ -900,6 +900,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 crate::ir::PropertyKind::DeadlockFreedom => {
                                     format!("{action} led to a deadlocked state without a visible field delta")
                                 }
+                                crate::ir::PropertyKind::Temporal => {
+                                    format!("{action} contributed to a temporal property violation without a visible field delta")
+                                }
                             })
                             .unwrap_or_else(|| match property_kind {
                                 crate::ir::PropertyKind::Invariant => {
@@ -910,6 +913,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 }
                                 crate::ir::PropertyKind::DeadlockFreedom => {
                                     "deadlock detected: no enabled actions from this state".to_string()
+                                }
+                                crate::ir::PropertyKind::Temporal => {
+                                    "temporal property violated on the explored reachable graph".to_string()
                                 }
                             }),
                     },
@@ -1844,6 +1850,13 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
             crate::ir::UnaryOp::Not => format!("!({})", render_expr_ir(expr)),
             crate::ir::UnaryOp::SetIsEmpty => format!("is_empty({})", render_expr_ir(expr)),
             crate::ir::UnaryOp::StringLen => format!("len({})", render_expr_ir(expr)),
+            crate::ir::UnaryOp::TemporalAlways => {
+                format!("always({})", render_expr_ir(expr))
+            }
+            crate::ir::UnaryOp::TemporalEventually => {
+                format!("eventually({})", render_expr_ir(expr))
+            }
+            crate::ir::UnaryOp::TemporalNext => format!("next({})", render_expr_ir(expr)),
         },
         crate::ir::ExprIr::Binary { op, left, right } => match op {
             crate::ir::BinaryOp::StringContains => {
@@ -1937,6 +1950,9 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
                     render_expr_ir(right)
                 )
             }
+            crate::ir::BinaryOp::TemporalUntil => {
+                format!("until({}, {})", render_expr_ir(left), render_expr_ir(right))
+            }
             _ => {
                 let operator = match op {
                     crate::ir::BinaryOp::Add => "+",
@@ -1962,7 +1978,8 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
                     | crate::ir::BinaryOp::MapPut
                     | crate::ir::BinaryOp::MapRemoveKey
                     | crate::ir::BinaryOp::StringContains
-                    | crate::ir::BinaryOp::RegexMatch => unreachable!(),
+                    | crate::ir::BinaryOp::RegexMatch
+                    | crate::ir::BinaryOp::TemporalUntil => unreachable!(),
                 };
                 format!(
                     "({} {} {})",

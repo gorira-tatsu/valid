@@ -128,12 +128,10 @@ valid_model! {
         ready: false,
     }];
     transitions {
-        on Enable {
-            when |state| state.ready == false => [State {
-                ready: true,
-                ..state.clone()
-            }];
-        }
+        transition Enable when |state| state.ready == false => [State {
+            ready: true,
+            ..state.clone()
+        }];
     }
     properties {
         invariant P_READY |state| state.ready == false || state.ready == true;
@@ -161,6 +159,74 @@ fn main() {}
         stderr.contains(
             "declarative transition struct updates support only `..state`-style identifiers"
         ),
+        "unexpected stderr: {stderr}"
+    );
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn valid_model_reports_step_model_split_diagnostic() {
+    let _guard = cargo_guard();
+    let project_dir = unique_temp_project_dir("valid-ui-diagnostics-step-model");
+    fs::create_dir_all(project_dir.join("src")).expect("temp src dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"valid-ui-diagnostics-step-model\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?} }}\n",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )
+    .expect("temp Cargo.toml");
+    fs::write(
+        project_dir.join("src").join("main.rs"),
+        r#"use valid::{valid_actions, valid_model, valid_state};
+
+valid_state! {
+    struct State {
+        ready: bool,
+    }
+}
+
+valid_actions! {
+    enum Action {
+        Enable => "ENABLE" [reads = ["ready"], writes = ["ready"]],
+    }
+}
+
+valid_model! {
+    model BrokenStepModel<State, Action>;
+    init [State { ready: false }];
+    step |state, action| {
+        match action {
+            Action::Enable if !state.ready => vec![State { ready: true }],
+            _ => Vec::new(),
+        }
+    }
+    properties {
+        invariant P_READY |state| state.ready == false || state.ready == true;
+    }
+}
+
+fn main() {}
+"#,
+    )
+    .expect("temp main.rs");
+
+    let output = Command::new("cargo")
+        .arg("check")
+        .arg("--offline")
+        .current_dir(&project_dir)
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .expect("cargo check should run");
+    assert!(
+        !output.status.success(),
+        "cargo check unexpectedly succeeded"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("step models must use `valid_step_model!`"),
         "unexpected stderr: {stderr}"
     );
 
