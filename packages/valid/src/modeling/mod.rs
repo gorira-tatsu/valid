@@ -1404,7 +1404,7 @@ macro_rules! valid_model {
                     $(
                         $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
                         when |$guard_state:ident| $guard_expr:expr
-                        => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];
+                        => [$($next_state:tt)+];
                     )+
                 }
             )+
@@ -1419,7 +1419,7 @@ macro_rules! valid_model {
             transitions {
                 $(
                     $(
-                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$state_ctor { $($field: $update_expr),* }];
+                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state)+];
                     )+
                 )+
             }
@@ -1432,40 +1432,7 @@ macro_rules! valid_model {
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
-            $(
-                on $group_action:ident {
-                    $(
-                        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
-                        when |$guard_state:ident| $guard_expr:expr
-                        => [$($next_state:expr),* $(,)?];
-                    )+
-                }
-            )+
-        }
-        properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
-        }
-    ) => {
-        $crate::valid_model! {
-            model $model<$state_ty, $action_ty>;
-            init [$($init_state),*];
-            transitions {
-                $(
-                    $(
-                        transition $group_action $( [ tags = [$($path_tag),*] ] )? when |$guard_state| $guard_expr => [$($next_state),*];
-                    )+
-                )+
-            }
-            properties {
-                $(invariant $property |$holds_state| $holds_expr;)+
-            }
-        }
-    };
-    (
-        model $model:ident<$state_ty:ty, $action_ty:ty>;
-        init [$($init_state:expr),* $(,)?];
-        transitions {
-            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }];)+
+            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:tt)+];)+
         }
         properties {
             $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
@@ -1491,7 +1458,7 @@ macro_rules! valid_model {
                     if matches!(action, <$action_ty>::$transition_action) {
                         let $guard_state = state;
                         if $guard_expr {
-                            next_states.push($state_ctor { $($field: $update_expr),* });
+                            $crate::valid_model!(@transition_push next_states, [$($next_state)+]);
                         }
                     }
                 )+
@@ -1513,105 +1480,128 @@ macro_rules! valid_model {
             fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
                 vec![
                     $(
-                        {
-                            let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
-                                stringify!($transition_action)
-                            );
-                            $crate::modeling::TransitionDescriptor {
-                                action_variant: descriptor.variant,
-                                action_id: descriptor.action_id,
-                                guard: stringify!($guard_expr),
-                                effect: stringify!($state_ctor { $($field: $update_expr),* }),
-                                reads: descriptor.reads,
-                                writes: descriptor.writes,
-                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
-                                updates: &[
-                                    $(
-                                        $crate::modeling::TransitionUpdateDescriptor {
-                                            field: stringify!($field),
-                                            expr: stringify!($update_expr),
-                                        }
-                                    ),*
-                                ],
-                            }
-                        }
+                        $crate::valid_model!(
+                            @transition_descriptor
+                            [$action_ty]
+                            $transition_action
+                            $( [ tags = [$($path_tag),*] ] )?
+                            |$guard_state| $guard_expr
+                            => [$($next_state)+]
+                        )
                     ),+
                 ]
             }
         }
+    };
+    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]) => {
+        $next_states.push($state_ctor {
+            $($field: $update_expr,)*
+            ..$rest_state.clone()
+        });
+    };
+    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]) => {
+        compile_error!(
+            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
+        );
+    };
+    (@transition_push $next_states:ident, [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]) => {
+        $next_states.push($state_ctor { $($field: $update_expr),* });
+    };
+    (@transition_push $next_states:ident, [$($next_state:expr),* $(,)?]) => {
+        $next_states.extend(vec![$($next_state),*]);
     };
     (
-        model $model:ident<$state_ty:ty, $action_ty:ty>;
-        init [$($init_state:expr),* $(,)?];
-        transitions {
-            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:expr),* $(,)?];)+
-        }
-        properties {
-            $(invariant $property:ident |$holds_state:ident| $holds_expr:expr;)+
-        }
-    ) => {
-        struct $model;
-
-        impl $crate::modeling::ModelSpec for $model {
-            type State = $state_ty;
-            type Action = $action_ty;
-
-            fn model_id() -> &'static str {
-                stringify!($model)
-            }
-
-            fn init_states() -> Vec<Self::State> {
-                vec![$($init_state),*]
-            }
-
-            fn step(state: &Self::State, action: &Self::Action) -> Vec<Self::State> {
-                let mut next_states = Vec::new();
+        @transition_descriptor
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!($state_ctor { $($field: $update_expr,)* ..$rest_state }),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+            updates: &[
                 $(
-                    if matches!(action, <$action_ty>::$transition_action) {
-                        let $guard_state = state;
-                        if $guard_expr {
-                            next_states.extend(vec![$($next_state),*]);
-                        }
+                    $crate::modeling::TransitionUpdateDescriptor {
+                        field: stringify!($field),
+                        expr: stringify!($update_expr),
                     }
-                )+
-                next_states
-            }
-
-            fn properties() -> Vec<$crate::modeling::ModelProperty<Self::State>> {
-                vec![
-                    $(
-                        $crate::modeling::ModelProperty::invariant_expr(
-                            stringify!($property),
-                            Some(stringify!($holds_expr)),
-                            |$holds_state: &Self::State| $holds_expr,
-                        )
-                    ),+
-                ]
-            }
-
-            fn transitions() -> Vec<$crate::modeling::TransitionDescriptor> {
-                vec![
-                    $(
-                        {
-                            let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
-                                stringify!($transition_action)
-                            );
-                            $crate::modeling::TransitionDescriptor {
-                                action_variant: descriptor.variant,
-                                action_id: descriptor.action_id,
-                                guard: stringify!($guard_expr),
-                                effect: stringify!([$($next_state),*]),
-                                reads: descriptor.reads,
-                                writes: descriptor.writes,
-                                path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
-                                updates: &[],
-                            }
-                        }
-                    ),+
-                ]
-            }
+                ),*
+            ],
         }
-    };
+    }};
+    (
+        @transition_descriptor
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]
+    ) => {{
+        compile_error!(
+            "declarative transition struct updates support only `..state`-style identifiers; write `..state`, not an arbitrary expression"
+        );
+    }};
+    (
+        @transition_descriptor
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!($state_ctor { $($field: $update_expr),* }),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+            updates: &[
+                $(
+                    $crate::modeling::TransitionUpdateDescriptor {
+                        field: stringify!($field),
+                        expr: stringify!($update_expr),
+                    }
+                ),*
+            ],
+        }
+    }};
+    (
+        @transition_descriptor
+        [$action_ty:ty]
+        $transition_action:ident
+        $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
+        |$guard_state:ident| $guard_expr:expr
+        => [$($next_state:expr),* $(,)?]
+    ) => {{
+        let descriptor = $crate::modeling::action_descriptor_by_variant::<$action_ty>(
+            stringify!($transition_action)
+        );
+        $crate::modeling::TransitionDescriptor {
+            action_variant: descriptor.variant,
+            action_id: descriptor.action_id,
+            guard: stringify!($guard_expr),
+            effect: stringify!([$($next_state),*]),
+            reads: descriptor.reads,
+            writes: descriptor.writes,
+            path_tags: $crate::valid_model!(@path_tags $($($path_tag),*)?),
+            updates: &[],
+        }
+    }};
     (@path_tags $($path_tag:literal),*) => {
         &[$($path_tag),*]
     };
@@ -4132,6 +4122,94 @@ mod tests {
             }
         ));
         assert_eq!(model.actions[0].updates[0].field, "attached");
+    }
+
+    valid_state! {
+        struct SpreadState {
+            note: String [range = "0..=32"],
+            approved: bool,
+            archived: bool,
+        }
+    }
+
+    valid_actions! {
+        enum SpreadAction {
+            Approve => "APPROVE" [reads = ["approved"], writes = ["approved"]],
+            Archive => "ARCHIVE" [reads = ["approved", "archived"], writes = ["note", "approved", "archived"]],
+        }
+    }
+
+    crate::valid_model! {
+        model SpreadModel<SpreadState, SpreadAction>;
+        init [SpreadState {
+            note: "draft".to_string(),
+            approved: false,
+            archived: false,
+        }];
+        transitions {
+            on Approve {
+                [tags = ["approval_path"]]
+                when |state| state.approved == false => [SpreadState {
+                    approved: true,
+                    ..state
+                }];
+            }
+            on Archive {
+                [tags = ["archive_path"]]
+                when |state| state.approved && state.archived == false => [SpreadState {
+                    note: "archived".to_string(),
+                    approved: state.approved,
+                    archived: true,
+                }];
+            }
+        }
+        properties {
+            invariant P_ARCHIVE_REQUIRES_APPROVAL |state| state.archived == false || state.approved;
+        }
+    }
+
+    #[test]
+    fn declarative_transition_struct_updates_clone_unchanged_fields() {
+        let init = <SpreadModel as crate::modeling::ModelSpec>::init_states()
+            .into_iter()
+            .next()
+            .expect("spread model init state");
+        let next_states =
+            <SpreadModel as crate::modeling::ModelSpec>::step(&init, &SpreadAction::Approve);
+        assert_eq!(
+            next_states,
+            vec![SpreadState {
+                note: "draft".to_string(),
+                approved: true,
+                archived: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn declarative_transition_struct_updates_preserve_explicit_update_metadata() {
+        let transitions = machine_transition_ir::<SpreadModel>();
+        assert_eq!(transitions.len(), 2);
+        assert_eq!(transitions[0].action_id, "APPROVE");
+        assert!(transitions[0]
+            .effect
+            .expect("spread transition effect")
+            .contains(".. state"));
+        assert_eq!(transitions[0].updates.len(), 1);
+        assert_eq!(transitions[0].updates[0].field, "approved");
+        assert_eq!(transitions[0].updates[0].expr, Some("true"));
+        assert_eq!(transitions[1].updates.len(), 3);
+    }
+
+    #[test]
+    fn declarative_transition_struct_updates_lower_with_mixed_literal_forms() {
+        let model =
+            lower_machine_model::<SpreadModel>().expect("spread model lowering should work");
+        assert_eq!(model.actions.len(), 2);
+        assert_eq!(model.actions[0].action_id, "APPROVE");
+        assert_eq!(model.actions[0].updates.len(), 1);
+        assert_eq!(model.actions[0].updates[0].field, "approved");
+        assert!(matches!(model.state_fields[0].ty, FieldType::String { .. }));
     }
 
     crate::valid_model! {
