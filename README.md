@@ -634,7 +634,8 @@ tracked reference set.
 - `packages/valid/src/`
   engine, DSL, lowering, solver adapters, and CLI implementation
 - `packages/valid_derive/`
-  proc-macro crate for DSL derives and function-like macro validation
+  proc-macro crate for DSL derives; `valid_model!` itself currently expands via
+  `macro_rules!` in `packages/valid/src/modeling/mod.rs`
 
 ## Recommended Workflow
 
