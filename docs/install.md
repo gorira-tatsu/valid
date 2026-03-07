@@ -15,10 +15,14 @@
 
 This is the easiest distribution path for non-Rust users.
 
-- download the release artifact for your platform
+- download the GitHub Release asset for your platform:
+  `valid-linux-x86_64.tar.gz` or `valid-macos-aarch64.tar.gz`
+- extract the archive, for example `tar -xzf valid-linux-x86_64.tar.gz`
 - put `valid` and `cargo-valid` on your `PATH`
 - run `valid` for `.valid` files
 - run `cargo-valid` only if the target project already has a Rust toolchain
+
+Tagged `v*` pushes publish these tarballs automatically on GitHub Releases.
 
 Recommended release build:
 

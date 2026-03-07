@@ -172,6 +172,8 @@ If you are deciding between the two, use the Rust-first path.
 
 - Prebuilt binary
   easiest distribution path; recommended for operators and reviewers
+  tagged releases publish `valid-linux-x86_64.tar.gz` and
+  `valid-macos-aarch64.tar.gz` on GitHub Releases
 - `cargo install --path . --features varisat-backend`
   recommended for authors working on Rust DSL registries
 - Docker
