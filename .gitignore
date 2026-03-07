@@ -2,3 +2,5 @@
 /artifacts
 /generated-tests/*.rs
 .DS_Store
+.claude/worktrees/
+.serena/

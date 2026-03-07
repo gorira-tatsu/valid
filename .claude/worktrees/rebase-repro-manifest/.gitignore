@@ -1,4 +1,0 @@
-/target
-/artifacts
-/generated-tests/*.rs
-.DS_Store
