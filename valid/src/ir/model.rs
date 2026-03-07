@@ -38,4 +38,6 @@ pub enum FieldType {
     Bool,
     BoundedU8 { min: u8, max: u8 },
     BoundedU16 { min: u16, max: u16 },
+    BoundedU32 { min: u32, max: u32 },
+    Enum { variants: Vec<String> },
 }

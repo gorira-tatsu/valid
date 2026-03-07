@@ -4,9 +4,17 @@ use std::{fs, path::Path};
 pub struct ProjectConfig {
     pub registry: Option<String>,
     pub default_backend: Option<String>,
+    pub default_property: Option<String>,
+    pub default_solver_executable: Option<String>,
+    pub default_solver_args: Vec<String>,
     pub suite_models: Vec<String>,
+    pub benchmark_models: Vec<String>,
+    pub benchmark_repeats: Option<usize>,
     pub generated_tests_dir: Option<String>,
     pub artifacts_dir: Option<String>,
+    pub benchmarks_dir: Option<String>,
+    pub benchmark_baseline_dir: Option<String>,
+    pub benchmark_regression_threshold_percent: Option<u32>,
     pub default_graph_format: Option<String>,
 }
 
@@ -39,11 +47,36 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
             "default_backend" => {
                 config.default_backend = Some(parse_string(value.trim(), index + 1)?)
             }
+            "default_property" => {
+                config.default_property = Some(parse_string(value.trim(), index + 1)?)
+            }
+            "default_solver_executable" => {
+                config.default_solver_executable = Some(parse_string(value.trim(), index + 1)?)
+            }
+            "default_solver_args" => {
+                config.default_solver_args = parse_string_array(value.trim(), index + 1)?
+            }
             "suite_models" => config.suite_models = parse_string_array(value.trim(), index + 1)?,
+            "benchmark_models" => {
+                config.benchmark_models = parse_string_array(value.trim(), index + 1)?
+            }
+            "benchmark_repeats" => {
+                config.benchmark_repeats = Some(parse_usize(value.trim(), index + 1)?)
+            }
             "generated_tests_dir" => {
                 config.generated_tests_dir = Some(parse_string(value.trim(), index + 1)?)
             }
             "artifacts_dir" => config.artifacts_dir = Some(parse_string(value.trim(), index + 1)?),
+            "benchmarks_dir" => {
+                config.benchmarks_dir = Some(parse_string(value.trim(), index + 1)?)
+            }
+            "benchmark_baseline_dir" => {
+                config.benchmark_baseline_dir = Some(parse_string(value.trim(), index + 1)?)
+            }
+            "benchmark_regression_threshold_percent" => {
+                config.benchmark_regression_threshold_percent =
+                    Some(parse_u32(value.trim(), index + 1)?)
+            }
             "default_graph_format" => {
                 config.default_graph_format = Some(parse_string(value.trim(), index + 1)?)
             }
@@ -60,7 +93,7 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
 
 pub fn render_project_config_template(registry: &str) -> String {
     format!(
-        "registry = {:?}\ndefault_backend = \"explicit\"\nsuite_models = []\ngenerated_tests_dir = \"tests/generated\"\nartifacts_dir = \"artifacts\"\ndefault_graph_format = \"mermaid\"\n",
+        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"tests/generated\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
         registry
     )
 }
@@ -126,6 +159,20 @@ fn parse_string_array(input: &str, line: usize) -> Result<Vec<String>, String> {
         .collect()
 }
 
+fn parse_usize(input: &str, line: usize) -> Result<usize, String> {
+    input
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| format!("expected positive integer on line {line}"))
+}
+
+fn parse_u32(input: &str, line: usize) -> Result<u32, String> {
+    input
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| format!("expected non-negative integer on line {line}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -139,9 +186,17 @@ mod tests {
             r#"
 registry = "examples/valid_models.rs"
 default_backend = "explicit"
+default_property = "P_SAFE"
+default_solver_executable = "cvc5"
+default_solver_args = ["--lang", "smt2"]
 suite_models = ["counter", "failing-counter"]
+benchmark_models = ["counter"]
+benchmark_repeats = 5
 generated_tests_dir = "tests/generated"
 artifacts_dir = "artifacts"
+benchmarks_dir = "artifacts/benchmarks"
+benchmark_baseline_dir = "benchmarks/baselines"
+benchmark_regression_threshold_percent = 30
 default_graph_format = "mermaid"
 "#,
         )
@@ -151,9 +206,17 @@ default_graph_format = "mermaid"
             ProjectConfig {
                 registry: Some("examples/valid_models.rs".to_string()),
                 default_backend: Some("explicit".to_string()),
+                default_property: Some("P_SAFE".to_string()),
+                default_solver_executable: Some("cvc5".to_string()),
+                default_solver_args: vec!["--lang".to_string(), "smt2".to_string()],
                 suite_models: vec!["counter".to_string(), "failing-counter".to_string()],
+                benchmark_models: vec!["counter".to_string()],
+                benchmark_repeats: Some(5),
                 generated_tests_dir: Some("tests/generated".to_string()),
                 artifacts_dir: Some("artifacts".to_string()),
+                benchmarks_dir: Some("artifacts/benchmarks".to_string()),
+                benchmark_baseline_dir: Some("benchmarks/baselines".to_string()),
+                benchmark_regression_threshold_percent: Some(30),
                 default_graph_format: Some("mermaid".to_string()),
             }
         );
@@ -165,6 +228,8 @@ default_graph_format = "mermaid"
         assert!(body.contains("registry = \"examples/valid_models.rs\""));
         assert!(body.contains("default_backend = \"explicit\""));
         assert!(body.contains("generated_tests_dir = \"tests/generated\""));
+        assert!(body.contains("benchmark_repeats = 3"));
+        assert!(body.contains("benchmark_baseline_dir = \"benchmarks/baselines\""));
     }
 
     #[test]

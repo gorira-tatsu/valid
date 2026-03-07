@@ -7,10 +7,16 @@ use std::{
 
 use valid::{
     api::{
-        check_source, explain_source, inspect_source, lint_source, orchestrate_source,
-        render_explain_json, render_explain_text, render_inspect_json, render_inspect_text,
-        render_lint_json, render_lint_text, testgen_source, CheckRequest, InspectRequest,
-        OrchestrateRequest, TestgenRequest,
+        check_source, explain_source, inspect_source, lint_source, migration_from_inspect,
+        orchestrate_source, render_explain_json, render_explain_text, render_inspect_json,
+        render_inspect_text, render_lint_json, render_lint_text, render_migration_json,
+        render_migration_text, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
+        TestgenRequest,
+    },
+    benchmark::{
+        benchmark_check_outcomes, compare_benchmark_to_baseline,
+        parse_benchmark_summary_json, render_benchmark_comparison_json,
+        render_benchmark_comparison_text, render_benchmark_json, render_benchmark_text,
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
     coverage::{render_coverage_json, render_coverage_text},
@@ -21,6 +27,11 @@ use valid::{
         ProjectConfig,
     },
     reporter::{render_model_dot, render_model_mermaid, render_model_svg},
+    support::{
+        artifact::{benchmark_baseline_path, benchmark_report_path},
+        hash::stable_hash_hex,
+        io::write_text_file,
+    },
 };
 
 fn main() {
@@ -38,10 +49,18 @@ fn main() {
     {
         run_external_registry(parsed);
     }
+    if !internal_bundled_mode_enabled() {
+        usage_exit(
+            "project-first mode expects valid.toml or --registry/--file/--example/--bin; bundled models are internal fixtures",
+        );
+    }
 
     let local_args = ParsedArgs {
         json: parsed.json,
         model: parsed.model,
+        repeat: parsed.repeat,
+        baseline_mode: parsed.baseline_mode,
+        threshold_percent: parsed.threshold_percent,
         strategy: parsed.strategy,
         format: parsed.format,
         property_id: parsed.property_id,
@@ -51,6 +70,8 @@ fn main() {
         actions: parsed.actions,
         focus_action_id: parsed.focus_action_id,
         suite_models: parsed.suite_models,
+        write_path: parsed.write_path,
+        check: parsed.check,
     };
 
     match parsed.command.as_str() {
@@ -58,6 +79,8 @@ fn main() {
         "inspect" => cmd_inspect(local_args),
         "graph" => cmd_graph(local_args),
         "lint" => cmd_lint(local_args),
+        "benchmark" => cmd_benchmark(local_args),
+        "migrate" => cmd_migrate(local_args),
         "check" => cmd_check(local_args),
         "all" => cmd_all(local_args),
         "explain" => cmd_explain(local_args),
@@ -74,12 +97,22 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+}
+
+fn internal_bundled_mode_enabled() -> bool {
+    matches!(
+        env::var("VALID_INTERNAL_BUNDLED_MODELS").as_deref(),
+        Ok("1")
+    )
 }
 
 fn run_external_registry(parsed: CliArgs) -> ! {
     if parsed.command == "all" {
         run_external_all(parsed);
+    }
+    if parsed.command == "benchmark" && parsed.model.is_none() {
+        run_external_benchmark(parsed);
     }
 
     let status = build_external_command(&parsed)
@@ -89,6 +122,78 @@ fn run_external_registry(parsed: CliArgs) -> ! {
             process::exit(3);
         });
     process::exit(status.code().unwrap_or(1));
+}
+
+fn run_external_benchmark(parsed: CliArgs) -> ! {
+    let models = if parsed.benchmark_models.is_empty() {
+        if parsed.suite_models.is_empty() {
+            fetch_external_models(&parsed)
+        } else {
+            parsed.suite_models.clone()
+        }
+    } else {
+        parsed.benchmark_models.clone()
+    };
+    let mut aggregate_status = 0;
+    let mut json_runs = Vec::new();
+
+    for model in models {
+        let output = build_external_command(&CliArgs {
+            command: "benchmark".to_string(),
+            model: Some(model.clone()),
+            repeat: parsed.repeat,
+            baseline_mode: parsed.baseline_mode.clone(),
+            threshold_percent: parsed.threshold_percent,
+            strategy: None,
+            format: parsed.format.clone(),
+            property_id: parsed.property_id.clone(),
+            backend: parsed.backend.clone(),
+            solver_executable: parsed.solver_executable.clone(),
+            solver_args: parsed.solver_args.clone(),
+            actions: Vec::new(),
+            focus_action_id: None,
+            json: parsed.json,
+            manifest_path: parsed.manifest_path.clone(),
+            example: parsed.example.clone(),
+            bin: parsed.bin.clone(),
+            file: parsed.file.clone(),
+            suite_models: Vec::new(),
+            benchmark_models: Vec::new(),
+            write_path: None,
+            check: false,
+        })
+        .output()
+        .unwrap_or_else(|err| {
+            eprintln!("failed to execute target registry: {err}");
+            process::exit(3);
+        });
+        let code = output.status.code().unwrap_or(1);
+        aggregate_status = aggregate_exit_code(aggregate_status, code);
+        if parsed.json {
+            json_runs.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        } else {
+            println!("== {model} ==");
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.trim().is_empty() {
+                eprint!("{stderr}");
+            }
+        }
+    }
+
+    if parsed.json {
+        let body = format!("{{\"runs\":[{}]}}", json_runs.join(","));
+        if let Some(path) = write_benchmark_artifact("project-benchmark-suite", &body) {
+            println!(
+                "{{\"artifact_path\":\"{}\",\"runs\":[{}]}}",
+                path.replace('\\', "\\\\"),
+                json_runs.join(",")
+            );
+        } else {
+            println!("{body}");
+        }
+    }
+    process::exit(aggregate_status);
 }
 
 fn run_external_all(parsed: CliArgs) -> ! {
@@ -104,6 +209,9 @@ fn run_external_all(parsed: CliArgs) -> ! {
         let mut command = build_external_command(&CliArgs {
             command: "check".to_string(),
             model: Some(model.clone()),
+            repeat: 0,
+            baseline_mode: None,
+            threshold_percent: None,
             strategy: None,
             format: parsed.format.clone(),
             property_id: None,
@@ -118,6 +226,9 @@ fn run_external_all(parsed: CliArgs) -> ! {
             bin: parsed.bin.clone(),
             file: parsed.file.clone(),
             suite_models: Vec::new(),
+            benchmark_models: Vec::new(),
+            write_path: None,
+            check: false,
         });
         let output = command.output().unwrap_or_else(|err| {
             eprintln!("failed to execute target registry: {err}");
@@ -166,6 +277,17 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(model) = &parsed.model {
         command.arg(model);
     }
+    if parsed.command == "benchmark" && parsed.repeat > 0 {
+        command.arg(format!("--repeat={}", parsed.repeat));
+    }
+    if parsed.command == "benchmark" {
+        if let Some(baseline_mode) = &parsed.baseline_mode {
+            command.arg(format!("--baseline={baseline_mode}"));
+        }
+        if let Some(threshold_percent) = parsed.threshold_percent {
+            command.arg(format!("--threshold-percent={threshold_percent}"));
+        }
+    }
     if let Some(strategy) = &parsed.strategy {
         command.arg(format!("--strategy={strategy}"));
     }
@@ -190,6 +312,16 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if !parsed.actions.is_empty() {
         command.arg(format!("--actions={}", parsed.actions.join(",")));
     }
+    if let Some(write_path) = &parsed.write_path {
+        if write_path.is_empty() {
+            command.arg("--write");
+        } else {
+            command.arg(format!("--write={write_path}"));
+        }
+    }
+    if parsed.check {
+        command.arg("--check");
+    }
     if parsed.json {
         command.arg("--json");
     }
@@ -200,6 +332,9 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
     let output = build_external_command(&CliArgs {
         command: "list".to_string(),
         model: None,
+        repeat: 0,
+        baseline_mode: None,
+        threshold_percent: None,
         strategy: None,
         format: None,
         property_id: None,
@@ -214,6 +349,9 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         bin: parsed.bin.clone(),
         file: parsed.file.clone(),
         suite_models: Vec::new(),
+        benchmark_models: Vec::new(),
+        write_path: None,
+        check: false,
     })
     .output()
     .unwrap_or_else(|err| {
@@ -372,6 +510,167 @@ fn cmd_lint(parsed: ParsedArgs) {
                 .iter()
                 .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
             process::exit(if has_findings { 2 } else { 0 });
+        }
+        Err(diagnostics) => {
+            if parsed.json {
+                println!("{}", render_diagnostics_json(&diagnostics));
+            } else {
+                for diagnostic in diagnostics {
+                    eprintln!("{}", diagnostic.message);
+                }
+            }
+            process::exit(3);
+        }
+    }
+}
+
+fn cmd_benchmark(parsed: ParsedArgs) {
+    let model = parsed.model.unwrap_or_else(|| {
+        usage_exit("usage: cargo valid benchmark <model> [--json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>]")
+    });
+    let backend_label = parsed
+        .backend
+        .clone()
+        .unwrap_or_else(|| "explicit".to_string());
+    let summary = benchmark_check_outcomes(
+        "cargo-valid-benchmark",
+        &model,
+        &backend_label,
+        parsed.property_id.as_deref(),
+        parsed.repeat,
+        |_| {
+            let request = CheckRequest {
+                request_id: "cargo-valid-benchmark".to_string(),
+                source_name: normalized_model_ref(&model),
+                source: String::new(),
+                property_id: parsed.property_id.clone(),
+                backend: parsed.backend.clone(),
+                solver_executable: parsed.solver_executable.clone(),
+                solver_args: parsed.solver_args.clone(),
+            };
+            check_source(&request)
+        },
+    );
+    let json = render_benchmark_json(&summary);
+    let artifact_id = format!(
+        "bench-{}",
+        stable_hash_hex(&format!(
+            "{}:{}:{}:{}",
+            model,
+            backend_label,
+            parsed.property_id.as_deref().unwrap_or(""),
+            parsed.repeat
+        ))
+        .replace("sha256:", "")
+    );
+    let baseline_id = benchmark_baseline_report_id(
+        &model,
+        &backend_label,
+        parsed.property_id.as_deref(),
+    );
+    let artifact_path = write_benchmark_artifact(&artifact_id, &json);
+    let baseline_mode = parsed
+        .baseline_mode
+        .as_deref()
+        .unwrap_or("compare");
+    let threshold_percent = parsed.threshold_percent.unwrap_or(25);
+    let (comparison_json, comparison_text, regression_detected) =
+        benchmark_baseline_outputs(&json, &baseline_id, baseline_mode, threshold_percent);
+    if parsed.json {
+        if let Some(path) = artifact_path {
+            println!(
+                "{{\"artifact_path\":\"{}\",\"summary\":{},\"baseline\":{}}}",
+                path.replace('\\', "\\\\"),
+                json,
+                comparison_json.unwrap_or_else(|| "null".to_string())
+            );
+        } else {
+            println!(
+                "{{\"summary\":{},\"baseline\":{}}}",
+                json,
+                comparison_json.unwrap_or_else(|| "null".to_string())
+            );
+        }
+    } else {
+        print!("{}", render_benchmark_text(&summary));
+        if let Some(path) = artifact_path {
+            println!("artifact_path: {path}");
+        }
+        if let Some(text) = comparison_text {
+            print!("{text}");
+        }
+    }
+    let exit_code = if baseline_mode == "ignore" {
+        if summary.error_count > 0 {
+            3
+        } else if summary.fail_count > 0 {
+            2
+        } else if summary.unknown_count > 0 {
+            4
+        } else if regression_detected {
+            5
+        } else {
+            0
+        }
+    } else if summary.error_count > 0 {
+        3
+    } else if regression_detected {
+        5
+    } else {
+        0
+    };
+    process::exit(exit_code);
+}
+
+fn cmd_migrate(parsed: ParsedArgs) {
+    let model = parsed
+        .model
+        .unwrap_or_else(|| usage_exit("usage: cargo valid migrate <model> [--json] [--write[=<path>]] [--check]"));
+    let request = InspectRequest {
+        request_id: "cargo-valid-migrate".to_string(),
+        source_name: normalized_model_ref(&model),
+        source: String::new(),
+    };
+    match inspect_source(&request) {
+        Ok(inspect) => {
+            let lint = valid::api::lint_from_inspect(&inspect);
+            let migration = migration_from_inspect(&inspect, &lint, parsed.check);
+            let json_body = render_migration_json(&migration);
+            let text_body = render_migration_text(&migration);
+            let written_path = parsed
+                .write_path
+                .as_ref()
+                .map(|value| migration_output_path(&model, value))
+                .and_then(|path| write_text_file(&path, &text_body).ok().map(|_| path));
+            if parsed.json {
+                if let Some(path) = written_path {
+                    println!(
+                        "{{\"written\":\"{}\",\"migration\":{}}}",
+                        path.replace('\\', "\\\\"),
+                        json_body
+                    );
+                } else {
+                    println!("{json_body}");
+                }
+            } else {
+                print!("{text_body}");
+                if let Some(path) = written_path {
+                    println!("written: {path}");
+                }
+            }
+            let exit_code = if parsed.check {
+                match migration.check.as_ref().map(|check| check.status.as_str()) {
+                    Some("already-declarative") => 0,
+                    Some("no-candidates") => 2,
+                    Some("candidate-complete") | Some("partial") => 6,
+                    _ => 3,
+                }
+            } else if migration.snippets.is_empty() {
+                2
+            } else {
+                0
+            };
+            process::exit(exit_code);
         }
         Err(diagnostics) => {
             if parsed.json {
@@ -620,6 +919,9 @@ fn cmd_clean(parsed: &CliArgs) -> ! {
 struct ParsedArgs {
     json: bool,
     model: Option<String>,
+    repeat: usize,
+    baseline_mode: Option<String>,
+    threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
     property_id: Option<String>,
@@ -629,6 +931,8 @@ struct ParsedArgs {
     actions: Vec<String>,
     focus_action_id: Option<String>,
     suite_models: Vec<String>,
+    write_path: Option<String>,
+    check: bool,
 }
 
 #[derive(Default)]
@@ -639,6 +943,9 @@ struct CliArgs {
     file: Option<String>,
     command: String,
     model: Option<String>,
+    repeat: usize,
+    baseline_mode: Option<String>,
+    threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
     property_id: Option<String>,
@@ -649,6 +956,9 @@ struct CliArgs {
     focus_action_id: Option<String>,
     json: bool,
     suite_models: Vec<String>,
+    benchmark_models: Vec<String>,
+    write_path: Option<String>,
+    check: bool,
 }
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
@@ -673,6 +983,30 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             "--solver-arg" => parsed.solver_args.push(next_arg(&mut iter, "--solver-arg")),
             "--json" => parsed.json = true,
+            "--check" => parsed.check = true,
+            "--write" => parsed.write_path = Some(String::new()),
+            _ if arg.starts_with("--write=") => {
+                parsed.write_path = Some(arg.trim_start_matches("--write=").to_string())
+            }
+            "--baseline" => parsed.baseline_mode = Some("compare".to_string()),
+            _ if arg.starts_with("--baseline=") => {
+                parsed.baseline_mode = Some(arg.trim_start_matches("--baseline=").to_string())
+            }
+            _ if arg.starts_with("--threshold-percent=") => {
+                parsed.threshold_percent = Some(
+                    arg.trim_start_matches("--threshold-percent=")
+                        .parse()
+                        .unwrap_or_else(|_| {
+                            usage_exit("`--threshold-percent` expects a non-negative integer")
+                        }),
+                )
+            }
+            _ if arg.starts_with("--repeat=") => {
+                parsed.repeat = arg
+                    .trim_start_matches("--repeat=")
+                    .parse()
+                    .unwrap_or_else(|_| usage_exit("`--repeat` expects a positive integer"))
+            }
             _ if arg.starts_with("--strategy=") => {
                 parsed.strategy = Some(arg.trim_start_matches("--strategy=").to_string())
             }
@@ -715,6 +1049,8 @@ fn normalize_command(command: &str) -> String {
         "models" => "list",
         "diagram" => "graph",
         "readiness" => "lint",
+        "migrate" => "migrate",
+        "benchmark" | "bench" => "benchmark",
         "verify" => "check",
         "suite" => "all",
         "generate-tests" => "testgen",
@@ -757,8 +1093,42 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
             if parsed.backend.is_none() {
                 parsed.backend = config.default_backend.clone();
             }
+            if parsed.property_id.is_none() {
+                parsed.property_id = config
+                    .default_property
+                    .clone()
+                    .filter(|value| !value.trim().is_empty());
+            }
+            if parsed.solver_executable.is_none() {
+                parsed.solver_executable = config
+                    .default_solver_executable
+                    .clone()
+                    .filter(|value| !value.trim().is_empty());
+            }
+            if parsed.solver_args.is_empty() && !config.default_solver_args.is_empty() {
+                parsed.solver_args = config.default_solver_args.clone();
+            }
             if parsed.suite_models.is_empty() && !explicit_registry_target {
                 parsed.suite_models = config.suite_models.clone();
+            }
+            if parsed.command == "benchmark"
+                && parsed.benchmark_models.is_empty()
+                && !explicit_registry_target
+            {
+                parsed.benchmark_models = if config.benchmark_models.is_empty() {
+                    config.suite_models.clone()
+                } else {
+                    config.benchmark_models.clone()
+                };
+            }
+            if parsed.command == "benchmark" && parsed.repeat == 0 {
+                parsed.repeat = config.benchmark_repeats.unwrap_or(3);
+            }
+            if parsed.command == "benchmark" && parsed.threshold_percent.is_none() {
+                parsed.threshold_percent = config.benchmark_regression_threshold_percent;
+            }
+            if parsed.command == "benchmark" && parsed.baseline_mode.is_none() {
+                parsed.baseline_mode = Some("compare".to_string());
             }
             if !explicit_registry_target {
                 if let Some(registry) = config.registry.clone() {
@@ -793,6 +1163,12 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
             parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
         }
         parsed.file = Some(file.to_string_lossy().to_string());
+    }
+    if parsed.command == "benchmark" && parsed.repeat == 0 {
+        parsed.repeat = 3;
+    }
+    if parsed.command == "benchmark" && parsed.baseline_mode.is_none() {
+        parsed.baseline_mode = Some("compare".to_string());
     }
     parsed
 }
@@ -897,6 +1273,7 @@ fn aggregate_exit_code(current: i32, next: i32) -> i32 {
         (3, _) | (_, 3) => 3,
         (2, _) | (_, 2) => 2,
         (4, _) | (_, 4) => 4,
+        (5, _) | (_, 5) => 5,
         _ => 0,
     }
 }
@@ -1018,6 +1395,116 @@ fn clean_artifacts(root: &Path) -> Vec<String> {
     removed
 }
 
+fn write_benchmark_artifact(report_id: &str, body: &str) -> Option<String> {
+    let path = benchmark_report_path(report_id);
+    write_text_file(&path, body).ok().map(|_| path)
+}
+
+fn migration_output_path(model: &str, requested: &str) -> String {
+    if !requested.trim().is_empty() {
+        return requested.to_string();
+    }
+    let root = env::var("VALID_ARTIFACTS_DIR").unwrap_or_else(|_| "artifacts".to_string());
+    format!(
+        "{}/migrations/{}.snippet.rs",
+        root.trim_end_matches('/'),
+        model
+    )
+}
+
+fn benchmark_baseline_report_id(
+    model: &str,
+    backend: &str,
+    property_id: Option<&str>,
+) -> String {
+    format!(
+        "baseline-{}",
+        stable_hash_hex(&format!(
+            "{}:{}:{}",
+            model,
+            backend,
+            property_id.unwrap_or("")
+        ))
+        .replace("sha256:", "")
+    )
+}
+
+fn benchmark_baseline_outputs(
+    summary_json: &str,
+    baseline_id: &str,
+    baseline_mode: &str,
+    threshold_percent: u32,
+) -> (Option<String>, Option<String>, bool) {
+    match baseline_mode {
+        "ignore" => (None, None, false),
+        "record" => {
+            let path = benchmark_baseline_path(baseline_id);
+            let comparison = if write_text_file(&path, summary_json).is_ok() {
+                Some(format!(
+                    "{{\"status\":\"recorded\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[]}}",
+                    path.replace('\\', "\\\\"),
+                    threshold_percent
+                ))
+            } else {
+                None
+            };
+            let text = comparison.as_ref().map(|_| {
+                format!(
+                    "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: recorded\nbaseline_regressions: none\n",
+                    path, threshold_percent
+                )
+            });
+            (comparison, text, false)
+        }
+        "compare" => {
+            let path = benchmark_baseline_path(baseline_id);
+            let Ok(body) = fs::read_to_string(&path) else {
+                let json = format!(
+                    "{{\"status\":\"missing\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[]}}",
+                    path.replace('\\', "\\\\"),
+                    threshold_percent
+                );
+                let text = format!(
+                    "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: missing\nbaseline_regressions: none\n",
+                    path, threshold_percent
+                );
+                return (Some(json), Some(text), false);
+            };
+            let current = match parse_benchmark_summary_json(summary_json) {
+                Ok(summary) => summary,
+                Err(_) => return (None, None, false),
+            };
+            let baseline = match parse_benchmark_summary_json(&body) {
+                Ok(summary) => summary,
+                Err(message) => {
+                    let json = format!(
+                        "{{\"status\":\"invalid\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[\"{}\"]}}",
+                        path.replace('\\', "\\\\"),
+                        threshold_percent,
+                        message.replace('\\', "\\\\").replace('"', "\\\"")
+                    );
+                    let text = format!(
+                        "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: invalid\nbaseline_regressions:\n- {}\n",
+                        path, threshold_percent, message
+                    );
+                    return (Some(json), Some(text), false);
+                }
+            };
+            let comparison =
+                compare_benchmark_to_baseline(&current, &path, &baseline, threshold_percent);
+            let regression = comparison.status == "regressed";
+            (
+                Some(render_benchmark_comparison_json(&comparison)),
+                Some(render_benchmark_comparison_text(&comparison)),
+                regression,
+            )
+        }
+        other => usage_exit(&format!(
+            "unsupported benchmark baseline mode `{other}`; expected compare, record, or ignore"
+        )),
+    }
+}
+
 fn resolve_project_dir(root: &Path, env_key: &str, default_rel: &str) -> PathBuf {
     env::var(env_key)
         .ok()
@@ -1038,6 +1525,12 @@ fn apply_project_runtime_config(config: &ProjectConfig) {
     }
     if let Some(artifacts_dir) = &config.artifacts_dir {
         env::set_var("VALID_ARTIFACTS_DIR", artifacts_dir);
+    }
+    if let Some(benchmarks_dir) = &config.benchmarks_dir {
+        env::set_var("VALID_BENCHMARKS_DIR", benchmarks_dir);
+    }
+    if let Some(benchmark_baseline_dir) = &config.benchmark_baseline_dir {
+        env::set_var("VALID_BENCHMARK_BASELINES_DIR", benchmark_baseline_dir);
     }
     if let Some(default_graph_format) = &config.default_graph_format {
         env::set_var("VALID_DEFAULT_GRAPH_FORMAT", default_graph_format);

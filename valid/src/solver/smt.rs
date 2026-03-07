@@ -302,7 +302,10 @@ fn parse_cvc5_get_value_line(line: &str) -> Result<(String, String), String> {
 fn smt_sort(ty: &FieldType) -> &'static str {
     match ty {
         FieldType::Bool => "Bool",
-        FieldType::BoundedU8 { .. } | FieldType::BoundedU16 { .. } => "Int",
+        FieldType::BoundedU8 { .. }
+        | FieldType::BoundedU16 { .. }
+        | FieldType::BoundedU32 { .. }
+        | FieldType::Enum { .. } => "Int",
     }
 }
 
@@ -311,6 +314,11 @@ fn integer_bounds(ty: &FieldType) -> Option<(u64, u64)> {
         FieldType::Bool => None,
         FieldType::BoundedU8 { min, max } => Some((*min as u64, *max as u64)),
         FieldType::BoundedU16 { min, max } => Some((*min as u64, *max as u64)),
+        FieldType::BoundedU32 { min, max } => Some((*min as u64, *max as u64)),
+        FieldType::Enum { variants } => variants
+            .len()
+            .checked_sub(1)
+            .map(|max| (0, max as u64)),
     }
 }
 
@@ -326,6 +334,7 @@ fn literal(value: &Value) -> String {
     match value {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
+        Value::EnumVariant { index, .. } => index.to_string(),
     }
 }
 

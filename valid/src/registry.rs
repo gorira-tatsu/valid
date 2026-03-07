@@ -1,6 +1,11 @@
-use std::{env, process};
+use std::{env, fs, process};
 
 use crate::{
+    benchmark::{
+        benchmark_check_outcomes, compare_benchmark_to_baseline,
+        parse_benchmark_summary_json, render_benchmark_comparison_json,
+        render_benchmark_comparison_text, render_benchmark_json, render_benchmark_text,
+    },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
@@ -12,12 +17,14 @@ use crate::{
     },
     reporter::{render_model_dot, render_model_mermaid, render_model_svg},
     solver::AdapterConfig,
+    support::{artifact::benchmark_baseline_path, hash::stable_hash_hex, io::write_text_file},
     testgen::{render_replay_json, write_generated_test_files, ReplayTarget},
 };
 
 use crate::api::{
-    lint_from_inspect, render_explain_json, render_explain_text, render_inspect_json,
-    render_inspect_text, render_lint_json, render_lint_text, ExplainResponse, InspectAction,
+    lint_from_inspect, migration_from_inspect, render_explain_json, render_explain_text,
+    render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
+    render_migration_json, render_migration_text, ExplainResponse, InspectAction,
     InspectCapabilities, InspectProperty, InspectResponse, InspectStateField, InspectTransition,
     InspectTransitionUpdate, OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
 };
@@ -70,6 +77,8 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "inspect" => cmd_inspect(&models, remaining),
         "graph" => cmd_graph(&models, remaining),
         "lint" => cmd_lint(&models, remaining),
+        "benchmark" => cmd_benchmark(&models, remaining),
+        "migrate" => cmd_migrate(&models, remaining),
         "check" => cmd_check(&models, remaining),
         "explain" => cmd_explain(&models, remaining),
         "coverage" => cmd_coverage(&models, remaining),
@@ -87,6 +96,7 @@ fn normalize_command(command: &str) -> String {
         "diagram" => "graph",
         "readiness" => "lint",
         "verify" => "check",
+        "bench" => "benchmark",
         "generate-tests" => "testgen",
         other => other,
     }
@@ -149,6 +159,131 @@ fn cmd_lint(models: &[RegisteredModel], args: Vec<String>) {
         .iter()
         .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
     process::exit(if has_findings { 2 } else { 0 });
+}
+
+fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
+    let parsed = parse_args(args);
+    let model = find_model(models, parsed.model.as_deref());
+    let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
+        eprintln!("{message}");
+        process::exit(3);
+    });
+    let backend_label = parsed
+        .backend
+        .clone()
+        .unwrap_or_else(|| "explicit".to_string());
+    let summary = benchmark_check_outcomes(
+        "registry-benchmark",
+        model.name,
+        &backend_label,
+        parsed.property_id.as_deref(),
+        parsed.repeat,
+        |_| {
+            (model.check)(
+                "registry-benchmark",
+                parsed.property_id.as_deref(),
+                adapter.as_ref(),
+            )
+            .unwrap_or_else(|message| {
+                eprintln!("{message}");
+                process::exit(3);
+            })
+        },
+    );
+    let summary_json = render_benchmark_json(&summary);
+    let baseline_id = format!(
+        "baseline-{}",
+        stable_hash_hex(&format!(
+            "{}:{}:{}",
+            model.name,
+            backend_label,
+            parsed.property_id.as_deref().unwrap_or("")
+        ))
+        .replace("sha256:", "")
+    );
+    let (comparison_json, comparison_text, regression_detected) = registry_benchmark_baseline_outputs(
+        &summary_json,
+        &baseline_id,
+        parsed.baseline_mode.as_deref().unwrap_or("compare"),
+        parsed.threshold_percent.unwrap_or(25),
+    );
+    if parsed.json {
+        println!(
+            "{{\"summary\":{},\"baseline\":{}}}",
+            summary_json,
+            comparison_json.unwrap_or_else(|| "null".to_string())
+        );
+    } else {
+        print!("{}", render_benchmark_text(&summary));
+        if let Some(text) = comparison_text {
+            print!("{text}");
+        }
+    }
+    let baseline_mode = parsed.baseline_mode.as_deref().unwrap_or("compare");
+    let exit_code = if baseline_mode == "ignore" {
+        if summary.error_count > 0 {
+            3
+        } else if summary.fail_count > 0 {
+            2
+        } else if summary.unknown_count > 0 {
+            4
+        } else if regression_detected {
+            5
+        } else {
+            0
+        }
+    } else if summary.error_count > 0 {
+        3
+    } else if regression_detected {
+        5
+    } else {
+        0
+    };
+    process::exit(exit_code);
+}
+
+fn cmd_migrate(models: &[RegisteredModel], args: Vec<String>) {
+    let parsed = parse_args(args);
+    let model = find_model(models, parsed.model.as_deref());
+    let inspect = (model.inspect)("registry-migrate");
+    let lint = lint_from_inspect(&inspect);
+    let migration = migration_from_inspect(&inspect, &lint, parsed.check);
+    let json_body = render_migration_json(&migration);
+    let text_body = render_migration_text(&migration);
+    let written_path = parsed
+        .write_path
+        .as_ref()
+        .map(|value| registry_migration_output_path(model.name, value))
+        .and_then(|path| write_text_file(&path, &text_body).ok().map(|_| path));
+    if parsed.json {
+        if let Some(path) = written_path {
+            println!(
+                "{{\"written\":\"{}\",\"migration\":{}}}",
+                path.replace('\\', "\\\\"),
+                json_body
+            );
+        } else {
+            println!("{json_body}");
+        }
+    } else {
+        print!("{text_body}");
+        if let Some(path) = written_path {
+            println!("written: {path}");
+        }
+    }
+    let exit_code = if parsed.check {
+        match migration.check.as_ref().map(|check| check.status.as_str()) {
+            Some("already-declarative") => 0,
+            Some("no-candidates") => 2,
+            Some("candidate-complete") | Some("partial") => 6,
+            _ => 3,
+        }
+    } else if migration.snippets.is_empty() {
+        2
+    } else {
+        0
+    };
+    process::exit(exit_code);
 }
 
 fn cmd_check(models: &[RegisteredModel], args: Vec<String>) {
@@ -305,6 +440,12 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
+            variants: field
+                .variants
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         })
         .collect::<Vec<_>>();
     let action_details = M::Action::action_descriptors()
@@ -567,6 +708,9 @@ fn annotate_registry_replay_targets<M: VerifiedMachine>(
 struct ParsedArgs {
     json: bool,
     model: Option<String>,
+    repeat: usize,
+    baseline_mode: Option<String>,
+    threshold_percent: Option<u32>,
     strategy: Option<String>,
     format: Option<String>,
     property_id: Option<String>,
@@ -575,14 +719,31 @@ struct ParsedArgs {
     solver_args: Vec<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
+    write_path: Option<String>,
+    check: bool,
 }
 
 fn parse_args(args: Vec<String>) -> ParsedArgs {
     let mut parsed = ParsedArgs::default();
+    parsed.repeat = 3;
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         if arg == "--json" {
             parsed.json = true;
+        } else if arg == "--check" {
+            parsed.check = true;
+        } else if arg == "--write" {
+            parsed.write_path = Some(String::new());
+        } else if let Some(value) = arg.strip_prefix("--write=") {
+            parsed.write_path = Some(value.to_string());
+        } else if arg == "--baseline" {
+            parsed.baseline_mode = Some("compare".to_string());
+        } else if let Some(value) = arg.strip_prefix("--baseline=") {
+            parsed.baseline_mode = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--threshold-percent=") {
+            parsed.threshold_percent = Some(value.parse().unwrap_or_else(|_| usage_exit()));
+        } else if let Some(value) = arg.strip_prefix("--repeat=") {
+            parsed.repeat = value.parse().unwrap_or_else(|_| usage_exit());
         } else if let Some(value) = arg.strip_prefix("--format=") {
             parsed.format = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--strategy=") {
@@ -650,7 +811,96 @@ fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'
         })
 }
 
+fn registry_benchmark_baseline_outputs(
+    summary_json: &str,
+    baseline_id: &str,
+    baseline_mode: &str,
+    threshold_percent: u32,
+) -> (Option<String>, Option<String>, bool) {
+    match baseline_mode {
+        "ignore" => (None, None, false),
+        "record" => {
+            let path = benchmark_baseline_path(baseline_id);
+            let comparison = if write_text_file(&path, summary_json).is_ok() {
+                Some(format!(
+                    "{{\"status\":\"recorded\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[]}}",
+                    path.replace('\\', "\\\\"),
+                    threshold_percent
+                ))
+            } else {
+                None
+            };
+            let text = comparison.as_ref().map(|_| {
+                format!(
+                    "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: recorded\nbaseline_regressions: none\n",
+                    path, threshold_percent
+                )
+            });
+            (comparison, text, false)
+        }
+        "compare" => {
+            let path = benchmark_baseline_path(baseline_id);
+            let Ok(body) = fs::read_to_string(&path) else {
+                let json = format!(
+                    "{{\"status\":\"missing\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[]}}",
+                    path.replace('\\', "\\\\"),
+                    threshold_percent
+                );
+                let text = format!(
+                    "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: missing\nbaseline_regressions: none\n",
+                    path, threshold_percent
+                );
+                return (Some(json), Some(text), false);
+            };
+            let current = match parse_benchmark_summary_json(summary_json) {
+                Ok(summary) => summary,
+                Err(_) => return (None, None, false),
+            };
+            let baseline = match parse_benchmark_summary_json(&body) {
+                Ok(summary) => summary,
+                Err(message) => {
+                    let json = format!(
+                        "{{\"status\":\"invalid\",\"baseline_path\":\"{}\",\"threshold_percent\":{},\"regressions\":[\"{}\"]}}",
+                        path.replace('\\', "\\\\"),
+                        threshold_percent,
+                        message.replace('\\', "\\\\").replace('"', "\\\"")
+                    );
+                    let text = format!(
+                        "baseline_path: {}\nbaseline_threshold_percent: {}\nbaseline_status: invalid\nbaseline_regressions:\n- {}\n",
+                        path, threshold_percent, message
+                    );
+                    return (Some(json), Some(text), false);
+                }
+            };
+            let comparison =
+                compare_benchmark_to_baseline(&current, &path, &baseline, threshold_percent);
+            let regression = comparison.status == "regressed";
+            (
+                Some(render_benchmark_comparison_json(&comparison)),
+                Some(render_benchmark_comparison_text(&comparison)),
+                regression,
+            )
+        }
+        other => {
+            eprintln!("unsupported benchmark baseline mode `{other}`");
+            process::exit(3);
+        }
+    }
+}
+
+fn registry_migration_output_path(model: &str, requested: &str) -> String {
+    if !requested.trim().is_empty() {
+        return requested.to_string();
+    }
+    let root = env::var("VALID_ARTIFACTS_DIR").unwrap_or_else(|_| "artifacts".to_string());
+    format!(
+        "{}/migrations/{}.snippet.rs",
+        root.trim_end_matches('/'),
+        model
+    )
+}
+
 fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]");
+    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--property=<id>] [--backend=<explicit|mock-bmc|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
     process::exit(3);
 }

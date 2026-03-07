@@ -214,6 +214,8 @@ fn field_type_label(field_type: &FieldType) -> String {
         FieldType::Bool => "bool".to_string(),
         FieldType::BoundedU8 { min, max } => format!("u8[{min}..{max}]"),
         FieldType::BoundedU16 { min, max } => format!("u16[{min}..{max}]"),
+        FieldType::BoundedU32 { min, max } => format!("u32[{min}..{max}]"),
+        FieldType::Enum { variants } => format!("enum[{}]", variants.join("|")),
     }
 }
 

@@ -59,9 +59,17 @@ registry file under `examples/valid_models.rs`:
 ```toml
 registry = "examples/valid_models.rs"
 default_backend = "explicit"
+default_property = ""
+default_solver_executable = ""
+default_solver_args = []
 suite_models = []
+benchmark_models = []
+benchmark_repeats = 3
 generated_tests_dir = "tests/generated"
 artifacts_dir = "artifacts"
+benchmarks_dir = "artifacts/benchmarks"
+benchmark_baseline_dir = "benchmarks/baselines"
+benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
 
@@ -73,7 +81,12 @@ cargo valid models
 cargo valid inspect refund-control
 cargo valid graph refund-control
 cargo valid readiness breakglass-access-regression
+cargo valid migrate counter
+cargo valid migrate counter --write
+cargo valid migrate counter --check
 cargo valid verify breakglass-access-regression
+cargo valid benchmark
+cargo valid benchmark --baseline=compare
 cargo valid suite
 ```
 
@@ -127,8 +140,16 @@ Primary commands:
   Render a model diagram in Mermaid, DOT, SVG, text, or JSON
 - `readiness <model>`
   Report capability-based migration findings and analysis-readiness gaps
+- `migrate <model>`
+  Print declarative transition snippets for step-based models. Add `--write`
+  to persist them under `artifacts/migrations/`, or add `--check` to run a
+  migration audit that reports action coverage and whether manual review is
+  still required.
 - `verify <model>`
   Verify one model and return `PASS` / `FAIL` / `UNKNOWN`
+- `benchmark [model]`
+  Run repeated verification timing for one model or for `benchmark_models`.
+  Use `--baseline=record` and `--baseline=compare` to gate regressions.
 - `explain <model>`
   Summarize why a failure likely happened
 - `coverage <model>`
@@ -156,8 +177,14 @@ cargo valid graph refund-control
 cargo valid graph refund-control --format=dot
 cargo valid graph refund-control --format=svg
 cargo valid readiness breakglass-access-regression
+cargo valid migrate counter
+cargo valid migrate counter --write
+cargo valid migrate counter --check
 cargo valid verify breakglass-access-regression
 cargo valid verify breakglass-access-regression --json
+cargo valid benchmark --json
+cargo valid benchmark --baseline=record
+cargo valid benchmark --baseline=compare --threshold-percent=25
 cargo valid suite
 cargo valid clean all
 ```
@@ -223,12 +250,20 @@ the types for you, there is also an attach-spec path:
 For ordinary Rust type declarations, you can also derive directly:
 
 ```rust
-use valid::{ValidAction, ValidState};
+use valid::{ValidAction, ValidEnum, ValidState};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValidEnum)]
+enum ReviewStage {
+    Draft,
+    Approved,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, ValidState)]
 struct State {
     #[valid(range = "0..=3")]
     x: u8,
+    #[valid(enum)]
+    review_stage: Option<ReviewStage>,
     locked: bool,
 }
 
@@ -248,12 +283,19 @@ Minimal example:
 ```rust
 use valid::{
     registry::run_registry_cli,
-    valid_actions, valid_model, valid_models, valid_state,
+    valid_actions, valid_model, valid_models, valid_state, ValidEnum,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValidEnum)]
+enum ReviewStage {
+    Draft,
+    Approved,
+}
 
 valid_state! {
     struct State {
         x: u8 [range = "0..=3"],
+        review_stage: ReviewStage,
         locked: bool,
     }
 }
@@ -268,15 +310,16 @@ valid_actions! {
 
 valid_model! {
     model CounterModel<State, Action>;
-    init [State { x: 0, locked: false }];
+    init [State { x: 0, review_stage: ReviewStage::Draft, locked: false }];
     step |state, action| {
         match action {
             Action::Inc if !state.locked && state.x < 3 => vec![State {
                 x: state.x + 1,
+                review_stage: state.review_stage,
                 locked: state.locked,
             }],
-            Action::Lock => vec![State { x: state.x, locked: true }],
-            Action::Unlock => vec![State { x: state.x, locked: false }],
+            Action::Lock => vec![State { x: state.x, review_stage: state.review_stage, locked: true }],
+            Action::Unlock => vec![State { x: state.x, review_stage: state.review_stage, locked: false }],
             _ => Vec::new(),
         }
     }
@@ -475,7 +518,8 @@ cargo valid verify iam-access \
 
 From another crate root, `cargo valid` auto-discovers `valid.toml` first, then
 falls back to `examples/valid_models.rs` or `src/bin/valid_models.rs` when
-present, so the common case can be as short as:
+present. If neither exists, it now errors instead of silently exposing bundled
+fixtures, so the common case can be as short as:
 
 ```sh
 cargo valid inspect my-model --json
@@ -487,6 +531,19 @@ To remove generated test files and artifact output:
 cargo valid clean all --json
 valid clean all --json
 ```
+
+To measure a practical suite repeatedly:
+
+```sh
+cargo valid benchmark --json
+cargo valid benchmark --baseline=record
+cargo valid benchmark --baseline=compare --threshold-percent=25
+cargo valid --registry examples/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --json
+```
+
+Benchmark baselines are meant to live in-repo under `benchmarks/baselines/` so
+CI can compare deterministic state-space metrics and elapsed time against a
+tracked reference set.
 
 ## Repository Layout
 

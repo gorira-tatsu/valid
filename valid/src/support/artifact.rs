@@ -48,3 +48,19 @@ pub fn selfcheck_report_path(suite_id: &str, run_id: &str) -> String {
         &format!("selfcheck/{suite_id}/{run_id}/report.json"),
     )
 }
+
+pub fn benchmark_report_path(report_id: &str) -> String {
+    path_from_env_or_default(
+        "VALID_BENCHMARKS_DIR",
+        "artifacts/benchmarks",
+        &format!("{report_id}.json"),
+    )
+}
+
+pub fn benchmark_baseline_path(report_id: &str) -> String {
+    path_from_env_or_default(
+        "VALID_BENCHMARK_BASELINES_DIR",
+        "artifacts/benchmarks/baselines",
+        &format!("{report_id}.json"),
+    )
+}

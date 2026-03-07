@@ -658,6 +658,7 @@ fn value_json(value: &Value) -> String {
     match value {
         Value::Bool(value) => value.to_string(),
         Value::UInt(value) => value.to_string(),
+        Value::EnumVariant { label, .. } => format!("\"{}\"", escape_json(label)),
     }
 }
 fn escape_json(input: &str) -> String {

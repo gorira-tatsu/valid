@@ -810,7 +810,9 @@ fn build_model_boundary_vectors(
         let (min, max) = match field.ty {
             crate::ir::FieldType::BoundedU8 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::BoundedU16 { min, max } => (min as u64, max as u64),
+            crate::ir::FieldType::BoundedU32 { min, max } => (min as u64, max as u64),
             crate::ir::FieldType::Bool => continue,
+            crate::ir::FieldType::Enum { .. } => continue,
         };
         for target in [min, max] {
             if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {

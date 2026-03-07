@@ -59,6 +59,7 @@ pub struct InspectStateField {
     pub name: String,
     pub rust_type: String,
     pub range: Option<String>,
+    pub variants: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +154,36 @@ pub struct LintResponse {
     pub model_id: String,
     pub capabilities: InspectCapabilities,
     pub findings: Vec<LintFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationSnippet {
+    pub code: String,
+    pub action: Option<String>,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationCheckResponse {
+    pub status: String,
+    pub mode: String,
+    pub verified_equivalence: bool,
+    pub total_action_count: usize,
+    pub snippet_action_count: usize,
+    pub covered_actions: Vec<String>,
+    pub missing_actions: Vec<String>,
+    pub reasons: Vec<String>,
+    pub next_steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub status: String,
+    pub model_id: String,
+    pub snippets: Vec<MigrationSnippet>,
+    pub check: Option<MigrationCheckResponse>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,11 +316,19 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                     crate::ir::FieldType::Bool => "bool".to_string(),
                     crate::ir::FieldType::BoundedU8 { .. } => "u8".to_string(),
                     crate::ir::FieldType::BoundedU16 { .. } => "u16".to_string(),
+                    crate::ir::FieldType::BoundedU32 { .. } => "u32".to_string(),
+                    crate::ir::FieldType::Enum { .. } => "enum".to_string(),
                 },
                 range: match field.ty {
                     crate::ir::FieldType::Bool => None,
                     crate::ir::FieldType::BoundedU8 { min, max } => Some(format!("{min}..={max}")),
                     crate::ir::FieldType::BoundedU16 { min, max } => Some(format!("{min}..={max}")),
+                    crate::ir::FieldType::BoundedU32 { min, max } => Some(format!("{min}..={max}")),
+                    crate::ir::FieldType::Enum { .. } => None,
+                },
+                variants: match &field.ty {
+                    crate::ir::FieldType::Enum { variants } => variants.clone(),
+                    _ => Vec::new(),
                 },
             })
             .collect(),
@@ -1268,14 +1307,15 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{}}}",
+            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{},\"variants\":{}}}",
             escape_json(&field.name),
             escape_json(&field.rust_type),
             field
                 .range
                 .as_ref()
                 .map(|range| format!("\"{}\"", escape_json(range)))
-                .unwrap_or_else(|| "null".to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            render_string_array(&field.variants)
         ));
     }
     out.push(']');
@@ -1376,15 +1416,21 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
     if !response.state_field_details.is_empty() {
         out.push_str("state_field_details:\n");
         for field in &response.state_field_details {
+            let variants = if field.variants.is_empty() {
+                String::new()
+            } else {
+                format!(" variants=[{}]", field.variants.join(", "))
+            };
             out.push_str(&format!(
-                "- {}: {}{}\n",
+                "- {}: {}{}{}\n",
                 field.name,
                 field.rust_type,
                 field
                     .range
                     .as_ref()
                     .map(|range| format!(" range={range}"))
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                variants
             ));
         }
     }
@@ -1532,6 +1578,7 @@ fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
         crate::ir::ExprIr::Literal(value) => match value {
             crate::ir::Value::Bool(value) => value.to_string(),
             crate::ir::Value::UInt(value) => value.to_string(),
+            crate::ir::Value::EnumVariant { label, .. } => label.clone(),
         },
         crate::ir::ExprIr::FieldRef(field) => field.clone(),
         crate::ir::ExprIr::Unary { op, expr } => match op {
@@ -1789,6 +1836,206 @@ pub fn render_lint_text(response: &LintResponse) -> String {
                 for line in snippet.lines() {
                     out.push_str(&format!("  | {line}\n"));
                 }
+            }
+        }
+    }
+    out
+}
+
+pub fn migration_from_inspect(
+    inspect: &InspectResponse,
+    lint: &LintResponse,
+    include_check: bool,
+) -> MigrationResponse {
+    let snippets = lint
+        .findings
+        .iter()
+        .filter_map(|finding| {
+            finding.snippet.as_ref().map(|snippet| MigrationSnippet {
+                code: finding.code.clone(),
+                action: finding
+                    .message
+                    .strip_prefix("action ")
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .map(str::to_string),
+                snippet: snippet.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let check = include_check.then(|| migration_check_from_inspect(inspect, &snippets));
+    MigrationResponse {
+        schema_version: lint.schema_version.clone(),
+        request_id: lint.request_id.clone(),
+        status: if snippets.is_empty() {
+            "no-op".to_string()
+        } else {
+            "ok".to_string()
+        },
+        model_id: lint.model_id.clone(),
+        snippets,
+        check,
+    }
+}
+
+fn migration_check_from_inspect(
+    inspect: &InspectResponse,
+    snippets: &[MigrationSnippet],
+) -> MigrationCheckResponse {
+    let covered_actions = snippets
+        .iter()
+        .filter_map(|snippet| snippet.action.clone())
+        .collect::<Vec<_>>();
+    let missing_actions = inspect
+        .action_details
+        .iter()
+        .map(|action| action.action_id.clone())
+        .filter(|action_id| !covered_actions.iter().any(|covered| covered == action_id))
+        .collect::<Vec<_>>();
+    let mut next_steps = Vec::new();
+    let mut reasons = inspect.capabilities.reasons.clone();
+    let (status, mode, verified_equivalence) = if inspect.machine_ir_ready {
+        next_steps.push(
+            "model already has declarative transitions; use verify/benchmark directly".to_string(),
+        );
+        ("already-declarative", "identity", true)
+    } else if snippets.is_empty() {
+        next_steps.push(
+            "no migration snippets were produced; add explicit action metadata before migrating"
+                .to_string(),
+        );
+        ("no-candidates", "heuristic-action-coverage", false)
+    } else if missing_actions.is_empty() {
+        next_steps.push(
+            "review each generated transition and validate property results against the original step model".to_string(),
+        );
+        if reasons.is_empty() {
+            reasons.push("manual_review_required".to_string());
+        }
+        ("candidate-complete", "heuristic-action-coverage", false)
+    } else {
+        next_steps.push(format!(
+            "fill in declarative transitions for missing actions: {}",
+            missing_actions.join(", ")
+        ));
+        next_steps.push(
+            "once all actions are covered, rerun verify and benchmark to compare behavior"
+                .to_string(),
+        );
+        ("partial", "heuristic-action-coverage", false)
+    };
+    MigrationCheckResponse {
+        status: status.to_string(),
+        mode: mode.to_string(),
+        verified_equivalence,
+        total_action_count: inspect.action_details.len(),
+        snippet_action_count: covered_actions.len(),
+        covered_actions,
+        missing_actions,
+        reasons,
+        next_steps,
+    }
+}
+
+pub fn render_migration_json(response: &MigrationResponse) -> String {
+    let snippets = response
+        .snippets
+        .iter()
+        .map(|snippet| {
+            format!(
+                "{{\"code\":\"{}\",\"action\":{},\"snippet\":\"{}\"}}",
+                escape_json(&snippet.code),
+                snippet
+                    .action
+                    .as_ref()
+                    .map(|value| format!("\"{}\"", escape_json(value)))
+                    .unwrap_or_else(|| "null".to_string()),
+                escape_json(&snippet.snippet)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let check = response
+        .check
+        .as_ref()
+        .map(|check| {
+            format!(
+                "{{\"status\":\"{}\",\"mode\":\"{}\",\"verified_equivalence\":{},\"total_action_count\":{},\"snippet_action_count\":{},\"covered_actions\":{},\"missing_actions\":{},\"reasons\":{},\"next_steps\":{}}}",
+                escape_json(&check.status),
+                escape_json(&check.mode),
+                check.verified_equivalence,
+                check.total_action_count,
+                check.snippet_action_count,
+                render_string_array(&check.covered_actions),
+                render_string_array(&check.missing_actions),
+                render_string_array(&check.reasons),
+                render_string_array(&check.next_steps)
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"snippets\":[{}],\"check\":{}}}",
+        escape_json(&response.schema_version),
+        escape_json(&response.request_id),
+        escape_json(&response.status),
+        escape_json(&response.model_id),
+        snippets,
+        check
+    )
+}
+
+pub fn render_migration_text(response: &MigrationResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("model_id: {}\n", response.model_id));
+    out.push_str(&format!("status: {}\n", response.status));
+    if response.snippets.is_empty() {
+        out.push_str("snippets: none\n");
+    } else {
+        out.push_str("snippets:\n");
+        for snippet in &response.snippets {
+            out.push_str(&format!(
+                "- {}\n",
+                snippet
+                    .action
+                    .as_ref()
+                    .map(|action| format!("action {action}"))
+                    .unwrap_or_else(|| snippet.code.clone())
+            ));
+            for line in snippet.snippet.lines() {
+                out.push_str(&format!("  | {line}\n"));
+            }
+        }
+    }
+    if let Some(check) = &response.check {
+        out.push_str("check:\n");
+        out.push_str(&format!("  status: {}\n", check.status));
+        out.push_str(&format!("  mode: {}\n", check.mode));
+        out.push_str(&format!(
+            "  verified_equivalence: {}\n",
+            check.verified_equivalence
+        ));
+        out.push_str(&format!(
+            "  covered_actions: {}\n",
+            if check.covered_actions.is_empty() {
+                "none".to_string()
+            } else {
+                check.covered_actions.join(", ")
+            }
+        ));
+        out.push_str(&format!(
+            "  missing_actions: {}\n",
+            if check.missing_actions.is_empty() {
+                "none".to_string()
+            } else {
+                check.missing_actions.join(", ")
+            }
+        ));
+        if !check.reasons.is_empty() {
+            out.push_str(&format!("  reasons: {}\n", check.reasons.join(", ")));
+        }
+        if !check.next_steps.is_empty() {
+            out.push_str("  next_steps:\n");
+            for step in &check.next_steps {
+                out.push_str(&format!("    - {step}\n"));
             }
         }
     }

@@ -154,6 +154,15 @@ fn lower_type(input: &str) -> Option<FieldType> {
         });
     }
 
+    if input.starts_with("u32[") && input.ends_with(']') {
+        let range = &input[4..input.len() - 1];
+        let (min, max) = range.split_once("..")?;
+        return Some(FieldType::BoundedU32 {
+            min: min.parse().ok()?,
+            max: max.parse().ok()?,
+        });
+    }
+
     None
 }
 
@@ -416,6 +425,35 @@ property P_SAFE:
         assert!(matches!(
             field.ty,
             crate::ir::FieldType::BoundedU16 { min: 0, max: 5000 }
+        ));
+    }
+
+    #[test]
+    fn lowers_u32_state_fields() {
+        let source = r#"
+model CostControl
+state:
+  spend: u32[0..500000]
+  approved: bool
+init:
+  spend = 0
+  approved = false
+action Raise:
+  pre: spend <= 499000
+  post:
+    spend = spend + 1000
+property P_SAFE:
+  invariant: spend <= 500000
+"#;
+        let model = compile_model(source).expect("compile");
+        let field = &model.state_fields[0];
+        assert_eq!(field.name, "spend");
+        assert!(matches!(
+            field.ty,
+            crate::ir::FieldType::BoundedU32 {
+                min: 0,
+                max: 500000
+            }
         ));
     }
 }

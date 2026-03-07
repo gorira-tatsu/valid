@@ -1,0 +1,22 @@
+name: ci-benchmark
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Compare project benchmark baselines
+        run: cargo run --bin cargo-valid -- benchmark --baseline=compare --json
+      - name: Compare enterprise registry benchmark baselines
+        run: cargo run --bin cargo-valid -- --registry examples/enterprise_scale_registry.rs benchmark access-review-scale --repeat=5 --baseline=compare --json
+      - name: Compare enterprise quota benchmark baselines
+        run: cargo run --bin cargo-valid -- --registry examples/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --baseline=compare --json

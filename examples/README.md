@@ -53,8 +53,14 @@ cargo valid models
 cargo valid inspect refund-control
 cargo valid graph refund-control
 cargo valid readiness breakglass-access-regression
+cargo valid migrate counter
+cargo valid migrate counter --write
+cargo valid migrate counter --check
 cargo valid verify breakglass-access-regression
 cargo valid generate-tests refund-control --strategy=path
+cargo valid benchmark --json
+cargo valid benchmark --baseline=record
+cargo valid benchmark --baseline=compare --threshold-percent=25
 cargo valid suite
 cargo valid clean all
 ```
@@ -75,7 +81,9 @@ Command meanings:
 - `inspect <model>`: show the model shape without verifying it
 - `graph <model>`: render a Mermaid, DOT, or SVG diagram for the model shape
 - `readiness <model>`: show capability-based migration hints and readiness findings
+- `migrate <model>`: emit declarative transition snippets for step-based models, optionally with `--write` or `--check`
 - `verify <model>`: verify one model
+- `benchmark [model]`: run repeated verification timing for one model or the configured benchmark set, optionally with baseline record/compare
 - `replay <model>`: replay an explicit action sequence and inspect the terminal state
 - `suite`: run `verify` for every model exported by the registry file
 - `clean`: remove generated tests and artifact output
@@ -86,6 +94,7 @@ Command meanings:
 - `iam-access` is solver-ready because it uses declarative `transitions { ... }`
 - declarative graphs now show guard conditions, concrete field updates, and path tags directly
 - `transition_details.path_tags` and `coverage.path_tags` expose the shared decision/path vocabulary
+- `access-review-scale` also exercises finite enum state via `ReviewStage`
 
 If you prefer ordinary Rust type declarations instead of `valid_state!` and
 `valid_actions!`, the crate also supports `#[derive(ValidState)]` and
@@ -116,8 +125,8 @@ current lowering path. It uses explicit tags plus richer boolean expressions
 such as `==`, `||`, and parenthesized guards / properties.
 
 `enterprise_scale_registry.rs` pushes that further with larger practical state,
-bounded `u16` counters, and richer guard arithmetic such as `>=`, `!=`, and
-subtraction. It is intended as the current “can this survive a heavier
+bounded `u16` and `u32` counters, and richer guard arithmetic such as `>=`,
+`!=`, and subtraction. It is intended as the current “can this survive a heavier
 business model?” suite.
 
 `practical_use_cases_registry.rs` is the business-oriented suite for trying the
@@ -142,10 +151,16 @@ cargo valid --registry examples/practical_use_cases_registry.rs coverage refund-
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control --format=svg
 cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
+cargo valid --registry examples/practical_use_cases_registry.rs benchmark refund-control --repeat=5 --json
+cargo valid --registry examples/practical_use_cases_registry.rs benchmark refund-control --repeat=5 --baseline=record
 cargo valid --registry examples/practical_use_cases_registry.rs suite
 cargo valid --registry examples/enterprise_scale_registry.rs inspect access-review-scale
 cargo valid --registry examples/enterprise_scale_registry.rs verify quota-guardrail-regression
+cargo valid --registry examples/enterprise_scale_registry.rs benchmark quota-guardrail-regression --property=P_EXPORT_REQUIRES_BUDGET_DISCIPLINE --repeat=5 --json
 ```
+
+Tracked benchmark baselines live under `benchmarks/baselines/` so CI can compare
+the practical and enterprise suites against committed reference numbers.
 
 ## Rust model examples
 

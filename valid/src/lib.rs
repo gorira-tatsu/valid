@@ -1,6 +1,8 @@
 extern crate self as valid;
 
 pub mod api;
+pub mod benchmark;
+#[doc(hidden)]
 pub mod bundled_models;
 pub mod contract;
 pub mod coverage;
@@ -19,4 +21,4 @@ pub mod solver;
 pub mod support;
 pub mod testgen;
 
-pub use valid_derive::{valid_model, ValidAction, ValidState};
+pub use valid_derive::{valid_model, ValidAction, ValidEnum, ValidState};

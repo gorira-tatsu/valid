@@ -33,11 +33,17 @@ pub fn derive_valid_state(input: TokenStream) -> TokenStream {
             .as_ref()
             .map(|value| format!("Some({value:?})"))
             .unwrap_or_else(|| "None".to_string());
+        let variants = if field.is_enum {
+            format!("Some(<{} as ::valid::modeling::FiniteValueSpec>::variant_labels().to_vec())", field.ty)
+        } else {
+            "None".to_string()
+        };
         descriptors.push_str(&format!(
-            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range} }}",
+            "::valid::modeling::StateFieldDescriptor {{ name: \"{name}\", rust_type: {ty:?}, range: {range}, variants: {variants} }}",
             name = field.name,
             ty = field.ty,
-            range = range
+            range = range,
+            variants = variants
         ));
     }
     format!(
@@ -60,6 +66,57 @@ impl ::valid::modeling::StateSpec for {name} {{
     )
     .parse()
     .expect("ValidState derive must emit valid tokens")
+}
+
+#[proc_macro_derive(ValidEnum)]
+pub fn derive_valid_enum(input: TokenStream) -> TokenStream {
+    let parsed = parse_enum(input);
+    let labels = parsed
+        .variants
+        .iter()
+        .map(|variant| format!("{:?}", variant.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let index_match = parsed
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(index, variant)| format!("Self::{} => {}", variant.name, index))
+        .collect::<Vec<_>>()
+        .join(",");
+    let label_match = parsed
+        .variants
+        .iter()
+        .map(|variant| format!("Self::{} => {:?}", variant.name, variant.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"
+impl ::valid::modeling::FiniteValueSpec for {name} {{
+    fn variant_labels() -> &'static [&'static str] {{
+        &[{labels}]
+    }}
+
+    fn variant_index(&self) -> u64 {{
+        (match self {{
+            {index_match}
+        }}) as u64
+    }}
+
+    fn variant_label(&self) -> &'static str {{
+        match self {{
+            {label_match}
+        }}
+    }}
+}}
+"#,
+        name = parsed.name,
+        labels = labels,
+        index_match = index_match,
+        label_match = label_match,
+    )
+    .parse()
+    .expect("ValidEnum derive must emit valid tokens")
 }
 
 #[proc_macro_derive(ValidAction, attributes(valid))]
@@ -139,6 +196,7 @@ struct ParsedField {
     name: String,
     ty: String,
     range: Option<String>,
+    is_enum: bool,
 }
 
 struct ParsedEnum {
@@ -362,16 +420,25 @@ fn parse_struct_field(tokens: Vec<TokenTree>) -> ParsedField {
         .rev()
         .find_map(as_ident_name)
         .expect("field must have a name");
-    let ty = filtered[colon + 1..]
-        .iter()
-        .map(TokenTree::to_string)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let ty = normalize_type_tokens(&filtered[colon + 1..]);
     ParsedField {
         name,
         ty,
         range: attrs.get("range").cloned(),
+        is_enum: attrs.contains_key("enum"),
     }
+}
+
+fn normalize_type_tokens(tokens: &[TokenTree]) -> String {
+    tokens
+        .iter()
+        .map(TokenTree::to_string)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" < ", "<")
+        .replace("< ", "<")
+        .replace(" >", ">")
+        .replace(" , ", ", ")
 }
 
 fn parse_enum(input: TokenStream) -> ParsedEnum {
@@ -471,7 +538,12 @@ fn parse_valid_attribute_group(
         let eq = entry
             .iter()
             .position(|token| matches!(token, TokenTree::Punct(p) if p.as_char() == '='));
-        let Some(eq) = eq else { continue };
+        let Some(eq) = eq else {
+            if let Some(key) = entry.iter().find_map(as_ident_name) {
+                values.insert(key, "true".to_string());
+            }
+            continue;
+        };
         let key = entry[..eq]
             .iter()
             .find_map(as_ident_name)

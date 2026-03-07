@@ -82,6 +82,9 @@ pub fn render_model_mermaid(response: &InspectResponse) -> String {
             if let Some(range) = &field.range {
                 lines.push(format!("range: {range}"));
             }
+            if !field.variants.is_empty() {
+                lines.push(format!("variants: {}", field.variants.join(", ")));
+            }
             out.push_str(&format!("    {node}[\"{}\"]\n", mermaid_label(&lines)));
             out.push_str(&format!("  {model_node} --> {node}\n"));
         }
@@ -224,6 +227,9 @@ pub fn render_model_dot(response: &InspectResponse) -> String {
             if let Some(range) = &field.range {
                 lines.push(format!("range: {range}"));
             }
+            if !field.variants.is_empty() {
+                lines.push(format!("variants: {}", field.variants.join(", ")));
+            }
             (node, dot_label(&lines), model_node.clone())
         }),
     );
@@ -353,6 +359,9 @@ pub fn render_model_svg(response: &InspectResponse) -> String {
                 let mut line = format!("{}: {}", field.name, field.rust_type);
                 if let Some(range) = &field.range {
                     line.push_str(&format!(" | range: {range}"));
+                }
+                if !field.variants.is_empty() {
+                    line.push_str(&format!(" | variants: {}", field.variants.join(", ")));
                 }
                 line
             })
@@ -602,6 +611,7 @@ mod tests {
                 name: "x".to_string(),
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
+                variants: Vec::new(),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -660,6 +670,7 @@ mod tests {
                 name: "x".to_string(),
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
+                variants: Vec::new(),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -721,6 +732,7 @@ mod tests {
                 name: "x".to_string(),
                 rust_type: "u8".to_string(),
                 range: Some("0..=3".to_string()),
+                variants: Vec::new(),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),

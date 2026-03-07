@@ -272,6 +272,89 @@ fn cargo_valid_lints_registered_model_with_migration_hints() {
 }
 
 #[test]
+fn cargo_valid_migrate_surfaces_transition_snippets() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("migrate")
+        .arg("counter")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid migrate should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"ok\""));
+    assert!(stdout.contains("\"snippets\":["));
+    assert!(stdout.contains("transition INC"));
+}
+
+#[test]
+fn cargo_valid_migrate_can_write_snippets_to_file() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output_path = std::env::temp_dir().join(format!(
+        "valid-migrate-{}.rs",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("migrate")
+        .arg("counter")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--json")
+        .output()
+        .expect("cargo-valid migrate write should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"written\""));
+    let body = fs::read_to_string(&output_path).expect("migration output file should exist");
+    assert!(body.contains("transition INC"));
+    let _ = fs::remove_file(output_path);
+}
+
+#[test]
+fn cargo_valid_migrate_check_marks_step_models_for_manual_review() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("migrate")
+        .arg("counter")
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid migrate check should run");
+    assert_eq!(output.status.code(), Some(6));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"check\":{"));
+    assert!(stdout.contains("\"status\":\"candidate-complete\""));
+    assert!(stdout.contains("\"verified_equivalence\":false"));
+    assert!(stdout.contains("\"covered_actions\":[\"INC\",\"LOCK\",\"UNLOCK\"]"));
+}
+
+#[test]
+fn cargo_valid_migrate_check_passes_for_declarative_models() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("migrate")
+        .arg("refund-control")
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid migrate check should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"no-op\""));
+    assert!(stdout.contains("\"check\":{"));
+    assert!(stdout.contains("\"status\":\"already-declarative\""));
+    assert!(stdout.contains("\"verified_equivalence\":true"));
+}
+
+#[test]
 fn cargo_valid_explain_includes_review_metadata() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
@@ -635,6 +718,9 @@ fn cargo_valid_init_writes_valid_toml() {
     let body = fs::read_to_string(project_dir.join("valid.toml")).expect("valid.toml must exist");
     assert!(body.contains("registry = \"examples/valid_models.rs\""));
     assert!(body.contains("default_backend = \"explicit\""));
+    assert!(body.contains("default_solver_args = []"));
+    assert!(body.contains("benchmark_repeats = 3"));
+    assert!(body.contains("benchmarks_dir = \"artifacts/benchmarks\""));
     assert!(body.contains("generated_tests_dir = \"tests/generated\""));
     assert!(project_dir
         .join("examples")
@@ -645,6 +731,29 @@ fn cargo_valid_init_writes_valid_toml() {
         .join("generated")
         .join(".gitkeep")
         .exists());
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_project_first_mode_requires_registry_or_valid_toml() {
+    let _guard = cargo_lock().lock().unwrap();
+    let project_dir = unique_temp_project_dir("valid-project-first");
+    fs::create_dir_all(&project_dir).expect("temp project dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        "[package]\nname = \"valid-project-first-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .expect("temp Cargo.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .current_dir(&project_dir)
+        .arg("models")
+        .output()
+        .expect("cargo-valid models should run");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("project-first mode expects valid.toml or --registry"));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -705,6 +814,78 @@ fn cargo_valid_suite_uses_valid_toml_suite_models() {
     assert!(!stdout.contains("\"model_id\":\"counter\""));
 
     let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_benchmark_uses_project_config_targets() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .arg("benchmark")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid benchmark should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"artifact_path\""));
+    assert!(stdout.contains("\"runs\":["));
+    assert!(stdout.contains("refund-control"));
+    assert!(stdout.contains("\"average_elapsed_ms\""));
+}
+
+#[test]
+fn cargo_valid_benchmark_can_record_and_compare_baselines() {
+    let _guard = cargo_lock().lock().unwrap();
+    let baseline_dir = std::env::temp_dir().join(format!(
+        "valid-bench-baselines-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&baseline_dir).expect("baseline dir");
+
+    let record = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(manifest_path())
+        .arg("--file")
+        .arg(example_registry_file())
+        .arg("benchmark")
+        .arg("failing-counter")
+        .arg("--repeat=1")
+        .arg("--baseline=record")
+        .arg("--json")
+        .env("VALID_BENCHMARK_BASELINES_DIR", &baseline_dir)
+        .output()
+        .expect("cargo-valid benchmark record should run");
+    assert_eq!(record.status.code(), Some(0));
+    let record_stdout = String::from_utf8_lossy(&record.stdout);
+    assert!(record_stdout.contains("\"status\":\"recorded\""));
+
+    let compare = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(manifest_path())
+        .arg("--file")
+        .arg(example_registry_file())
+        .arg("benchmark")
+        .arg("failing-counter")
+        .arg("--repeat=1")
+        .arg("--baseline=compare")
+        .arg("--threshold-percent=1000")
+        .arg("--json")
+        .env("VALID_BENCHMARK_BASELINES_DIR", &baseline_dir)
+        .output()
+        .expect("cargo-valid benchmark compare should run");
+    assert_eq!(compare.status.code(), Some(0));
+    let compare_stdout = String::from_utf8_lossy(&compare.stdout);
+    assert!(compare_stdout.contains("\"baseline\""));
+    assert!(compare_stdout.contains("\"status\":\"ok\""));
+
+    let _ = fs::remove_dir_all(baseline_dir);
 }
 
 #[test]

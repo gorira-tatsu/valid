@@ -62,6 +62,54 @@ impl IntoModelValue for u64 {
     }
 }
 
+pub trait FiniteValueSpec: Clone + Debug + Eq + Hash {
+    fn variant_labels() -> &'static [&'static str];
+    fn variant_index(&self) -> u64;
+    fn variant_label(&self) -> &'static str;
+}
+
+impl<T> FiniteValueSpec for Option<T>
+where
+    T: FiniteValueSpec,
+{
+    fn variant_labels() -> &'static [&'static str] {
+        let mut labels = Vec::with_capacity(T::variant_labels().len() + 1);
+        labels.push("None");
+        labels.extend(
+            T::variant_labels()
+                .iter()
+                .map(|label| Box::leak(format!("Some({label})").into_boxed_str()) as &'static str),
+        );
+        Box::leak(labels.into_boxed_slice())
+    }
+
+    fn variant_index(&self) -> u64 {
+        match self {
+            None => 0,
+            Some(value) => value.variant_index() + 1,
+        }
+    }
+
+    fn variant_label(&self) -> &'static str {
+        match self {
+            None => "None",
+            Some(value) => Box::leak(format!("Some({})", value.variant_label()).into_boxed_str()),
+        }
+    }
+}
+
+impl<T> IntoModelValue for T
+where
+    T: FiniteValueSpec,
+{
+    fn into_model_value(self) -> Value {
+        Value::EnumVariant {
+            label: self.variant_label().to_string(),
+            index: self.variant_index(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelingRunStatus {
     Pass,
@@ -107,6 +155,7 @@ pub struct StateFieldDescriptor {
     pub name: &'static str,
     pub rust_type: &'static str,
     pub range: Option<&'static str>,
+    pub variants: Option<Vec<&'static str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -505,6 +554,7 @@ macro_rules! valid_state {
                             name: stringify!($field),
                             rust_type: stringify!($field_ty),
                             range: $crate::valid_state!(@range $($range)?),
+                            variants: None,
                         }
                     ),+
                 ]
@@ -547,6 +597,7 @@ macro_rules! valid_state_spec {
                             name: stringify!($field),
                             rust_type: stringify!($field_ty),
                             range: $crate::valid_state!(@range $($range)?),
+                            variants: None,
                         }
                     ),+
                 ]
@@ -1650,6 +1701,7 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let enum_literals = build_machine_enum_literal_map::<M>();
 
     let init = state_fields
         .iter()
@@ -1676,7 +1728,7 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
     let actions = transitions
         .into_iter()
         .map(|transition| {
-            let guard = lower_machine_expr(transition.guard).ok_or_else(|| {
+            let guard = lower_machine_expr_with_enums(transition.guard, &enum_literals).ok_or_else(|| {
                 format!(
                     "unsupported machine guard expression `{}`",
                     transition.guard
@@ -1686,7 +1738,8 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
                 .updates
                 .iter()
                 .map(|update| {
-                    let value = lower_machine_expr(update.expr).ok_or_else(|| {
+                    let value =
+                        lower_machine_expr_with_enums(update.expr, &enum_literals).ok_or_else(|| {
                         format!("unsupported machine update expression `{}`", update.expr)
                     })?;
                     Ok(UpdateIr {
@@ -1725,12 +1778,15 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
     let properties = M::properties()
         .into_iter()
         .map(|property| {
-            let expr = property.expr.and_then(lower_machine_expr).ok_or_else(|| {
+            let expr = property
+                .expr
+                .and_then(|expr| lower_machine_expr_with_enums(expr, &enum_literals))
+                .ok_or_else(|| {
                 format!(
                     "machine property `{}` is not representable in the current IR subset",
                     property.property_id
                 )
-            })?;
+                })?;
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
                 kind: property.property_kind,
@@ -1749,6 +1805,11 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
 }
 
 fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, String> {
+    if let Some(variants) = &field.variants {
+        return Ok(FieldType::Enum {
+            variants: variants.iter().map(|item| item.to_string()).collect(),
+        });
+    }
     match field.rust_type {
         "bool" => Ok(FieldType::Bool),
         "u8" => {
@@ -1779,13 +1840,74 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
                 max: max as u16,
             })
         }
+        "u32" => {
+            let (min, max) = parse_inclusive_range(field.range).unwrap_or((0, u32::MAX as u64));
+            if max > u32::MAX as u64 {
+                return Err(format!(
+                    "range `{}` exceeds supported u32 bounds for field `{}`",
+                    field.range.unwrap_or("0..=4294967295"),
+                    field.name
+                ));
+            }
+            Ok(FieldType::BoundedU32 {
+                min: min as u32,
+                max: max as u32,
+            })
+        }
         other => Err(format!(
             "unsupported rust field type `{other}` for machine IR lowering"
         )),
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn lower_machine_expr(input: &str) -> Option<ExprIr> {
+    lower_machine_expr_with_enums(input, &BTreeMap::new())
+}
+
+fn build_machine_enum_literal_map<M: VerifiedMachine>() -> BTreeMap<String, (String, u64)> {
+    let mut literals = BTreeMap::new();
+    for field in M::State::state_fields() {
+        if let Some(variants) = field.variants {
+            for (index, variant) in variants.iter().enumerate() {
+                literals.insert(
+                    format!("{}::{}", field.rust_type, variant),
+                    ((*variant).to_string(), index as u64),
+                );
+                literals.entry((*variant).to_string()).or_insert_with(|| {
+                    ((*variant).to_string(), index as u64)
+                });
+                if let Some(inner_ty) = option_inner_rust_type(field.rust_type) {
+                    if let Some(inner_variant) =
+                        variant.strip_prefix("Some(").and_then(|value| value.strip_suffix(')'))
+                    {
+                        literals.insert(
+                            format!("Some({inner_ty}::{inner_variant})"),
+                            ((*variant).to_string(), index as u64),
+                        );
+                    } else if *variant == "None" {
+                        literals.insert("Option::None".to_string(), ((*variant).to_string(), index as u64));
+                    }
+                }
+            }
+        }
+    }
+    literals
+}
+
+fn option_inner_rust_type(rust_type: &str) -> Option<String> {
+    let normalized = rust_type.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    normalized
+        .strip_prefix("Option<")
+        .and_then(|value| value.strip_suffix('>'))
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+}
+
+fn lower_machine_expr_with_enums(
+    input: &str,
+    enum_literals: &BTreeMap<String, (String, u64)>,
+) -> Option<ExprIr> {
     let trimmed = strip_wrapping_machine_parens(input.trim());
     let normalized = trimmed.strip_prefix("state.").unwrap_or(trimmed).trim();
     if normalized == "true" {
@@ -1794,83 +1916,89 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
     if normalized == "false" {
         return Some(ExprIr::Literal(Value::Bool(false)));
     }
+    if let Some((label, index)) = enum_literals.get(normalized) {
+        return Some(ExprIr::Literal(Value::EnumVariant {
+            label: label.clone(),
+            index: *index,
+        }));
+    }
     if let Ok(value) = normalized.parse::<u64>() {
         return Some(ExprIr::Literal(Value::UInt(value)));
     }
     if let Some(rest) = normalized.strip_prefix('!') {
         return Some(ExprIr::Unary {
             op: UnaryOp::Not,
-            expr: Box::new(lower_machine_expr(rest.trim())?),
+            expr: Box::new(lower_machine_expr_with_enums(rest.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "||") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Or,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "&&") {
         return Some(ExprIr::Binary {
             op: BinaryOp::And,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "!=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::NotEqual,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, ">=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::GreaterThanOrEqual,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "<=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThanOrEqual,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, ">") {
         return Some(ExprIr::Binary {
             op: BinaryOp::GreaterThan,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "<") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThan,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "==") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Equal,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "-") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Sub,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     if let Some((left, right)) = split_top_level_machine(normalized, "+") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Add,
-            left: Box::new(lower_machine_expr(left.trim())?),
-            right: Box::new(lower_machine_expr(right.trim())?),
+            left: Box::new(lower_machine_expr_with_enums(left.trim(), enum_literals)?),
+            right: Box::new(lower_machine_expr_with_enums(right.trim(), enum_literals)?),
         });
     }
     let normalized = normalized
@@ -2299,7 +2427,7 @@ mod tests {
     };
     use crate::{
         engine::CheckOutcome,
-        ir::{BinaryOp, ExprIr},
+        ir::{BinaryOp, ExprIr, FieldType, Value},
         valid_actions, valid_state,
     };
 
@@ -2488,6 +2616,26 @@ mod tests {
         Lock,
     }
 
+    #[derive(crate::ValidEnum, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    enum ReviewStage {
+        Draft,
+        Approved,
+    }
+
+    #[derive(crate::ValidState, Debug, Clone, PartialEq, Eq, Hash)]
+    struct EnumState {
+        #[valid(enum)]
+        review_stage: ReviewStage,
+        active: bool,
+    }
+
+    #[derive(crate::ValidState, Debug, Clone, PartialEq, Eq, Hash)]
+    struct OptionalEnumState {
+        #[valid(enum)]
+        review_stage: Option<ReviewStage>,
+        active: bool,
+    }
+
     #[test]
     fn derive_macros_attach_model_traits() {
         let snapshot = DerivedState {
@@ -2502,6 +2650,48 @@ mod tests {
         assert_eq!(actions[0].action_id, "INC");
         assert_eq!(actions[0].reads, &["x"]);
         assert_eq!(actions[1].writes, &["locked"]);
+    }
+
+    #[test]
+    fn valid_enum_fields_expose_variants_and_snapshot_labels() {
+        let snapshot = EnumState {
+            review_stage: ReviewStage::Approved,
+            active: true,
+        }
+        .snapshot();
+        assert_eq!(
+            snapshot.get("review_stage"),
+            Some(&crate::ir::Value::EnumVariant {
+                label: "Approved".to_string(),
+                index: 1,
+            })
+        );
+        let fields = state_field_descriptors::<EnumState>();
+        assert_eq!(
+            fields[0].variants.as_ref().unwrap(),
+            &vec!["Draft", "Approved"]
+        );
+    }
+
+    #[test]
+    fn optional_enum_fields_expose_none_and_some_variants() {
+        let snapshot = OptionalEnumState {
+            review_stage: Some(ReviewStage::Approved),
+            active: false,
+        }
+        .snapshot();
+        assert_eq!(
+            snapshot.get("review_stage"),
+            Some(&crate::ir::Value::EnumVariant {
+                label: "Some(Approved)".to_string(),
+                index: 2,
+            })
+        );
+        let fields = state_field_descriptors::<OptionalEnumState>();
+        assert_eq!(
+            fields[0].variants.as_ref().unwrap(),
+            &vec!["None", "Some(Draft)", "Some(Approved)"]
+        );
     }
 
     valid_state! {
@@ -2582,6 +2772,80 @@ mod tests {
             }
         ));
         assert_eq!(model.actions[0].updates[0].field, "attached");
+    }
+
+    valid_derive::valid_model! {
+        model ReviewStageModel<EnumState, AttachedAction>;
+        init [EnumState {
+            review_stage: ReviewStage::Draft,
+            active: false,
+        }];
+        transitions {
+            transition Inc [tags = ["approval_path"]] when |state| state.review_stage == ReviewStage::Draft => [EnumState {
+                review_stage: ReviewStage::Approved,
+                active: state.active,
+            }];
+            transition Lock [tags = ["deny_path"]] when |state| state.review_stage == ReviewStage::Approved => [EnumState {
+                review_stage: state.review_stage,
+                active: true,
+            }];
+        }
+        properties {
+            invariant P_ACTIVE_REQUIRES_APPROVAL |state| state.active == false || state.review_stage == ReviewStage::Approved;
+        }
+    }
+
+    #[test]
+    fn declarative_model_can_lower_enum_literals() {
+        let model = lower_machine_model::<ReviewStageModel>().expect("enum lowering should work");
+        assert!(matches!(
+            model.state_fields[0].ty,
+            FieldType::Enum { .. }
+        ));
+        assert!(matches!(
+            model.actions[0].guard,
+            ExprIr::Binary { op: BinaryOp::Equal, .. }
+        ));
+        assert!(matches!(
+            model.actions[0].updates[0].value,
+            ExprIr::Literal(Value::EnumVariant { .. })
+        ));
+    }
+
+    valid_derive::valid_model! {
+        model OptionalReviewStageModel<OptionalEnumState, AttachedAction>;
+        init [OptionalEnumState {
+            review_stage: None,
+            active: false,
+        }];
+        transitions {
+            transition Inc [tags = ["approval_path"]] when |state| state.review_stage == None => [OptionalEnumState {
+                review_stage: Some(ReviewStage::Approved),
+                active: state.active,
+            }];
+            transition Lock [tags = ["deny_path"]] when |state| state.review_stage == Some(ReviewStage::Approved) => [OptionalEnumState {
+                review_stage: state.review_stage,
+                active: true,
+            }];
+        }
+        properties {
+            invariant P_ACTIVE_REQUIRES_OPTIONAL_APPROVAL |state| state.active == false || state.review_stage == Some(ReviewStage::Approved);
+        }
+    }
+
+    #[test]
+    fn declarative_model_can_lower_optional_enum_literals() {
+        let model =
+            lower_machine_model::<OptionalReviewStageModel>().expect("optional enum lowering should work");
+        assert!(matches!(model.state_fields[0].ty, FieldType::Enum { .. }));
+        assert!(matches!(
+            model.actions[0].guard,
+            ExprIr::Binary { op: BinaryOp::Equal, .. }
+        ));
+        assert!(matches!(
+            model.actions[0].updates[0].value,
+            ExprIr::Literal(Value::EnumVariant { .. })
+        ));
     }
 
     #[test]

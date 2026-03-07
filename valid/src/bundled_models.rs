@@ -448,6 +448,12 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
+            variants: field
+                .variants
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         })
         .collect::<Vec<_>>();
     let action_details = M::Action::action_descriptors()

@@ -88,6 +88,19 @@ fn validate_value_for_type(
         {
             Ok(())
         }
+        (FieldType::BoundedU32 { min, max }, Value::UInt(value))
+            if *value >= *min as u64 && *value <= *max as u64 =>
+        {
+            Ok(())
+        }
+        (FieldType::Enum { variants }, Value::EnumVariant { label, index })
+            if variants
+                .get(*index as usize)
+                .map(|variant| variant == label)
+                .unwrap_or(false) =>
+        {
+            Ok(())
+        }
         (FieldType::BoundedU8 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
@@ -102,6 +115,20 @@ fn validate_value_for_type(
         )
         .with_help("keep update results inside the bounded integer range")
         .with_best_practice("encode saturation or guards explicitly in the model")),
+        (FieldType::BoundedU32 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` exceeds declared range"),
+        )
+        .with_help("keep update results inside the bounded integer range")
+        .with_best_practice("encode saturation or guards explicitly in the model")),
+        (FieldType::Enum { .. }, Value::EnumVariant { .. }) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` is not one of the declared enum variants"),
+        )
+        .with_help("keep enum updates within the derived finite variant set")
+        .with_best_practice("prefer unit enums with stable variant sets for symbolic state")),
         _ => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
