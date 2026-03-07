@@ -80,6 +80,7 @@ pub struct RegisteredModel {
 
 impl RegisteredModel {
     pub fn for_machine<M: VerifiedMachine>(name: &'static str) -> Self {
+        let _ = property_ids::<M>();
         Self {
             name,
             inspect: inspect_machine::<M>,

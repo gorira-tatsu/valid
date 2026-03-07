@@ -373,6 +373,8 @@ fn small_registry_examples_run_successfully() {
     ] {
         let output = Command::new("cargo")
             .arg("run")
+            .arg("--features")
+            .arg("verification-runtime")
             .arg("--example")
             .arg(example)
             .arg("--")

@@ -317,8 +317,15 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     let target = resolve_external_target(parsed);
     let mut command = Command::new("cargo");
     command.arg("run");
+    let mut features = Vec::new();
+    if external_target_requires_runtime_feature(parsed, &target) {
+        features.push("verification-runtime");
+    }
     if matches!(parsed.backend.as_deref(), Some("sat-varisat")) {
-        command.arg("--features").arg("varisat-backend");
+        features.push("varisat-backend");
+    }
+    if !features.is_empty() {
+        command.arg("--features").arg(features.join(","));
     }
     if let Some(manifest_path) = target.manifest_path {
         command.arg("--manifest-path").arg(manifest_path);
@@ -396,6 +403,11 @@ fn build_external_command(parsed: &CliArgs) -> Command {
         command.arg("--progress=json");
     }
     command
+}
+
+fn external_target_requires_runtime_feature(parsed: &CliArgs, target: &ExternalTarget) -> bool {
+    let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    project_root(parsed) == built_in_manifest_dir && matches!(target.kind, "--example" | "--bin")
 }
 
 fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {

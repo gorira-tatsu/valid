@@ -3,15 +3,22 @@
 //! This module exposes only generic system-side contracts. Concrete domain
 //! models belong in user code, examples, or tests rather than inside `src/`.
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+use std::collections::{HashSet, VecDeque};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    collections::{HashSet, VecDeque},
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
     sync::{Mutex, OnceLock},
 };
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+use crate::ir::{
+    ActionIr, FieldType, InitAssignment, ModelIr, PropertyIr, SourceSpan, StateField, UpdateIr,
+};
+use crate::ir::{BinaryOp, ExprIr, UnaryOp, Value};
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 use crate::{
     api::{ExplainCandidateCause, ExplainResponse},
     contract::snapshot_model,
@@ -594,12 +601,14 @@ where
     found
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelingRunStatus {
     Pass,
     Fail,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelingTraceStep<S, A> {
     pub index: usize,
@@ -608,6 +617,7 @@ pub struct ModelingTraceStep<S, A> {
     pub state_after: S,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelingCheckResult<S, A> {
     pub model_id: &'static str,
@@ -675,12 +685,14 @@ pub struct TransitionUpdateDescriptor {
     pub expr: &'static str,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineTransitionUpdateIr {
     pub field: &'static str,
     pub expr: Option<&'static str>,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityDetail {
     pub reason: String,
@@ -728,6 +740,7 @@ pub struct MachineTransitionIr {
     pub updates: Vec<MachineTransitionUpdateIr>,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineCapabilityReport {
     pub parse_ready: bool,
@@ -860,18 +873,80 @@ pub trait ModelSpec {
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub trait VerifiedMachine: ModelSpec {}
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 impl<T> VerifiedMachine for T where T: ModelSpec {}
 
+#[cfg(debug_assertions)]
+fn debug_validation_cache() -> &'static Mutex<HashSet<&'static str>> {
+    static CACHE: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+#[cfg(debug_assertions)]
+fn run_debug_machine_validation<M: VerifiedMachine>() {
+    let mut cache = debug_validation_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !cache.insert(M::model_id()) {
+        return;
+    }
+    drop(cache);
+
+    let validation = std::panic::catch_unwind(|| {
+        let init_states = M::init_states();
+        if init_states.is_empty() {
+            return Err(format!(
+                "ModelSpec::init_states must return at least one state for `{}`",
+                M::model_id()
+            ));
+        }
+
+        let properties = M::properties();
+        if properties.is_empty() {
+            return Err(format!(
+                "ModelSpec::properties must return at least one property for `{}`",
+                M::model_id()
+            ));
+        }
+
+        for state in &init_states {
+            let _ = M::enabled_actions(state);
+            let _ = M::observe(state);
+        }
+        Ok::<(), String>(())
+    });
+    match validation {
+        Ok(Ok(())) => {}
+        Ok(Err(message)) => {
+            eprintln!("debug validation warning: {message}");
+        }
+        Err(_) => {
+            eprintln!(
+                "debug validation warning: model `{}` panicked during lightweight validation",
+                M::model_id()
+            );
+        }
+    }
+}
+
+#[cfg(all(not(debug_assertions), feature = "verification-runtime"))]
+fn run_debug_machine_validation<M: VerifiedMachine>() {}
+
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn primary_property<M: ModelSpec>() -> ModelProperty<M::State> {
+    run_debug_machine_validation::<M>();
     M::properties()
         .into_iter()
         .next()
         .expect("ModelSpec::properties must return at least one property")
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn find_property<M: ModelSpec>(property_id: &str) -> ModelProperty<M::State> {
+    run_debug_machine_validation::<M>();
     M::properties()
         .into_iter()
         .find(|property| property.property_id == property_id)
@@ -883,7 +958,9 @@ fn find_property<M: ModelSpec>(property_id: &str) -> ModelProperty<M::State> {
         })
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn property_ids<M: ModelSpec>() -> Vec<&'static str> {
+    run_debug_machine_validation::<M>();
     M::properties()
         .into_iter()
         .map(|property| property.property_id)
@@ -902,6 +979,7 @@ pub fn transition_descriptors<M: ModelSpec>() -> Vec<TransitionDescriptor> {
     M::transitions()
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
     let descriptors = M::transitions();
     if !descriptors.is_empty() {
@@ -942,7 +1020,9 @@ pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
         .collect()
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityReport {
+    run_debug_machine_validation::<M>();
     let machine_ir = lower_machine_model::<M>();
     match machine_ir {
         Ok(model) => {
@@ -994,6 +1074,7 @@ pub fn machine_capability_report<M: VerifiedMachine>() -> MachineCapabilityRepor
 fn machine_solver_capability_assessment(model: &ModelIr) -> CapabilityAssessment {
     let mut codes = BTreeSet::new();
     let mut unsupported_features = BTreeSet::new();
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
     for field in &model.state_fields {
         if matches!(field.ty, FieldType::String { .. }) {
             codes.insert("string_fields_require_explicit_backend".to_string());
@@ -1043,6 +1124,7 @@ fn collect_solver_subset_reasons_from_expr(
     reasons: &mut BTreeSet<String>,
     unsupported_features: &mut BTreeSet<String>,
 ) {
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
     match expr {
         ExprIr::Literal(Value::String(_)) => {
             reasons.insert("string_literals_require_explicit_backend".to_string());
@@ -1241,7 +1323,7 @@ fn sorted_unique_strings(values: Vec<String>) -> Vec<String> {
         .into_iter()
         .collect()
 }
-
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn machine_transition_tags_for_action<M: ModelSpec>(action_id: &str) -> Vec<String> {
     machine_transition_path_for_action::<M>(action_id, true).legacy_path_tags()
 }
@@ -1293,6 +1375,7 @@ pub fn machine_transition_path_for_action<M: ModelSpec>(
         ));
     }
     path
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 }
 
 #[doc(hidden)]
@@ -1957,6 +2040,7 @@ macro_rules! valid_model {
     };
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone)]
 struct ModelingNode<S, A> {
     state: S,
@@ -1965,6 +2049,7 @@ struct ModelingNode<S, A> {
     depth: u32,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone)]
 struct ModelingEdge<S, A> {
     from_index: usize,
@@ -1974,11 +2059,13 @@ struct ModelingEdge<S, A> {
     state_after: S,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine<M: VerifiedMachine>() -> ModelingCheckResult<M::State, M::Action> {
     let property = primary_property::<M>();
     check_machine_property::<M>(property.property_id)
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_property<M: VerifiedMachine>(
     property_id: &str,
 ) -> ModelingCheckResult<M::State, M::Action> {
@@ -2004,6 +2091,7 @@ pub fn check_machine_property<M: VerifiedMachine>(
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
     let exploration = explore_machine::<M>(primary_property::<M>().holds);
     let total_actions = M::Action::all()
@@ -2155,6 +2243,7 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainResponse, String> {
     let outcome = check_machine_outcome::<M>(request_id);
     let CheckOutcome::Completed(result) = outcome else {
@@ -2332,11 +2421,13 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
     })
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn build_machine_test_vectors<M: VerifiedMachine>() -> Vec<TestVector> {
     let property = primary_property::<M>();
     build_machine_test_vectors_for_property::<M>(property.property_id)
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
     property_id: &str,
 ) -> Vec<TestVector> {
@@ -2402,6 +2493,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
     vectors
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
     property_id: Option<&str>,
     strategy: &str,
@@ -2421,6 +2513,7 @@ pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_transition_witness_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
     build_machine_test_vectors_for_property::<M>(property_id)
         .into_iter()
@@ -2428,6 +2521,7 @@ fn build_transition_witness_vectors<M: VerifiedMachine>(property_id: &str) -> Ve
         .collect()
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_path_tag_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
     let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
@@ -2474,6 +2568,7 @@ fn build_path_tag_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVect
     vectors
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
     let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
@@ -2586,6 +2681,7 @@ fn build_guard_coverage_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
     vectors
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_boundary_focus_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<TestVector> {
     let property = find_property::<M>(property_id);
     let exploration = explore_machine::<M>(property.holds);
@@ -2635,6 +2731,7 @@ fn build_boundary_focus_vectors<M: VerifiedMachine>(property_id: &str) -> Vec<Te
     vectors
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_randomized_vectors<M: VerifiedMachine>(
     property_id: &str,
     limit: usize,
@@ -2680,6 +2777,7 @@ fn build_randomized_vectors<M: VerifiedMachine>(
     vectors
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_machine_vector_for_node<M: VerifiedMachine>(
     nodes: &[ModelingNode<M::State, M::Action>],
     end_index: usize,
@@ -2781,6 +2879,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
     })
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn parse_inclusive_range(range: Option<&'static str>) -> Option<(u64, u64)> {
     let range = range?;
     let (min, max) = range.split_once("..=")?;
@@ -2789,7 +2888,9 @@ fn parse_inclusive_range(range: Option<&'static str>) -> Option<(u64, u64)> {
     Some((min, max))
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
+    run_debug_machine_validation::<M>();
     let init_states = M::init_states();
     if init_states.len() != 1 {
         return Err("machine IR lowering currently requires exactly one init state".to_string());
@@ -2919,6 +3020,7 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
     })
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, String> {
     if let Some(variants) = &field.variants {
         if variants.len() > 64 {
@@ -3047,6 +3149,7 @@ fn lower_machine_expr(input: &str) -> Option<ExprIr> {
     lower_machine_expr_with_enums(input, &BTreeMap::new())
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_machine_enum_literal_map<M: VerifiedMachine>() -> BTreeMap<String, (String, u64)> {
     let mut literals = BTreeMap::new();
     for field in M::State::state_fields() {
@@ -3110,6 +3213,7 @@ fn build_machine_enum_literal_map<M: VerifiedMachine>() -> BTreeMap<String, (Str
     literals
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn register_enum_literals(
     literals: &mut BTreeMap<String, (String, u64)>,
     enum_ty: &str,
@@ -3142,6 +3246,7 @@ fn register_enum_literals(
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn set_inner_rust_type(rust_type: &str) -> Option<String> {
     let normalized = rust_type
         .chars()
@@ -3154,6 +3259,7 @@ fn set_inner_rust_type(rust_type: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn option_inner_rust_type(rust_type: &str) -> Option<String> {
     let normalized = rust_type
         .chars()
@@ -3166,6 +3272,7 @@ fn option_inner_rust_type(rust_type: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn relation_inner_rust_types(rust_type: &str) -> Option<(String, String)> {
     let normalized = rust_type
         .chars()
@@ -3182,6 +3289,7 @@ fn relation_inner_rust_types(rust_type: &str) -> Option<(String, String)> {
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn map_inner_rust_types(rust_type: &str) -> Option<(String, String)> {
     let normalized = rust_type
         .chars()
@@ -3664,11 +3772,13 @@ fn split_top_level_args(input: &str) -> Vec<&str> {
     parts
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
     let property = primary_property::<M>();
     check_machine_outcome_for_property::<M>(request_id, property.property_id)
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
     request_id: &str,
     property_id: &str,
@@ -3754,6 +3864,7 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
     })
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<ExplicitRunResult> {
     property_ids::<M>()
         .into_iter()
@@ -3766,6 +3877,7 @@ pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<Expli
         .collect()
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_with_adapter<M: VerifiedMachine>(
     request_id: &str,
     property_id: Option<&str>,
@@ -3807,6 +3919,7 @@ pub fn check_machine_with_adapter<M: VerifiedMachine>(
     run_with_adapter(&model, &plan, adapter).map(|normalized| normalized.outcome)
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
     match adapter {
         AdapterConfig::Explicit => BackendKind::Explicit,
@@ -3816,6 +3929,7 @@ fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn backend_version_for_adapter(adapter: &AdapterConfig) -> String {
     match adapter {
         AdapterConfig::Explicit | AdapterConfig::MockBmc => env!("CARGO_PKG_VERSION").to_string(),
@@ -3824,6 +3938,7 @@ fn backend_version_for_adapter(adapter: &AdapterConfig) -> String {
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn replay_machine_actions<M: VerifiedMachine>(
     property_id: Option<&str>,
     action_ids: &[String],
@@ -3891,6 +4006,7 @@ pub fn replay_machine_actions<M: VerifiedMachine>(
     ))
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_trace<M: VerifiedMachine>(
     nodes: &[ModelingNode<M::State, M::Action>],
     end_index: usize,
@@ -3920,6 +4036,7 @@ fn build_trace<M: VerifiedMachine>(
     trace
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[derive(Debug, Clone)]
 struct ModelingExploration<S, A> {
     nodes: Vec<ModelingNode<S, A>>,
@@ -3929,6 +4046,7 @@ struct ModelingExploration<S, A> {
     failure_index: Option<usize>,
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn explore_machine<M: VerifiedMachine>(
     holds: fn(&M::State) -> bool,
 ) -> ModelingExploration<M::State, M::Action> {
@@ -4007,6 +4125,7 @@ fn explore_machine<M: VerifiedMachine>(
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn modeling_result_from_failure<M: VerifiedMachine>(
     exploration: &ModelingExploration<M::State, M::Action>,
     failure_index: usize,
@@ -4022,6 +4141,7 @@ fn modeling_result_from_failure<M: VerifiedMachine>(
     }
 }
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn build_evidence_trace<M: VerifiedMachine>(
     request_id: &str,
     result: &ModelingCheckResult<M::State, M::Action>,

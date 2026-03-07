@@ -1,26 +1,39 @@
 extern crate self as valid;
 
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod api;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod benchmark;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 #[doc(hidden)]
 pub mod bundled_models;
 pub mod cli;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod contract;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod coverage;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod engine;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod evidence;
 pub mod frontend;
 pub mod ir;
 pub mod kernel;
 pub mod mcp;
 pub mod modeling;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod orchestrator;
 pub mod project;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod registry;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod reporter;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod selfcheck;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod solver;
 pub mod support;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod testgen;
 
 pub use modeling::{

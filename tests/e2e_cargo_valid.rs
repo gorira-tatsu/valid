@@ -84,7 +84,7 @@ fn write_autodiscover_fixture(project_dir: &Path, model_name: &str) {
     fs::write(
         project_dir.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"valid-autodiscover-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?} }}\n",
+            "[package]\nname = \"valid-autodiscover-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?}, features = [\"verification-runtime\"] }}\n",
             env!("CARGO_MANIFEST_DIR")
         ),
     )

@@ -46,10 +46,10 @@ This installs:
 - `valid`
 - `cargo-valid`
 
-If you want the smallest build and only need explicit exploration:
+If you want the smallest CLI build and only need explicit exploration:
 
 ```sh
-cargo install --path .
+cargo install --path . --features verification-runtime
 ```
 
 ### 3. Docker
@@ -66,6 +66,10 @@ The Docker image enables `varisat-backend`.
 ## Important Limitation
 
 `cargo valid` compiles Rust registry targets such as `examples/*.rs`.
+
+Release builds of the `valid` library exclude the verification runtime by
+default. If you need the CLI binaries or registry/runtime APIs in a release
+build, enable `verification-runtime` explicitly.
 
 That means:
 
