@@ -142,6 +142,7 @@ pub struct LintFinding {
     pub code: String,
     pub message: String,
     pub suggestion: Option<String>,
+    pub snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,10 +284,12 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 rust_type: match field.ty {
                     crate::ir::FieldType::Bool => "bool".to_string(),
                     crate::ir::FieldType::BoundedU8 { .. } => "u8".to_string(),
+                    crate::ir::FieldType::BoundedU16 { .. } => "u16".to_string(),
                 },
                 range: match field.ty {
                     crate::ir::FieldType::Bool => None,
                     crate::ir::FieldType::BoundedU8 { min, max } => Some(format!("{min}..={max}")),
+                    crate::ir::FieldType::BoundedU16 { min, max } => Some(format!("{min}..={max}")),
                 },
             })
             .collect(),
@@ -1584,6 +1587,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 suggestion: Some(
                     "rewrite critical actions with declarative transitions { ... }".to_string(),
                 ),
+                snippet: None,
             }),
             "missing_declarative_transitions" => findings.push(LintFinding {
                 severity: "warn".to_string(),
@@ -1592,6 +1596,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 suggestion: Some(
                     "add transitions { transition ... } so guard/effect metadata becomes first-class".to_string(),
                 ),
+                snippet: None,
             }),
             "unsupported_machine_guard_expr" => findings.push(LintFinding {
                 severity: "warn".to_string(),
@@ -1600,6 +1605,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 suggestion: Some(
                     "simplify guards to the current IR subset or extend lowering support".to_string(),
                 ),
+                snippet: None,
             }),
             "unsupported_machine_update_expr" => findings.push(LintFinding {
                 severity: "warn".to_string(),
@@ -1608,6 +1614,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 suggestion: Some(
                     "rewrite updates with supported expressions or extend lowering support".to_string(),
                 ),
+                snippet: None,
             }),
             "unsupported_machine_property_expr" => findings.push(LintFinding {
                 severity: "warn".to_string(),
@@ -1616,12 +1623,14 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 suggestion: Some(
                     "keep properties within the supported boolean/arithmetic subset for solver runs".to_string(),
                 ),
+                snippet: None,
             }),
             other => findings.push(LintFinding {
                 severity: "warn".to_string(),
                 code: other.to_string(),
                 message: format!("model is not fully analysis-ready: {other}"),
                 suggestion: None,
+                snippet: None,
             }),
         }
     }
@@ -1638,6 +1647,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                 "add reads=[...] and writes=[...] to improve explain, coverage, and testgen"
                     .to_string(),
             ),
+            snippet: None,
         });
     }
     if inspect
@@ -1660,6 +1670,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
                     action.reads.join(", "),
                     action.writes.join(", ")
                 )),
+                snippet: Some(render_transition_migration_snippet(inspect, action)),
             });
         }
     }
@@ -1675,6 +1686,7 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
             suggestion: Some(
                 "use descriptive action ids and metadata so allow/deny/boundary paths become visible".to_string(),
             ),
+            snippet: None,
         });
     }
     let status = if findings
@@ -1701,12 +1713,17 @@ pub fn render_lint_json(response: &LintResponse) -> String {
         .iter()
         .map(|finding| {
             format!(
-                "{{\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"suggestion\":{}}}",
+                "{{\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"suggestion\":{},\"snippet\":{}}}",
                 escape_json(&finding.severity),
                 escape_json(&finding.code),
                 escape_json(&finding.message),
                 finding
                     .suggestion
+                    .as_ref()
+                    .map(|value| format!("\"{}\"", escape_json(value)))
+                    .unwrap_or_else(|| "null".to_string()),
+                finding
+                    .snippet
                     .as_ref()
                     .map(|value| format!("\"{}\"", escape_json(value)))
                     .unwrap_or_else(|| "null".to_string())
@@ -1768,9 +1785,55 @@ pub fn render_lint_text(response: &LintResponse) -> String {
                     .map(|suggestion| format!(" suggestion={suggestion}"))
                     .unwrap_or_default()
             ));
+            if let Some(snippet) = &finding.snippet {
+                for line in snippet.lines() {
+                    out.push_str(&format!("  | {line}\n"));
+                }
+            }
         }
     }
     out
+}
+
+fn render_transition_migration_snippet(
+    inspect: &InspectResponse,
+    action: &InspectAction,
+) -> String {
+    let tags = crate::modeling::infer_decision_path_tags(
+        &action.action_id,
+        action.reads.iter().map(String::as_str),
+        action.writes.iter().map(String::as_str),
+        Some("<guard>"),
+        Some("State { ... }"),
+    );
+    let tag_block = if tags.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " [tags = [{}]]",
+            tags.iter()
+                .map(|tag| format!("\"{tag}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let updates = inspect
+        .state_field_details
+        .iter()
+        .map(|field| {
+            let expr = if action.writes.iter().any(|write| write == &field.name) {
+                format!("/* TODO update {} */ state.{}", field.name, field.name)
+            } else {
+                format!("state.{}", field.name)
+            };
+            format!("    {}: {}", field.name, expr)
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+    format!(
+        "transition {}{} when |state| /* TODO guard */ true => [State {{\n{}\n}}];",
+        action.action_id, tag_block, updates
+    )
 }
 
 fn render_string_array(values: &[String]) -> String {

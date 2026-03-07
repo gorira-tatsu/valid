@@ -213,6 +213,7 @@ fn field_type_label(field_type: &FieldType) -> String {
     match field_type {
         FieldType::Bool => "bool".to_string(),
         FieldType::BoundedU8 { min, max } => format!("u8[{min}..{max}]"),
+        FieldType::BoundedU16 { min, max } => format!("u16[{min}..{max}]"),
     }
 }
 

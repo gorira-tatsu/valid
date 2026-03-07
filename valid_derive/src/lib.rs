@@ -220,15 +220,32 @@ fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
         }
     }
 
-    let has_init = top_level_idents.iter().any(|ident| ident == "init");
-    let has_step = top_level_idents.iter().any(|ident| ident == "step");
-    let has_transitions = top_level_idents.iter().any(|ident| ident == "transitions");
-    let has_properties = top_level_idents.iter().any(|ident| ident == "properties");
-    let has_legacy_property = top_level_idents.iter().any(|ident| ident == "property");
-    let has_legacy_invariant = top_level_idents.iter().any(|ident| ident == "invariant");
+    let count = |needle: &str| {
+        top_level_idents
+            .iter()
+            .filter(|ident| ident.as_str() == needle)
+            .count()
+    };
+    let init_count = count("init");
+    let step_count = count("step");
+    let transitions_count = count("transitions");
+    let properties_count = count("properties");
+    let legacy_property_count = count("property");
+    let invariant_count = count_ident_recursive(tokens, "invariant");
+    let transition_item_count = count_ident_recursive(tokens, "transition");
+
+    let has_init = init_count > 0;
+    let has_step = step_count > 0;
+    let has_transitions = transitions_count > 0;
+    let has_properties = properties_count > 0;
+    let has_legacy_property = legacy_property_count > 0;
+    let has_legacy_invariant = invariant_count > 0;
 
     if !has_init {
         return Err("valid_model! requires `init [...]` after the model header".to_string());
+    }
+    if init_count > 1 {
+        return Err("valid_model! supports exactly one `init [...]` section".to_string());
     }
     if has_step && has_transitions {
         return Err(
@@ -236,9 +253,23 @@ fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
                 .to_string(),
         );
     }
+    if step_count > 1 {
+        return Err(
+            "valid_model! supports exactly one `step |state, action| { ... }` section".to_string(),
+        );
+    }
+    if transitions_count > 1 {
+        return Err("valid_model! supports exactly one `transitions { ... }` block".to_string());
+    }
     if !has_step && !has_transitions {
         return Err(
             "valid_model! requires either `step |state, action| { ... }` or `transitions { ... }`"
+                .to_string(),
+        );
+    }
+    if has_transitions && transition_item_count == 0 {
+        return Err(
+            "valid_model! requires at least one `transition ...` inside `transitions { ... }`"
                 .to_string(),
         );
     }
@@ -248,7 +279,36 @@ fn validate_valid_model_shape(tokens: &[TokenTree]) -> Result<(), String> {
                 .to_string(),
         );
     }
+    if properties_count > 1 {
+        return Err("valid_model! supports exactly one `properties { ... }` block".to_string());
+    }
+    if has_properties && invariant_count == 0 {
+        return Err(
+            "valid_model! requires at least one `invariant ...;` inside `properties { ... }`"
+                .to_string(),
+        );
+    }
+    if has_properties && has_legacy_property {
+        return Err("valid_model! cannot mix `properties { ... }` with legacy `property ...; invariant ...;` syntax".to_string());
+    }
     Ok(())
+}
+
+fn count_ident_recursive(tokens: &[TokenTree], needle: &str) -> usize {
+    let mut count = 0usize;
+    for token in tokens {
+        match token {
+            TokenTree::Ident(ident) if ident.to_string() == needle => {
+                count += 1;
+            }
+            TokenTree::Group(group) => {
+                let nested = group.stream().into_iter().collect::<Vec<_>>();
+                count += count_ident_recursive(&nested, needle);
+            }
+            _ => {}
+        }
+    }
+    count
 }
 
 fn wrap_valid_model_tokens(input: TokenStream) -> TokenStream {
@@ -536,5 +596,25 @@ mod tests {
             .parse()
             .unwrap();
         assert!(validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>()).is_ok());
+    }
+
+    #[test]
+    fn valid_model_shape_requires_transition_entries() {
+        let tokens = "model CounterModel<State, Action>; init []; transitions { } properties { invariant P |state| true; }"
+            .parse()
+            .unwrap();
+        let error = validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>())
+            .expect_err("empty transitions block should be rejected");
+        assert!(error.contains("at least one `transition"));
+    }
+
+    #[test]
+    fn valid_model_shape_rejects_mixed_property_styles() {
+        let tokens = "model CounterModel<State, Action>; init []; transitions { transition Go when |state| true => []; } property P; properties { invariant Q |state| true; } invariant |state| true;"
+            .parse()
+            .unwrap();
+        let error = validate_valid_model_shape(&tokens.into_iter().collect::<Vec<_>>())
+            .expect_err("mixed property styles should be rejected");
+        assert!(error.contains("cannot mix"));
     }
 }

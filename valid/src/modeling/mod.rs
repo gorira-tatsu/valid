@@ -1765,6 +1765,20 @@ fn lower_machine_field_type(field: &StateFieldDescriptor) -> Result<FieldType, S
                 max: max as u8,
             })
         }
+        "u16" => {
+            let (min, max) = parse_inclusive_range(field.range).unwrap_or((0, u16::MAX as u64));
+            if max > u16::MAX as u64 {
+                return Err(format!(
+                    "range `{}` exceeds supported u16 bounds for field `{}`",
+                    field.range.unwrap_or("0..=65535"),
+                    field.name
+                ));
+            }
+            Ok(FieldType::BoundedU16 {
+                min: min as u16,
+                max: max as u16,
+            })
+        }
         other => Err(format!(
             "unsupported rust field type `{other}` for machine IR lowering"
         )),

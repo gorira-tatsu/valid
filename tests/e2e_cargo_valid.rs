@@ -268,6 +268,7 @@ fn cargo_valid_lints_registered_model_with_migration_hints() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"code\":\"opaque_step_closure\""));
     assert!(stdout.contains("\"code\":\"missing_declarative_transitions\""));
+    assert!(stdout.contains("\"snippet\":\"transition INC"));
 }
 
 #[test]

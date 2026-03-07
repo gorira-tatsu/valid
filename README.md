@@ -170,6 +170,7 @@ cargo valid --registry examples/practical_use_cases_registry.rs models
 cargo valid --registry examples/practical_use_cases_registry.rs verify breakglass-access-regression
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
+cargo valid --registry examples/enterprise_scale_registry.rs verify quota-guardrail-regression
 ```
 
 `inspect --json` now includes:
@@ -199,6 +200,10 @@ Step-only models are explicitly marked `explicit-only / opaque-step`.
 `verify --json` now includes CI-oriented summary fields such as `ci.exit_code`
 and `review_summary`, while `explain` includes failing action metadata,
 write-overlap hints, and reviewer-oriented next steps.
+
+`readiness --json` now also includes migration snippets for opaque step models,
+so you can lift a critical action into `transitions { ... }` from the report
+instead of writing the first skeleton by hand.
 
 ## Rust DSL
 

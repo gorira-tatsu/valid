@@ -145,6 +145,15 @@ fn lower_type(input: &str) -> Option<FieldType> {
         });
     }
 
+    if input.starts_with("u16[") && input.ends_with(']') {
+        let range = &input[4..input.len() - 1];
+        let (min, max) = range.split_once("..")?;
+        return Some(FieldType::BoundedU16 {
+            min: min.parse().ok()?,
+            max: max.parse().ok()?,
+        });
+    }
+
     None
 }
 
@@ -382,5 +391,31 @@ property P_SAFE:
         assert!(guard.contains("NotEqual"));
         assert!(guard.contains("GreaterThanOrEqual"));
         assert!(guard.contains("LessThan"));
+    }
+
+    #[test]
+    fn lowers_u16_state_fields() {
+        let source = r#"
+model BudgetControl
+state:
+  spend: u16[0..5000]
+  approved: bool
+init:
+  spend = 0
+  approved = false
+action Raise:
+  pre: spend <= 4500
+  post:
+    spend = spend + 500
+property P_SAFE:
+  invariant: spend <= 5000
+"#;
+        let model = compile_model(source).expect("compile");
+        let field = &model.state_fields[0];
+        assert_eq!(field.name, "spend");
+        assert!(matches!(
+            field.ty,
+            crate::ir::FieldType::BoundedU16 { min: 0, max: 5000 }
+        ));
     }
 }

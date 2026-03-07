@@ -132,7 +132,7 @@ pub fn build_invariant_bmc_query(
 
     for step in 0..=depth {
         for field in &model.state_fields {
-            if let FieldType::BoundedU8 { min, max } = field.ty {
+            if let Some((min, max)) = integer_bounds(&field.ty) {
                 let symbol = state_symbol(field.name.as_str(), step);
                 smtlib.push_str(&format!("(assert (<= {} {}))\n", min, symbol));
                 smtlib.push_str(&format!("(assert (<= {} {}))\n", symbol, max));
@@ -302,7 +302,15 @@ fn parse_cvc5_get_value_line(line: &str) -> Result<(String, String), String> {
 fn smt_sort(ty: &FieldType) -> &'static str {
     match ty {
         FieldType::Bool => "Bool",
-        FieldType::BoundedU8 { .. } => "Int",
+        FieldType::BoundedU8 { .. } | FieldType::BoundedU16 { .. } => "Int",
+    }
+}
+
+fn integer_bounds(ty: &FieldType) -> Option<(u64, u64)> {
+    match ty {
+        FieldType::Bool => None,
+        FieldType::BoundedU8 { min, max } => Some((*min as u64, *max as u64)),
+        FieldType::BoundedU16 { min, max } => Some((*min as u64, *max as u64)),
     }
 }
 
@@ -400,6 +408,18 @@ mod tests {
         assert!(query.check_smtlib.contains("(>= x_0 1)"));
         assert!(query.check_smtlib.contains("(< x_0 7)"));
         assert!(query.check_smtlib.contains("(not (= enabled_0 true))"));
+    }
+
+    #[test]
+    fn bmc_query_supports_u16_bounds() {
+        let model = compile_model(
+            "model Budget\nstate:\n  spend: u16[0..5000]\ninit:\n  spend = 0\naction Raise:\n  pre: spend <= 4500\n  post:\n    spend = spend + 500\nproperty P_SAFE:\n  invariant: spend <= 5000\n",
+        )
+        .unwrap();
+        let query = build_invariant_bmc_query(&model, &["P_SAFE".to_string()], 1).unwrap();
+        assert!(query.check_smtlib.contains("(assert (<= 0 spend_0))"));
+        assert!(query.check_smtlib.contains("(assert (<= spend_0 5000))"));
+        assert!(query.check_smtlib.contains("(assert (<= spend_1 5000))"));
     }
 
     #[test]

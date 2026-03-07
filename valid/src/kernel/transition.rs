@@ -83,7 +83,19 @@ fn validate_value_for_type(
         {
             Ok(())
         }
+        (FieldType::BoundedU16 { min, max }, Value::UInt(value))
+            if *value >= *min as u64 && *value <= *max as u64 =>
+        {
+            Ok(())
+        }
         (FieldType::BoundedU8 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
+            ErrorCode::InvalidState,
+            DiagnosticSegment::KernelTransition,
+            format!("value for `{field_name}` exceeds declared range"),
+        )
+        .with_help("keep update results inside the bounded integer range")
+        .with_best_practice("encode saturation or guards explicitly in the model")),
+        (FieldType::BoundedU16 { .. }, Value::UInt(_)) => Err(Diagnostic::new(
             ErrorCode::InvalidState,
             DiagnosticSegment::KernelTransition,
             format!("value for `{field_name}` exceeds declared range"),
@@ -96,7 +108,9 @@ fn validate_value_for_type(
             format!("value for `{field_name}` does not match the declared field type"),
         )
         .with_help("keep init assignments and updates type-consistent")
-        .with_best_practice("prefer bool for predicates and bounded u8 for counters in the MVP")),
+        .with_best_practice(
+            "prefer bool for predicates and bounded unsigned integers for counters in the MVP",
+        )),
     }
 }
 

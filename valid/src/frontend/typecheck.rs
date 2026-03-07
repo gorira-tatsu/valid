@@ -10,7 +10,7 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
     let mut errors = Vec::new();
 
     for field in &resolved.parsed.state_fields {
-        if field.ty != "bool" && !is_bounded_u8(&field.ty) {
+        if field.ty != "bool" && !is_bounded_u8(&field.ty) && !is_bounded_u16(&field.ty) {
             errors.push(type_error(
                 format!("unknown type `{}`", field.ty),
                 field.line,
@@ -74,6 +74,10 @@ fn is_bounded_u8(ty: &str) -> bool {
     ty.starts_with("u8[") && ty.ends_with(']') && ty.contains("..")
 }
 
+fn is_bounded_u16(ty: &str) -> bool {
+    ty.starts_with("u16[") && ty.ends_with(']') && ty.contains("..")
+}
+
 fn type_error(message: String, line: usize) -> Diagnostic {
     Diagnostic::new(
         ErrorCode::TypecheckError,
@@ -108,5 +112,21 @@ action Inc:
         let resolved = resolve_model(parsed).expect("resolve");
         let errors = typecheck_model(resolved).expect_err("must fail");
         assert_eq!(errors[0].error_code.as_str(), "TYPECHECK_ERROR");
+    }
+
+    #[test]
+    fn accepts_bounded_u16_fields() {
+        let source = r#"
+model BudgetControl
+state:
+  spend: u16[0..5000]
+init:
+  spend = 0
+property P_SAFE:
+  invariant: spend <= 5000
+"#;
+        let parsed = parse_model(source).expect("parse");
+        let resolved = resolve_model(parsed).expect("resolve");
+        typecheck_model(resolved).expect("u16 fields should typecheck");
     }
 }

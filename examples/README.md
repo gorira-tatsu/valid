@@ -115,6 +115,11 @@ allow/deny/boundary/session paths explicit instead of relying on heuristics.
 current lowering path. It uses explicit tags plus richer boolean expressions
 such as `==`, `||`, and parenthesized guards / properties.
 
+`enterprise_scale_registry.rs` pushes that further with larger practical state,
+bounded `u16` counters, and richer guard arithmetic such as `>=`, `!=`, and
+subtraction. It is intended as the current “can this survive a heavier
+business model?” suite.
+
 `practical_use_cases_registry.rs` is the business-oriented suite for trying the
 tool against more realistic workflows. It currently includes:
 
@@ -138,6 +143,8 @@ cargo valid --registry examples/practical_use_cases_registry.rs graph refund-con
 cargo valid --registry examples/practical_use_cases_registry.rs graph refund-control --format=svg
 cargo valid --registry examples/practical_use_cases_registry.rs generate-tests refund-control --strategy=path
 cargo valid --registry examples/practical_use_cases_registry.rs suite
+cargo valid --registry examples/enterprise_scale_registry.rs inspect access-review-scale
+cargo valid --registry examples/enterprise_scale_registry.rs verify quota-guardrail-regression
 ```
 
 ## Rust model examples

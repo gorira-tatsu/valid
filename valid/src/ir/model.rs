@@ -37,4 +37,5 @@ pub type PropertyId = String;
 pub enum FieldType {
     Bool,
     BoundedU8 { min: u8, max: u8 },
+    BoundedU16 { min: u16, max: u16 },
 }

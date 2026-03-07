@@ -807,10 +807,12 @@ fn build_model_boundary_vectors(
     let mut seen = BTreeSet::new();
 
     for (field_index, field) in model.state_fields.iter().enumerate() {
-        let crate::ir::FieldType::BoundedU8 { min, max } = field.ty else {
-            continue;
+        let (min, max) = match field.ty {
+            crate::ir::FieldType::BoundedU8 { min, max } => (min as u64, max as u64),
+            crate::ir::FieldType::BoundedU16 { min, max } => (min as u64, max as u64),
+            crate::ir::FieldType::Bool => continue,
         };
-        for target in [min as u64, max as u64] {
+        for target in [min, max] {
             if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
                 matches!(node.state.values.get(field_index), Some(Value::UInt(value)) if *value == target)
             }) {
