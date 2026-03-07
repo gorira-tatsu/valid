@@ -8,10 +8,11 @@ use crate::{
     coverage::CoverageReport,
     engine::CheckOutcome,
     modeling::{
-        build_machine_test_vectors_for_strategy, check_machine_outcome,
-        check_machine_outcome_for_property, check_machine_outcomes, check_machine_with_adapter,
-        collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
-        property_ids, replay_machine_actions, ActionSpec, StateSpec,
+        build_machine_test_vectors_for_strategy, check_machine_outcome_for_property_with_seed,
+        check_machine_outcome_with_seed, check_machine_outcomes_with_seed,
+        check_machine_with_adapter_and_seed, collect_machine_coverage, explain_machine,
+        lower_machine_model, machine_capability_report, property_ids, replay_machine_actions,
+        ActionSpec, StateSpec,
     },
     orchestrator::run_all_properties_with_backend,
     solver::AdapterConfig,
@@ -162,43 +163,56 @@ pub fn check_bundled_model(
     request_id: &str,
     model_ref: &str,
     property_id: Option<&str>,
+    seed: Option<u64>,
     adapter: Option<&AdapterConfig>,
 ) -> Result<CheckOutcome, String> {
     match parse_model_ref(model_ref) {
         Some(BundledModel::Counter) => match adapter {
-            Some(adapter) => {
-                check_machine_with_adapter::<CounterModel>(request_id, property_id, adapter)
-            }
+            Some(adapter) => check_machine_with_adapter_and_seed::<CounterModel>(
+                request_id,
+                property_id,
+                adapter,
+                seed,
+            ),
             None => Ok(match property_id {
-                Some(property_id) => {
-                    check_machine_outcome_for_property::<CounterModel>(request_id, property_id)
-                }
-                None => check_machine_outcome::<CounterModel>(request_id),
+                Some(property_id) => check_machine_outcome_for_property_with_seed::<CounterModel>(
+                    request_id,
+                    property_id,
+                    seed,
+                ),
+                None => check_machine_outcome_with_seed::<CounterModel>(request_id, seed),
             }),
         },
         Some(BundledModel::FailingCounter) => match adapter {
-            Some(adapter) => {
-                check_machine_with_adapter::<FailingCounterModel>(request_id, property_id, adapter)
-            }
+            Some(adapter) => check_machine_with_adapter_and_seed::<FailingCounterModel>(
+                request_id,
+                property_id,
+                adapter,
+                seed,
+            ),
             None => Ok(match property_id {
-                Some(property_id) => check_machine_outcome_for_property::<FailingCounterModel>(
+                Some(property_id) => check_machine_outcome_for_property_with_seed::<
+                    FailingCounterModel,
+                >(request_id, property_id, seed),
+                None => check_machine_outcome_with_seed::<FailingCounterModel>(request_id, seed),
+            }),
+        },
+        Some(BundledModel::IamAccess) => {
+            match adapter {
+                Some(adapter) => check_machine_with_adapter_and_seed::<IamAccessModel>(
                     request_id,
                     property_id,
+                    adapter,
+                    seed,
                 ),
-                None => check_machine_outcome::<FailingCounterModel>(request_id),
-            }),
-        },
-        Some(BundledModel::IamAccess) => match adapter {
-            Some(adapter) => {
-                check_machine_with_adapter::<IamAccessModel>(request_id, property_id, adapter)
+                None => Ok(match property_id {
+                    Some(property_id) => check_machine_outcome_for_property_with_seed::<
+                        IamAccessModel,
+                    >(request_id, property_id, seed),
+                    None => check_machine_outcome_with_seed::<IamAccessModel>(request_id, seed),
+                }),
             }
-            None => Ok(match property_id {
-                Some(property_id) => {
-                    check_machine_outcome_for_property::<IamAccessModel>(request_id, property_id)
-                }
-                None => check_machine_outcome::<IamAccessModel>(request_id),
-            }),
-        },
+        }
         None => Err(format!("unknown bundled rust model `{model_ref}`")),
     }
 }
@@ -250,6 +264,7 @@ pub fn testgen_bundled_model(
     model_ref: &str,
     property_id: Option<&str>,
     strategy: &str,
+    seed: Option<u64>,
     adapter: Option<&AdapterConfig>,
 ) -> Result<TestgenResponse, String> {
     let mut vectors = if let Some(adapter) = adapter {
@@ -258,6 +273,7 @@ pub fn testgen_bundled_model(
                 request_id,
                 model_ref,
                 property_id,
+                seed,
                 adapter,
             )?
         } else {
@@ -326,9 +342,10 @@ fn bundled_counterexample_vectors_from_adapter(
     request_id: &str,
     model_ref: &str,
     property_id: Option<&str>,
+    seed: Option<u64>,
     adapter: &AdapterConfig,
 ) -> Result<Vec<TestVector>, String> {
-    let outcome = check_bundled_model(request_id, model_ref, property_id, Some(adapter))?;
+    let outcome = check_bundled_model(request_id, model_ref, property_id, seed, Some(adapter))?;
     match outcome {
         CheckOutcome::Completed(result) => {
             let Some(trace) = result.trace else {
@@ -381,6 +398,7 @@ fn annotate_bundled_replay_targets(
 pub fn orchestrate_bundled_model(
     request_id: &str,
     model_ref: &str,
+    seed: Option<u64>,
     adapter: Option<&AdapterConfig>,
 ) -> Result<OrchestrateResponse, String> {
     if let Some(adapter) = adapter {
@@ -429,11 +447,15 @@ pub fn orchestrate_bundled_model(
         }
     }
     let outcomes = match parse_model_ref(model_ref) {
-        Some(BundledModel::Counter) => check_machine_outcomes::<CounterModel>(request_id),
-        Some(BundledModel::FailingCounter) => {
-            check_machine_outcomes::<FailingCounterModel>(request_id)
+        Some(BundledModel::Counter) => {
+            check_machine_outcomes_with_seed::<CounterModel>(request_id, seed)
         }
-        Some(BundledModel::IamAccess) => check_machine_outcomes::<IamAccessModel>(request_id),
+        Some(BundledModel::FailingCounter) => {
+            check_machine_outcomes_with_seed::<FailingCounterModel>(request_id, seed)
+        }
+        Some(BundledModel::IamAccess) => {
+            check_machine_outcomes_with_seed::<IamAccessModel>(request_id, seed)
+        }
         None => return Err(format!("unknown bundled rust model `{model_ref}`")),
     };
     let coverage = coverage_bundled_model(model_ref)?;

@@ -24,8 +24,8 @@ use crate::{
     contract::snapshot_model,
     coverage::CoverageReport,
     engine::{
-        AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult, PropertyResult,
-        PropertySelection, RunManifest, RunPlan, RunStatus,
+        build_run_manifest, AssuranceLevel, BackendKind, CheckOutcome, ExplicitRunResult,
+        PropertyResult, PropertySelection, RunPlan, RunStatus,
     },
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::{
@@ -34,7 +34,10 @@ use crate::{
         FieldType, InitAssignment, ModelIr, Path, PropertyIr, SourceSpan, StateField, UnaryOp,
         UpdateIr, Value,
     },
-    solver::{run_with_adapter, AdapterConfig},
+    solver::{
+        backend_version_for_config as solver_backend_version_for_config, run_with_adapter,
+        AdapterConfig,
+    },
     support::hash::stable_hash_hex,
     testgen::{build_counterexample_vector, TestVector, VectorActionStep},
 };
@@ -3774,14 +3777,29 @@ fn split_top_level_args(input: &str) -> Vec<&str> {
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcome<M: VerifiedMachine>(request_id: &str) -> CheckOutcome {
+    check_machine_outcome_with_seed::<M>(request_id, None)
+}
+
+pub fn check_machine_outcome_with_seed<M: VerifiedMachine>(
+    request_id: &str,
+    seed: Option<u64>,
+) -> CheckOutcome {
     let property = primary_property::<M>();
-    check_machine_outcome_for_property::<M>(request_id, property.property_id)
+    check_machine_outcome_for_property_with_seed::<M>(request_id, property.property_id, seed)
 }
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
     request_id: &str,
     property_id: &str,
+) -> CheckOutcome {
+    check_machine_outcome_for_property_with_seed::<M>(request_id, property_id, None)
+}
+
+pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
+    request_id: &str,
+    property_id: &str,
+    seed: Option<u64>,
 ) -> CheckOutcome {
     let result = check_machine_property::<M>(property_id);
     let property = find_property::<M>(result.property_id);
@@ -3793,17 +3811,15 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
     );
     let source_hash = stable_hash_hex(M::model_id());
     let contract_hash = stable_hash_hex(&(M::model_id().to_string() + result.property_id));
-    let manifest = RunManifest {
-        request_id: request_id.to_string(),
-        run_id: run_id.clone(),
-        schema_version: "1.0.0".to_string(),
+    let manifest = build_run_manifest(
+        request_id.to_string(),
+        run_id.clone(),
         source_hash,
         contract_hash,
-        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        backend_name: BackendKind::Explicit,
-        backend_version: env!("CARGO_PKG_VERSION").to_string(),
-        seed: None,
-    };
+        BackendKind::Explicit,
+        env!("CARGO_PKG_VERSION").to_string(),
+        seed,
+    );
 
     let (status, reason_code, summary, trace) = match result.status {
         ModelingRunStatus::Pass => (
@@ -3866,10 +3882,17 @@ pub fn check_machine_outcome_for_property<M: VerifiedMachine>(
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub fn check_machine_outcomes<M: VerifiedMachine>(request_id: &str) -> Vec<ExplicitRunResult> {
+    check_machine_outcomes_with_seed::<M>(request_id, None)
+}
+
+pub fn check_machine_outcomes_with_seed<M: VerifiedMachine>(
+    request_id: &str,
+    seed: Option<u64>,
+) -> Vec<ExplicitRunResult> {
     property_ids::<M>()
         .into_iter()
         .filter_map(|property_id| {
-            match check_machine_outcome_for_property::<M>(request_id, property_id) {
+            match check_machine_outcome_for_property_with_seed::<M>(request_id, property_id, seed) {
                 CheckOutcome::Completed(result) => Some(result),
                 CheckOutcome::Errored(_) => None,
             }
@@ -3883,10 +3906,28 @@ pub fn check_machine_with_adapter<M: VerifiedMachine>(
     property_id: Option<&str>,
     adapter: &AdapterConfig,
 ) -> Result<CheckOutcome, String> {
+    check_machine_with_adapter_and_seed::<M>(request_id, property_id, adapter, None)
+}
+
+pub fn check_machine_with_adapter_and_seed<M: VerifiedMachine>(
+    request_id: &str,
+    property_id: Option<&str>,
+    adapter: &AdapterConfig,
+    seed: Option<u64>,
+) -> Result<CheckOutcome, String> {
     if matches!(adapter, AdapterConfig::Explicit) {
         return Ok(match property_id {
-            Some(property_id) => check_machine_outcome_for_property::<M>(request_id, property_id),
-            None => check_machine_outcome::<M>(request_id),
+            Some(property_id) => {
+                check_machine_outcome_for_property_with_seed::<M>(request_id, property_id, seed)
+            }
+            None => {
+                let property = primary_property::<M>();
+                check_machine_outcome_for_property_with_seed::<M>(
+                    request_id,
+                    property.property_id,
+                    seed,
+                )
+            }
         });
     }
     let model = lower_machine_model::<M>()?;
@@ -3901,20 +3942,18 @@ pub fn check_machine_with_adapter<M: VerifiedMachine>(
         })
         .ok_or_else(|| format!("model `{}` has no properties", M::model_id()))?;
     let mut plan = RunPlan::default();
-    plan.manifest = RunManifest {
-        request_id: request_id.to_string(),
-        run_id: format!(
+    plan.manifest = build_run_manifest(
+        request_id.to_string(),
+        format!(
             "run-{}",
             stable_hash_hex(&(request_id.to_string() + &property_id)).replace("sha256:", "")
         ),
-        schema_version: "1.0.0".to_string(),
-        source_hash: stable_hash_hex(M::model_id()),
-        contract_hash: snapshot.contract_hash,
-        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        backend_name: backend_kind_for_adapter(adapter),
-        backend_version: backend_version_for_adapter(adapter),
-        seed: None,
-    };
+        stable_hash_hex(M::model_id()),
+        snapshot.contract_hash,
+        backend_kind_for_adapter(adapter),
+        backend_version_for_adapter(adapter),
+        seed,
+    );
     plan.property_selection = PropertySelection::ExactlyOne(property_id);
     run_with_adapter(&model, &plan, adapter).map(|normalized| normalized.outcome)
 }
@@ -3931,11 +3970,7 @@ fn backend_kind_for_adapter(adapter: &AdapterConfig) -> BackendKind {
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 fn backend_version_for_adapter(adapter: &AdapterConfig) -> String {
-    match adapter {
-        AdapterConfig::Explicit | AdapterConfig::MockBmc => env!("CARGO_PKG_VERSION").to_string(),
-        AdapterConfig::SatVarisat => env!("CARGO_PKG_VERSION").to_string(),
-        AdapterConfig::SmtCvc5 { .. } | AdapterConfig::Command { .. } => "external".to_string(),
-    }
+    solver_backend_version_for_config(adapter)
 }
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
@@ -4205,7 +4240,7 @@ mod tests {
         ModelingRunStatus, ModelingState, StateSpec,
     };
     use crate::{
-        engine::{CheckOutcome, PropertySelection, RunManifest, RunPlan, RunStatus},
+        engine::{CheckOutcome, PropertySelection, RunPlan, RunStatus},
         ir::{BinaryOp, ExprIr, FieldType, Value},
         solver::{run_with_adapter, AdapterConfig},
         valid_actions, valid_state,
@@ -5078,17 +5113,15 @@ mod tests {
         let lowered = lower_machine_model::<BranchModel>().expect("branch model lowers");
         assert_eq!(lowered.actions.len(), 2);
         let mut plan = RunPlan::default();
-        plan.manifest = RunManifest {
-            request_id: "req-branch".to_string(),
-            run_id: "run-branch".to_string(),
-            schema_version: "1.0.0".to_string(),
-            source_hash: "sha256:test".to_string(),
-            contract_hash: "sha256:test".to_string(),
-            engine_version: env!("CARGO_PKG_VERSION").to_string(),
-            backend_name: crate::engine::BackendKind::Explicit,
-            backend_version: env!("CARGO_PKG_VERSION").to_string(),
-            seed: None,
-        };
+        plan.manifest = crate::engine::build_run_manifest(
+            "req-branch".to_string(),
+            "run-branch".to_string(),
+            "sha256:test".to_string(),
+            "sha256:test".to_string(),
+            crate::engine::BackendKind::Explicit,
+            env!("CARGO_PKG_VERSION").to_string(),
+            Some(17),
+        );
         plan.property_selection = PropertySelection::ExactlyOne("P_BRANCH_BOUND".to_string());
         plan.detect_deadlocks = false;
         let outcome = run_with_adapter(&lowered, &plan, &AdapterConfig::Explicit)

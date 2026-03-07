@@ -10,13 +10,16 @@ use crate::{
     coverage::{
         collect_coverage, machine_state_from_snapshot, validate_coverage_report, CoverageReport,
     },
-    engine::{CheckErrorEnvelope, CheckOutcome, PropertySelection, RunManifest, RunPlan},
+    engine::{build_run_manifest, CheckErrorEnvelope, CheckOutcome, PropertySelection, RunPlan},
     frontend,
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path},
     modeling::CapabilityDetail,
 ir::{ModelIr, PropertyKind},
     orchestrator::run_all_properties_with_backend,
-    solver::{capabilities_for_config, run_with_adapter, AdapterConfig, CapabilityMatrix},
+    solver::{
+        backend_version_for_config as solver_backend_version_for_config, capabilities_for_config,
+        run_with_adapter, AdapterConfig, CapabilityMatrix,
+    },
     support::{
         diagnostics::Diagnostic,
         hash::stable_hash_hex,
@@ -141,6 +144,7 @@ pub struct CheckRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
     pub solver_args: Vec<String>,
@@ -229,6 +233,7 @@ pub struct MinimizeRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
     pub solver_args: Vec<String>,
@@ -251,6 +256,7 @@ pub struct TestgenRequest {
     pub source: String,
     pub property_id: Option<String>,
     pub strategy: String,
+    pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
     pub solver_args: Vec<String>,
@@ -296,6 +302,7 @@ pub struct OrchestrateRequest {
     pub request_id: String,
     pub source_name: String,
     pub source: String,
+    pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
     pub solver_args: Vec<String>,
@@ -507,20 +514,18 @@ pub fn orchestrate_source(
     if is_bundled_model_ref(&request.source_name) {
         let backend = backend_config_from_orchestrate_request(request).map_err(|message| {
             CheckErrorEnvelope {
-                manifest: RunManifest {
-                    request_id: request.request_id.clone(),
-                    run_id: format!(
+                manifest: build_run_manifest(
+                    request.request_id.clone(),
+                    format!(
                         "run-{}",
                         stable_hash_hex(&request.request_id).replace("sha256:", "")
                     ),
-                    schema_version: "1.0.0".to_string(),
-                    source_hash: stable_hash_hex(&request.source_name),
-                    contract_hash: stable_hash_hex(&request.source_name),
-                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                    backend_name: crate::engine::BackendKind::Explicit,
-                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                    seed: None,
-                },
+                    stable_hash_hex(&request.source_name),
+                    stable_hash_hex(&request.source_name),
+                    crate::engine::BackendKind::Explicit,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    request.seed,
+                ),
                 status: crate::engine::ErrorStatus::Error,
                 assurance_level: crate::engine::AssuranceLevel::Incomplete,
                 diagnostics: vec![Diagnostic::new(
@@ -533,23 +538,22 @@ pub fn orchestrate_source(
         return orchestrate_bundled_model(
             &request.request_id,
             &request.source_name,
+            request.seed,
             Some(&backend),
         )
         .map_err(|message| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source_name),
-                contract_hash: stable_hash_hex(&request.source_name),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                seed: None,
-            },
+                stable_hash_hex(&request.source_name),
+                stable_hash_hex(&request.source_name),
+                crate::engine::BackendKind::Explicit,
+                env!("CARGO_PKG_VERSION").to_string(),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics: vec![Diagnostic::new(
@@ -563,20 +567,18 @@ pub fn orchestrate_source(
         backend_config_from_orchestrate_request(request).unwrap_or(AdapterConfig::Explicit);
     let model =
         frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source),
-                contract_hash: "sha256:unknown".to_string(),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: backend_kind_for_config(&backend_fallback),
-                backend_version: backend_version_for_config(&backend_fallback),
-                seed: None,
-            },
+                stable_hash_hex(&request.source),
+                "sha256:unknown".to_string(),
+                backend_kind_for_config(&backend_fallback),
+                backend_version_for_config(&backend_fallback),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics,
@@ -584,20 +586,18 @@ pub fn orchestrate_source(
     let snapshot = snapshot_model(&model);
     let backend =
         backend_config_from_orchestrate_request(request).map_err(|message| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source),
-                contract_hash: snapshot.contract_hash.clone(),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                seed: None,
-            },
+                stable_hash_hex(&request.source),
+                snapshot.contract_hash.clone(),
+                crate::engine::BackendKind::Explicit,
+                env!("CARGO_PKG_VERSION").to_string(),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics: vec![Diagnostic::new(
@@ -649,20 +649,18 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
             Ok(adapter) => adapter,
             Err(message) => {
                 return CheckOutcome::Errored(CheckErrorEnvelope {
-                    manifest: RunManifest {
-                        request_id: request.request_id.clone(),
-                        run_id: format!(
+                    manifest: build_run_manifest(
+                        request.request_id.clone(),
+                        format!(
                             "run-{}",
                             stable_hash_hex(&request.request_id).replace("sha256:", "")
                         ),
-                        schema_version: "1.0.0".to_string(),
-                        source_hash: stable_hash_hex(&request.source_name),
-                        contract_hash: stable_hash_hex(&request.source_name),
-                        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                        backend_name: crate::engine::BackendKind::Explicit,
-                        backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                        seed: None,
-                    },
+                        stable_hash_hex(&request.source_name),
+                        stable_hash_hex(&request.source_name),
+                        crate::engine::BackendKind::Explicit,
+                        env!("CARGO_PKG_VERSION").to_string(),
+                        request.seed,
+                    ),
                     status: crate::engine::ErrorStatus::Error,
                     assurance_level: crate::engine::AssuranceLevel::Incomplete,
                     diagnostics: vec![Diagnostic::new(
@@ -677,24 +675,23 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
             &request.request_id,
             &request.source_name,
             request.property_id.as_deref(),
+            request.seed,
             Some(&adapter),
         )
         .unwrap_or_else(|message| {
             CheckOutcome::Errored(CheckErrorEnvelope {
-                manifest: RunManifest {
-                    request_id: request.request_id.clone(),
-                    run_id: format!(
+                manifest: build_run_manifest(
+                    request.request_id.clone(),
+                    format!(
                         "run-{}",
                         stable_hash_hex(&request.request_id).replace("sha256:", "")
                     ),
-                    schema_version: "1.0.0".to_string(),
-                    source_hash: stable_hash_hex(&request.source_name),
-                    contract_hash: stable_hash_hex(&request.source_name),
-                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                    backend_name: crate::engine::BackendKind::Explicit,
-                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                    seed: None,
-                },
+                    stable_hash_hex(&request.source_name),
+                    stable_hash_hex(&request.source_name),
+                    crate::engine::BackendKind::Explicit,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    request.seed,
+                ),
                 status: crate::engine::ErrorStatus::Error,
                 assurance_level: crate::engine::AssuranceLevel::Incomplete,
                 diagnostics: vec![Diagnostic::new(
@@ -721,21 +718,19 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 })
                 .unwrap_or_else(|| "P_SAFE".to_string());
             let mut plan = RunPlan::default();
-            plan.manifest = RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            plan.manifest = build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&(request.request_id.clone() + &property_id))
                         .replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
                 source_hash,
-                contract_hash: snapshot.contract_hash,
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: backend_kind_for_config(&adapter),
-                backend_version: backend_version_for_config(&adapter),
-                seed: None,
-            };
+                snapshot.contract_hash,
+                backend_kind_for_config(&adapter),
+                backend_version_for_config(&adapter),
+                request.seed,
+            );
             plan.property_selection = PropertySelection::ExactlyOne(property_id);
             match run_with_adapter(&model, &plan, &adapter) {
                 Ok(normalized) => normalized.outcome,
@@ -752,20 +747,18 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
             }
         }
         Err(diagnostics) => CheckOutcome::Errored(CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
                 source_hash,
-                contract_hash: "sha256:unknown".to_string(),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: backend_kind_for_config(&adapter),
-                backend_version: backend_version_for_config(&adapter),
-                seed: None,
-            },
+                "sha256:unknown".to_string(),
+                backend_kind_for_config(&adapter),
+                backend_version_for_config(&adapter),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics,
@@ -777,20 +770,18 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
     if is_bundled_model_ref(&request.source_name) {
         return explain_bundled_model(&request.request_id, &request.source_name).map_err(
             |message| CheckErrorEnvelope {
-                manifest: RunManifest {
-                    request_id: request.request_id.clone(),
-                    run_id: format!(
+                manifest: build_run_manifest(
+                    request.request_id.clone(),
+                    format!(
                         "run-{}",
                         stable_hash_hex(&request.request_id).replace("sha256:", "")
                     ),
-                    schema_version: "1.0.0".to_string(),
-                    source_hash: stable_hash_hex(&request.source_name),
-                    contract_hash: stable_hash_hex(&request.source_name),
-                    engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                    backend_name: crate::engine::BackendKind::Explicit,
-                    backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                    seed: None,
-                },
+                    stable_hash_hex(&request.source_name),
+                    stable_hash_hex(&request.source_name),
+                    crate::engine::BackendKind::Explicit,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    request.seed,
+                ),
                 status: crate::engine::ErrorStatus::Error,
                 assurance_level: crate::engine::AssuranceLevel::Incomplete,
                 diagnostics: vec![Diagnostic::new(
@@ -1098,20 +1089,18 @@ pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, Ch
     let property_id = request.property_id.clone();
     let compiled =
         frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source),
-                contract_hash: "sha256:unknown".to_string(),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                seed: None,
-            },
+                stable_hash_hex(&request.source),
+                "sha256:unknown".to_string(),
+                crate::engine::BackendKind::Explicit,
+                env!("CARGO_PKG_VERSION").to_string(),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics,
@@ -1121,6 +1110,7 @@ pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, Ch
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id,
+        seed: request.seed,
         backend: request.backend.clone(),
         solver_executable: request.solver_executable.clone(),
         solver_args: request.solver_args.clone(),
@@ -1184,6 +1174,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             source_name: request.source_name.clone(),
             source: request.source.clone(),
             property_id: request.property_id.clone(),
+            seed: request.seed,
             backend: request.backend.clone(),
             solver_executable: request.solver_executable.clone(),
             solver_args: request.solver_args.clone(),
@@ -1194,23 +1185,22 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             &request.source_name,
             request.property_id.as_deref(),
             &request.strategy,
+            request.seed,
             bundled_adapter.as_ref(),
         )
         .map_err(|message| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source_name),
-                contract_hash: stable_hash_hex(&request.source_name),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                seed: None,
-            },
+                stable_hash_hex(&request.source_name),
+                stable_hash_hex(&request.source_name),
+                crate::engine::BackendKind::Explicit,
+                env!("CARGO_PKG_VERSION").to_string(),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics: vec![Diagnostic::new(
@@ -1225,26 +1215,25 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: request.property_id.clone(),
+        seed: request.seed,
         backend: request.backend.clone(),
         solver_executable: request.solver_executable.clone(),
         solver_args: request.solver_args.clone(),
     });
     let model =
         frontend::compile_model(&request.source).map_err(|diagnostics| CheckErrorEnvelope {
-            manifest: RunManifest {
-                request_id: request.request_id.clone(),
-                run_id: format!(
+            manifest: build_run_manifest(
+                request.request_id.clone(),
+                format!(
                     "run-{}",
                     stable_hash_hex(&request.request_id).replace("sha256:", "")
                 ),
-                schema_version: "1.0.0".to_string(),
-                source_hash: stable_hash_hex(&request.source),
-                contract_hash: "sha256:unknown".to_string(),
-                engine_version: env!("CARGO_PKG_VERSION").to_string(),
-                backend_name: crate::engine::BackendKind::Explicit,
-                backend_version: env!("CARGO_PKG_VERSION").to_string(),
-                seed: None,
-            },
+                stable_hash_hex(&request.source),
+                "sha256:unknown".to_string(),
+                crate::engine::BackendKind::Explicit,
+                env!("CARGO_PKG_VERSION").to_string(),
+                request.seed,
+            ),
             status: crate::engine::ErrorStatus::Error,
             assurance_level: crate::engine::AssuranceLevel::Incomplete,
             diagnostics,
@@ -3103,6 +3092,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "broken.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  y = 0\n".to_string(),
             property_id: None,
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3118,6 +3108,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            seed: Some(41),
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3185,6 +3176,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            seed: Some(43),
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3206,6 +3198,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source: source.to_string(),
             property_id: None,
             strategy: "counterexample".to_string(),
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3225,6 +3218,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source: source.to_string(),
             property_id: None,
             strategy: "witness".to_string(),
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3264,6 +3258,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source: source.to_string(),
             property_id: None,
             strategy: "guard".to_string(),
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3312,6 +3307,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "a.valid".to_string(),
             source: "".to_string(),
             property_id: None,
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3328,6 +3324,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source: "model A".to_string(),
             property_id: None,
             strategy: "weird".to_string(),
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3343,6 +3340,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "cmd.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            seed: Some(47),
             backend: Some("command".to_string()),
             solver_executable: Some("sh".to_string()),
             solver_args: vec![
@@ -3365,6 +3363,7 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
             source_name: "hash.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            seed: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3379,11 +3378,55 @@ fn inspect_hides_expr_for_deadlock_freedom_property() {
     }
 
     #[test]
+    fn check_records_generated_seed_and_platform_metadata() {
+        let outcome = check_source(&CheckRequest {
+            request_id: "req-seed-auto".to_string(),
+            source_name: "seed.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
+            property_id: Some("P_SAFE".to_string()),
+            seed: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        let CheckOutcome::Completed(result) = outcome else {
+            panic!("expected completed outcome");
+        };
+        assert_ne!(result.manifest.seed, 0);
+        assert!(!result.manifest.platform_metadata.os.is_empty());
+        assert!(!result.manifest.platform_metadata.arch.is_empty());
+        let json =
+            crate::evidence::render_outcome_json("seed.valid", &CheckOutcome::Completed(result));
+        assert!(json.contains("\"seed\":"));
+        assert!(json.contains("\"platform_metadata\""));
+    }
+
+    #[test]
+    fn check_is_reproducible_with_explicit_seed() {
+        let request = CheckRequest {
+            request_id: "req-seed-fixed".to_string(),
+            source_name: "seed.valid".to_string(),
+            source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n".to_string(),
+            property_id: Some("P_SAFE".to_string()),
+            seed: Some(99),
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        };
+        let first = check_source(&request);
+        let second = check_source(&request);
+        let first_json = crate::evidence::render_outcome_json("seed.valid", &first);
+        let second_json = crate::evidence::render_outcome_json("seed.valid", &second);
+        assert_eq!(first_json, second_json);
+    }
+
+    #[test]
     fn orchestrate_returns_one_entry_per_property() {
         let response = orchestrate_source(&OrchestrateRequest {
             request_id: "req-orch".to_string(),
             source_name: "a.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P1:\n  invariant: x <= 1\nproperty P2:\n  invariant: x <= 7\n".to_string(),
+            seed: Some(53),
             backend: Some("mock-bmc".to_string()),
             solver_executable: None,
             solver_args: vec![],
@@ -3469,9 +3512,5 @@ fn backend_kind_for_config(config: &AdapterConfig) -> crate::engine::BackendKind
 }
 
 fn backend_version_for_config(config: &AdapterConfig) -> String {
-    match config {
-        AdapterConfig::Command { .. } | AdapterConfig::SmtCvc5 { .. } => "external".to_string(),
-        AdapterConfig::SatVarisat => env!("CARGO_PKG_VERSION").to_string(),
-        _ => env!("CARGO_PKG_VERSION").to_string(),
-    }
+    solver_backend_version_for_config(config)
 }

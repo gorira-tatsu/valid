@@ -84,6 +84,7 @@ fn main() {
         json: parsed.json,
         progress_json: parsed.progress_json,
         model: parsed.model,
+        seed: parsed.seed,
         repeat: parsed.repeat,
         baseline_mode: parsed.baseline_mode,
         threshold_percent: parsed.threshold_percent,
@@ -125,6 +126,7 @@ fn main() {
 
 fn primary_usage() -> String {
     "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+"usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|clean> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -176,6 +178,7 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
         let output = build_external_command(&CliArgs {
             command: "benchmark".to_string(),
             model: Some(model.clone()),
+            seed: parsed.seed,
             repeat: parsed.repeat,
             baseline_mode: parsed.baseline_mode.clone(),
             threshold_percent: parsed.threshold_percent,
@@ -256,6 +259,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
         let mut command = build_external_command(&CliArgs {
             command: "check".to_string(),
             model: Some(model.clone()),
+            seed: parsed.seed,
             repeat: 0,
             baseline_mode: None,
             threshold_percent: None,
@@ -371,6 +375,9 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(property_id) = &parsed.property_id {
         command.arg(format!("--property={property_id}"));
     }
+    if let Some(seed) = parsed.seed {
+        command.arg(format!("--seed={seed}"));
+    }
     if let Some(backend) = &parsed.backend {
         command.arg(format!("--backend={backend}"));
     }
@@ -414,6 +421,7 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
     let output = build_external_command(&CliArgs {
         command: "list".to_string(),
         model: None,
+        seed: None,
         repeat: 0,
         baseline_mode: None,
         threshold_percent: None,
@@ -477,6 +485,7 @@ fn cmd_all(parsed: ParsedArgs) {
             source_name: normalized_model_ref(model),
             source: String::new(),
             property_id: parsed.property_id.clone(),
+            seed: parsed.seed,
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
             solver_args: parsed.solver_args.clone(),
@@ -632,6 +641,7 @@ fn cmd_benchmark(parsed: ParsedArgs) {
                 source_name: normalized_model_ref(&model),
                 source: String::new(),
                 property_id: parsed.property_id.clone(),
+                seed: parsed.seed,
                 backend: parsed.backend.clone(),
                 solver_executable: parsed.solver_executable.clone(),
                 solver_args: parsed.solver_args.clone(),
@@ -785,6 +795,7 @@ fn cmd_check(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -811,6 +822,7 @@ fn cmd_explain(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
+        seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -852,6 +864,7 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
         request_id: "cargo-valid-orchestrate".to_string(),
         source_name: normalized_model_ref(&model),
         source: String::new(),
+        seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -903,6 +916,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
             .strategy
             .clone()
             .unwrap_or_else(|| "counterexample".to_string()),
+        seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -1020,6 +1034,7 @@ struct ParsedArgs {
     json: bool,
     progress_json: bool,
     model: Option<String>,
+    seed: Option<u64>,
     repeat: usize,
     baseline_mode: Option<String>,
     threshold_percent: Option<u32>,
@@ -1046,6 +1061,7 @@ struct CliArgs {
     command: String,
     model: Option<String>,
     extra_positionals: Vec<String>,
+seed: Option<u64>,
     repeat: usize,
     baseline_mode: Option<String>,
     threshold_percent: Option<u32>,
@@ -1127,6 +1143,20 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             }
             _ if arg.starts_with("--property=") => {
                 parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())
+            }
+            _ if arg.starts_with("--seed=") => {
+                parsed.seed = Some(
+                    arg.trim_start_matches("--seed=")
+                        .parse()
+                        .unwrap_or_else(|_| usage_exit("`--seed` expects an unsigned integer")),
+                )
+            }
+            "--seed" => {
+                parsed.seed = Some(
+                    next_arg(&mut iter, "--seed")
+                        .parse()
+                        .unwrap_or_else(|_| usage_exit("`--seed` expects an unsigned integer")),
+                )
             }
             _ if arg.starts_with("--backend=") => {
                 parsed.backend = Some(arg.trim_start_matches("--backend=").to_string())
