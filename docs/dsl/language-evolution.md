@@ -80,7 +80,86 @@ on Inc {
 - text abstraction
   - raw string theoryではなく、policy/password向けの bounded abstraction
 
-## 検討中 5: logic sugar
+## 検討中 5: transition updates sugar (`..state`)
+
+### 背景
+
+declarative `transitions` は canonical path ですが、更新対象が少ない遷移でも
+現状は state literal を全面的に書き下ろす必要がありました。
+
+```rust
+on Approve {
+    when |state| !state.approved
+    => [ReviewState {
+        score: state.score,
+        waiver: state.waiver,
+        approved: true,
+    }];
+}
+```
+
+これは:
+
+- frame condition が冗長になる
+- `String` など非 `Copy` field の保持が書きづらい
+- arbitrary expr list に逃げると transition metadata が薄くなる
+
+という問題を持ちます。
+
+### 決定
+
+declarative transition 内の state literal に、明示的な frame condition sugar として
+`..state` を導入します。
+
+```rust
+on Approve {
+    when |state| !state.approved
+    => [ReviewState {
+        approved: true,
+        ..state
+    }];
+}
+```
+
+意味は次の通りです。
+
+- 明示した field だけが update
+- `..state` が未指定 field の保持を表す
+- implicit retention はしない
+
+つまり、未変更 field を残したいときは必ず `..state` を書きます。
+
+### lowering / IR 方針
+
+- generated `step` では `State { approved: true, ..state.clone() }` 相当に展開する
+- `TransitionUpdateDescriptor` / machine IR updates には明示 field だけを残す
+- `effect` 文字列は source-level の `..state` 形を保持する
+- `reads` / `writes` は従来どおり action metadata を一次ソースとする
+
+これにより core IR は flat guarded transition のまま保てます。
+
+### `macro_rules!` 制約との整合
+
+今回の採用構文は `macro_rules!` で扱える範囲に限定します。
+
+- 許可: `..state` のような identifier-based struct update
+- 非採用: `..state.clone()` のような arbitrary expression
+
+後者を許すと、opaque expr path に落ちて transition metadata を失いやすいためです。
+
+### 後方互換性
+
+- 既存の `field: expr` を並べる完全な state literal はそのまま使える
+- `=> [expr, ...];` の generic form もそのまま使える
+- 新しい sugar は declarative transition literal の ergonomic improvement に留める
+
+### non-goals
+
+- implicit frame condition inference
+- nested spread / multiple spread
+- write-set の自動推論変更
+
+## 検討中 6: logic sugar
 
 今後の候補:
 
@@ -92,7 +171,7 @@ on Inc {
 
 ただし core IR は小さく保つ方針です。
 
-## 検討中 6: text / regex story
+## 検討中 7: text / regex story
 
 現在の text support は explicit-first です。
 
@@ -118,7 +197,7 @@ on Inc {
 
 これは backend-neutral にしやすい可能性があります。
 
-## 検討中 7: step の位置づけ
+## 検討中 8: step の位置づけ
 
 `step` を完全に消す予定はありませんが、位置づけはかなり明確です。
 
@@ -131,7 +210,7 @@ on Inc {
   - solver-visible
   - graph/coverage/testgen/explain の正規入力
 
-## 検討中 8: IDE / diagnostics
+## 検討中 9: IDE / diagnostics
 
 今後強めたいもの:
 
@@ -140,7 +219,7 @@ on Inc {
 - rust-analyzer での誤診断低減
 - `cargo valid readiness` / `cargo valid migrate` の提案精度向上
 
-## 検討中 9: packaging
+## 検討中 10: packaging
 
 目標:
 

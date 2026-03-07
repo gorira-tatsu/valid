@@ -105,7 +105,17 @@ transitions {
 }
 ```
 
-内部では flat な guarded transition IR に lower されます。
+未変更 field を明示的に保持したいときは、struct update 形式の `..state` を使えます。
+
+```rust
+=> [ReviewState {
+    approved: true,
+    ..state
+}];
+```
+
+この `..state` は frame condition sugar です。内部では flat な guarded
+transition IR に lower され、IR 上の update として残るのは明示 field だけです。
 
 ### 2. step
 

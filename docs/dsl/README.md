@@ -259,13 +259,27 @@ transitions {
         [tags = ["allow_path", "approval_path"]]
         when |state| state.approved == false
         => [ReviewState {
-            score: state.score,
-            waiver: state.waiver,
             approved: true,
+            ..state
         }];
     }
 }
 ```
+
+When a transition only changes a subset of fields, prefer explicit frame
+condition sugar:
+
+```rust
+=> [ReviewState {
+    approved: true,
+    ..state
+}];
+```
+
+`..state` keeps omitted fields from the current state. Only explicitly listed
+fields are recorded as transition updates in the transition metadata and
+machine IR. There is no implicit carry-forward of omitted fields; write
+`..state` when you want that behavior.
 
 Each transition carries:
 
