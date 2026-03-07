@@ -666,7 +666,12 @@ struct CliArgs {
 
 fn parse_cli(args: Vec<String>) -> CliArgs {
     let mut parsed = CliArgs::default();
-    let mut iter = args.into_iter();
+    let normalized_args = if matches!(args.first().map(String::as_str), Some("valid")) {
+        args.into_iter().skip(1).collect::<Vec<_>>()
+    } else {
+        args
+    };
+    let mut iter = normalized_args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--manifest-path" => {

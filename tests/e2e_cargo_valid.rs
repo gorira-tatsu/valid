@@ -113,6 +113,20 @@ fn cargo_valid_lists_registered_models() {
 }
 
 #[test]
+fn cargo_subcommand_style_prefix_is_accepted() {
+    let _guard = cargo_lock().lock().unwrap();
+    let output = Command::new(cargo_valid_path())
+        .arg("valid")
+        .arg("models")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid should accept cargo subcommand style prefix");
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"prod-deploy-safe\""));
+}
+
+#[test]
 fn cargo_valid_registry_flag_alias_works() {
     let _guard = cargo_lock().lock().unwrap();
     let output = Command::new(cargo_valid_path())
