@@ -1,7 +1,8 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -267,7 +268,7 @@ fn cli_check_and_orchestrate_work_against_repo_examples() {
         .arg("--json")
         .output()
         .expect("fail check should run");
-    assert_eq!(fail_output.status.code(), Some(2));
+    assert_eq!(fail_output.status.code(), Some(1));
 
     let orchestrate = Command::new(binary_path())
         .arg("orchestrate")
@@ -331,7 +332,7 @@ fn cli_command_backend_demo_script_normalizes_failures() {
         .arg(solver)
         .output()
         .expect("command backend should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("MOCK_SOLVER_COUNTEREXAMPLE"));
@@ -354,7 +355,7 @@ fn cli_cvc5_backend_demo_script_normalizes_failures() {
         .arg(solver)
         .output()
         .expect("cvc5 backend should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("CVC5_COUNTEREXAMPLE"));
@@ -404,7 +405,7 @@ fn bundled_rust_models_run_via_main_cli_path() {
         .arg("--json")
         .output()
         .expect("check should run");
-    assert_eq!(check.status.code(), Some(2));
+    assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
 
     let coverage = Command::new(binary_path())
@@ -427,7 +428,81 @@ fn main_cli_lints_bundled_step_model() {
         .arg("--json")
         .output()
         .expect("lint should run");
-    assert_eq!(lint.status.code(), Some(2));
+    assert_eq!(lint.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&lint.stdout);
     assert!(stdout.contains("\"opaque_step_closure\""));
+}
+
+#[test]
+fn cli_commands_and_schema_are_machine_readable() {
+    let commands = Command::new(binary_path())
+        .arg("commands")
+        .arg("--json")
+        .output()
+        .expect("commands should run");
+    assert!(commands.status.success());
+    let commands_stdout = String::from_utf8_lossy(&commands.stdout);
+    assert!(commands_stdout.contains("\"surface\":\"valid\""));
+    assert!(commands_stdout.contains("\"name\":\"check\""));
+    assert!(commands_stdout.contains("\"response\":\"schema.run_result\""));
+
+    let schema = Command::new(binary_path())
+        .arg("schema")
+        .arg("check")
+        .output()
+        .expect("schema should run");
+    assert!(schema.status.success());
+    let schema_stdout = String::from_utf8_lossy(&schema.stdout);
+    assert!(schema_stdout.contains("\"command\":\"check\""));
+    assert!(schema_stdout.contains("\"parameter_schema_id\":\"schema.cli.valid.check.parameters\""));
+    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.run_result\""));
+}
+
+#[test]
+fn cli_json_errors_go_to_stderr() {
+    let missing = repo_path("tests/fixtures/models/does-not-exist.valid");
+    let output = Command::new(binary_path())
+        .arg("check")
+        .arg(&missing)
+        .arg("--json")
+        .output()
+        .expect("json error case should run");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("\"kind\":\"cli_error\""));
+    assert!(stderr.contains("\"command\":\"check\""));
+    assert!(stderr.contains("failed to read"));
+}
+
+#[test]
+fn cli_batch_runs_multiple_operations() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let fail = repo_path("tests/fixtures/models/failing_counter.valid");
+    let request = format!(
+        "{{\"schema_version\":\"1.0.0\",\"continue_on_error\":true,\"operations\":[{{\"command\":\"check\",\"args\":[\"{}\"],\"json\":true}},{{\"command\":\"check\",\"args\":[\"{}\"],\"json\":true}}]}}",
+        safe.display(),
+        fail.display()
+    );
+    let mut child = Command::new(binary_path())
+        .arg("batch")
+        .arg("--json")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("batch should spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(request.as_bytes())
+        .expect("write batch request");
+    let output = child.wait_with_output().expect("batch should complete");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"command\":\"check\""));
+    assert!(stdout.contains("\"exit_code\":0"));
+    assert!(stdout.contains("\"exit_code\":1"));
 }

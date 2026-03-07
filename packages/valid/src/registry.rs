@@ -1,4 +1,8 @@
-use std::{env, fs, process};
+use std::{
+    env, fs,
+    io::{self, Read},
+    process::{self, Command},
+};
 
 use crate::{
     benchmark::{
@@ -6,13 +10,19 @@ use crate::{
         render_benchmark_comparison_json, render_benchmark_comparison_text, render_benchmark_json,
         render_benchmark_text,
     },
+    cli::{
+        child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
+        parse_batch_request, render_batch_response, render_cli_error_json, render_cli_warning_json,
+        render_commands_json, render_commands_text, render_schema_json, usage_diagnostic,
+        BatchResult, ExitCode, ProgressReporter, Surface,
+    },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
         snapshot_model, write_lock_file, ContractSnapshot,
     },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
     engine::CheckOutcome,
-    evidence::{render_diagnostics_json, render_outcome_json, render_outcome_text},
+    evidence::{render_outcome_json, render_outcome_text},
     modeling::{
         build_machine_test_vectors_for_strategy, check_machine_outcome,
         check_machine_outcome_for_property, check_machine_outcomes, check_machine_with_adapter,
@@ -36,6 +46,26 @@ use crate::api::{
     InspectTransitionUpdate, OrchestrateResponse, OrchestratedRunSummary, TestgenResponse,
 };
 
+const REGISTRY_USAGE: &str =
+    "usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
+const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
+const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]";
+const LINT_USAGE: &str = "usage: <registry-bin> lint <model> [--json] [--progress=json]";
+const BENCHMARK_USAGE: &str = "usage: <registry-bin> benchmark <model> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
+const MIGRATE_USAGE: &str =
+    "usage: <registry-bin> migrate <model> [--json] [--progress=json] [--write[=<path>]] [--check]";
+const CHECK_USAGE: &str = "usage: <registry-bin> check <model> [--json] [--progress=json] [--property=<id>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
+const EXPLAIN_USAGE: &str = "usage: <registry-bin> explain <model> [--json] [--progress=json]";
+const COVERAGE_USAGE: &str = "usage: <registry-bin> coverage <model> [--json] [--progress=json]";
+const ORCHESTRATE_USAGE: &str = "usage: <registry-bin> orchestrate <model> [--json] [--progress=json] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
+const TESTGEN_USAGE: &str = "usage: <registry-bin> testgen <model> [--json] [--progress=json] [--property=<id>] [--strategy=<...>]";
+const REPLAY_USAGE: &str = "usage: <registry-bin> replay <model> [--json] [--progress=json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]";
+const CONTRACT_USAGE: &str =
+    "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json] [--progress=json]";
+const SCHEMA_USAGE: &str = "usage: <registry-bin> schema <command>";
+const BATCH_USAGE: &str = "usage: <registry-bin> batch [--json] [--progress=json] < batch.json";
+
 pub struct RegisteredModel {
     pub name: &'static str,
     pub inspect: fn(&str) -> InspectResponse,
@@ -43,7 +73,7 @@ pub struct RegisteredModel {
     pub explain: fn(&str) -> Result<ExplainResponse, String>,
     pub coverage: fn() -> CoverageReport,
     pub orchestrate: fn(&str, Option<&AdapterConfig>) -> Result<OrchestrateResponse, String>,
-    pub testgen: fn(Option<&str>, &str) -> TestgenResponse,
+    pub testgen: fn(Option<&str>, &str, bool) -> TestgenResponse,
     pub replay: fn(Option<&str>, &[String], Option<&str>) -> Result<String, String>,
     pub contract_snapshot: fn() -> Result<ContractSnapshot, String>,
 }
@@ -77,9 +107,10 @@ macro_rules! valid_models {
 
 pub fn run_registry_cli(models: Vec<RegisteredModel>) {
     let models = models;
-    let mut args = env::args().skip(1);
-    let command = normalize_command(&args.next().unwrap_or_default());
-    let remaining = args.collect::<Vec<_>>();
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let json = detect_json_flag(&args) || args.iter().any(|arg| arg == "--format=json");
+    let command = normalize_command(args.first().map(String::as_str).unwrap_or_default());
+    let remaining = args.into_iter().skip(1).collect::<Vec<_>>();
 
     match command.as_str() {
         "list" => cmd_list(&models, remaining),
@@ -95,8 +126,11 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "testgen" => cmd_testgen(&models, remaining),
         "replay" => cmd_replay(&models, remaining),
         "contract" => cmd_contract(&models, remaining),
-        "help" => usage_exit(),
-        _ => usage_exit(),
+        "commands" => cmd_commands(remaining),
+        "schema" => cmd_schema(remaining),
+        "batch" => cmd_batch(remaining),
+        "help" => usage_exit("registry", json, REGISTRY_USAGE),
+        _ => usage_exit("registry", json, REGISTRY_USAGE),
     }
 }
 
@@ -114,7 +148,7 @@ fn normalize_command(command: &str) -> String {
 }
 
 fn cmd_list(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
+    let parsed = parse_args(args, "list", LIST_USAGE);
     if parsed.json {
         println!(
             "{{\"models\":[{}]}}",
@@ -132,19 +166,37 @@ fn cmd_list(models: &[RegisteredModel], args: Vec<String>) {
 }
 
 fn cmd_inspect(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "inspect", INSPECT_USAGE);
+    let progress = ProgressReporter::new("inspect", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "inspect",
+        parsed.json,
+        INSPECT_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let response = (model.inspect)("registry-inspect");
     if parsed.json {
         println!("{}", render_inspect_json(&response));
     } else {
         print!("{}", render_inspect_text(&response));
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "graph", GRAPH_USAGE);
+    let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
+    let progress = ProgressReporter::new("graph", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "graph",
+        json_output,
+        GRAPH_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let response = (model.inspect)("registry-graph");
     let view = GraphView::parse(parsed.view.as_deref());
     match parsed.format.as_deref().unwrap_or("mermaid") {
@@ -154,11 +206,20 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
         "svg" => println!("{}", render_model_svg_with_view(&response, view)),
         _ => println!("{}", render_model_mermaid_with_view(&response, view)),
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_lint(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "lint", LINT_USAGE);
+    let progress = ProgressReporter::new("lint", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "lint",
+        parsed.json,
+        LINT_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let response = lint_from_inspect(&(model.inspect)("registry-lint"));
     if parsed.json {
         println!("{}", render_lint_json(&response));
@@ -169,15 +230,29 @@ fn cmd_lint(models: &[RegisteredModel], args: Vec<String>) {
         .findings
         .iter()
         .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
-    process::exit(if has_findings { 2 } else { 0 });
+    let exit_code = if has_findings {
+        ExitCode::Fail
+    } else {
+        ExitCode::Success
+    };
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "benchmark", BENCHMARK_USAGE);
+    let progress = ProgressReporter::new("benchmark", parsed.progress_json);
+    let repeat_total = parsed.repeat.max(1);
+    progress.start(Some(repeat_total));
+    let model = find_model(
+        "benchmark",
+        parsed.json,
+        BENCHMARK_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("benchmark", parsed.json, &message, Some(BENCHMARK_USAGE))
     });
     let backend_label = parsed
         .backend
@@ -189,16 +264,23 @@ fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
         &backend_label,
         parsed.property_id.as_deref(),
         parsed.repeat,
-        |_| {
-            (model.check)(
+        |iteration| {
+            progress.item_start(iteration, repeat_total, model.name);
+            let outcome = (model.check)(
                 "registry-benchmark",
                 parsed.property_id.as_deref(),
                 adapter.as_ref(),
             )
             .unwrap_or_else(|message| {
-                eprintln!("{message}");
-                process::exit(3);
-            })
+                message_exit("benchmark", parsed.json, &message, Some(BENCHMARK_USAGE))
+            });
+            progress.item_complete(
+                iteration,
+                repeat_total,
+                model.name,
+                ExitCode::from_check_outcome(&outcome).code(),
+            );
+            outcome
         },
     );
     let summary_json = render_benchmark_json(&summary);
@@ -218,6 +300,7 @@ fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
             &baseline_id,
             parsed.baseline_mode.as_deref().unwrap_or("compare"),
             parsed.threshold_percent.unwrap_or(25),
+            parsed.json,
         );
     if parsed.json {
         println!(
@@ -234,29 +317,36 @@ fn cmd_benchmark(models: &[RegisteredModel], args: Vec<String>) {
     let baseline_mode = parsed.baseline_mode.as_deref().unwrap_or("compare");
     let exit_code = if baseline_mode == "ignore" {
         if summary.error_count > 0 {
-            3
-        } else if summary.fail_count > 0 {
-            2
+            ExitCode::Error
+        } else if summary.fail_count > 0 || regression_detected {
+            ExitCode::Fail
         } else if summary.unknown_count > 0 {
-            4
-        } else if regression_detected {
-            5
+            ExitCode::Unknown
         } else {
-            0
+            ExitCode::Success
         }
     } else if summary.error_count > 0 {
-        3
+        ExitCode::Error
     } else if regression_detected {
-        5
+        ExitCode::Fail
     } else {
-        0
+        ExitCode::Success
     };
-    process::exit(exit_code);
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_migrate(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "migrate", MIGRATE_USAGE);
+    let progress = ProgressReporter::new("migrate", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "migrate",
+        parsed.json,
+        MIGRATE_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let inspect = (model.inspect)("registry-migrate");
     let lint = lint_from_inspect(&inspect);
     let migration = migration_from_inspect(&inspect, &lint, parsed.check);
@@ -285,30 +375,41 @@ fn cmd_migrate(models: &[RegisteredModel], args: Vec<String>) {
     }
     let exit_code = if parsed.check {
         match migration.check.as_ref().map(|check| check.status.as_str()) {
-            Some("already-declarative") => 0,
-            Some("no-candidates") => 2,
-            Some("candidate-complete") | Some("partial") => 6,
-            _ => 3,
+            Some("already-declarative") => ExitCode::Success,
+            Some("no-candidates") => ExitCode::Unknown,
+            Some("candidate-complete") | Some("partial") => ExitCode::Fail,
+            _ => ExitCode::Error,
         }
     } else if migration.snippets.is_empty() {
-        2
+        ExitCode::Unknown
     } else {
-        0
+        ExitCode::Success
     };
-    process::exit(exit_code);
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_check(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "check", CHECK_USAGE);
+    let progress = ProgressReporter::new("check", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "check",
+        parsed.json,
+        CHECK_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let inspect = (model.inspect)("registry-check-preflight");
-    let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    let adapter = adapter_from_parsed_args(&parsed)
+        .unwrap_or_else(|message| message_exit("check", parsed.json, &message, Some(CHECK_USAGE)));
     if matches!(adapter, Some(AdapterConfig::Explicit) | None) {
         if let Some(warning) = explicit_analysis_warning(&inspect) {
-            eprintln!("{warning}");
+            if parsed.json || parsed.progress_json {
+                eprintln!("{}", render_cli_warning_json("check", &warning));
+            } else {
+                eprintln!("{warning}");
+            }
         }
     }
     let outcome = (model.check)(
@@ -316,28 +417,28 @@ fn cmd_check(models: &[RegisteredModel], args: Vec<String>) {
         parsed.property_id.as_deref(),
         adapter.as_ref(),
     )
-    .unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    .unwrap_or_else(|message| message_exit("check", parsed.json, &message, Some(CHECK_USAGE)));
     if parsed.json {
         println!("{}", render_outcome_json(model.name, &outcome));
     } else {
         print!("{}", render_outcome_text(&outcome));
     }
-    process::exit(match outcome {
-        CheckOutcome::Completed(result) => match result.status {
-            crate::engine::RunStatus::Pass => 0,
-            crate::engine::RunStatus::Fail => 2,
-            crate::engine::RunStatus::Unknown => 4,
-        },
-        CheckOutcome::Errored(_) => 3,
-    });
+    let exit_code = ExitCode::from_check_outcome(&outcome);
+    progress.finish(exit_code);
+    process::exit(exit_code.code());
 }
 
 fn cmd_explain(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "explain", EXPLAIN_USAGE);
+    let progress = ProgressReporter::new("explain", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "explain",
+        parsed.json,
+        EXPLAIN_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     match (model.explain)("registry-explain") {
         Ok(response) => {
             if parsed.json {
@@ -345,47 +446,61 @@ fn cmd_explain(models: &[RegisteredModel], args: Vec<String>) {
             } else {
                 print!("{}", render_explain_text(&response));
             }
+            progress.finish(ExitCode::Success);
         }
         Err(message) => {
-            if parsed.json {
-                println!(
-                    "{}",
-                    render_diagnostics_json(&[crate::support::diagnostics::Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        message,
-                    )])
-                );
-            } else {
-                eprintln!("{message}");
-            }
-            process::exit(3);
+            message_exit("explain", parsed.json, &message, Some(EXPLAIN_USAGE));
         }
     }
 }
 
 fn cmd_coverage(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "coverage", COVERAGE_USAGE);
+    let progress = ProgressReporter::new("coverage", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "coverage",
+        parsed.json,
+        COVERAGE_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let report = (model.coverage)();
     if parsed.json {
         println!("{}", render_coverage_json(&report));
     } else {
         println!("{}", render_coverage_text(&report));
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "orchestrate", ORCHESTRATE_USAGE);
+    let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "orchestrate",
+        parsed.json,
+        ORCHESTRATE_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit(
+            "orchestrate",
+            parsed.json,
+            &message,
+            Some(ORCHESTRATE_USAGE),
+        )
     });
     let response =
         (model.orchestrate)("registry-orchestrate", adapter.as_ref()).unwrap_or_else(|message| {
-            eprintln!("{message}");
-            process::exit(3);
+            message_exit(
+                "orchestrate",
+                parsed.json,
+                &message,
+                Some(ORCHESTRATE_USAGE),
+            )
         });
     if parsed.json {
         let body = response
@@ -413,14 +528,24 @@ fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
             println!("property_id: {} status: {}", run.property_id, run.status);
         }
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "testgen", TESTGEN_USAGE);
+    let progress = ProgressReporter::new("testgen", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "testgen",
+        parsed.json,
+        TESTGEN_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let response = (model.testgen)(
         parsed.property_id.as_deref(),
         parsed.strategy.as_deref().unwrap_or("counterexample"),
+        parsed.json,
     );
     if parsed.json {
         println!(
@@ -460,21 +585,28 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
             }
         }
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_replay(models: &[RegisteredModel], args: Vec<String>) {
-    let parsed = parse_args(args);
-    let model = find_model(models, parsed.model.as_deref());
+    let parsed = parse_args(args, "replay", REPLAY_USAGE);
+    let progress = ProgressReporter::new("replay", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "replay",
+        parsed.json,
+        REPLAY_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
     let response = (model.replay)(
         parsed.property_id.as_deref(),
         &parsed.actions,
         parsed.focus_action_id.as_deref(),
     )
-    .unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    .unwrap_or_else(|message| message_exit("replay", parsed.json, &message, Some(REPLAY_USAGE)));
     println!("{response}");
+    progress.finish(ExitCode::Success);
 }
 
 fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
@@ -712,13 +844,12 @@ fn orchestrate_machine<M: VerifiedMachine>(
 fn testgen_machine<M: VerifiedMachine>(
     property_id: Option<&str>,
     request_id: &str,
+    json: bool,
 ) -> TestgenResponse {
     let mut vectors = build_machine_test_vectors_for_strategy::<M>(property_id, request_id);
     annotate_registry_replay_targets::<M>(property_id, &mut vectors);
-    let generated_files = write_generated_test_files(&vectors).unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    let generated_files = write_generated_test_files(&vectors)
+        .unwrap_or_else(|message| message_exit("testgen", json, &message, Some(TESTGEN_USAGE)));
     TestgenResponse {
         schema_version: "1.0.0".to_string(),
         request_id: "registry-testgen".to_string(),
@@ -811,6 +942,7 @@ fn annotate_registry_replay_targets<M: VerifiedMachine>(
 #[derive(Default)]
 struct ParsedArgs {
     json: bool,
+    progress_json: bool,
     model: Option<String>,
     repeat: usize,
     baseline_mode: Option<String>,
@@ -828,13 +960,24 @@ struct ParsedArgs {
     check: bool,
 }
 
-fn parse_args(args: Vec<String>) -> ParsedArgs {
+fn parse_args(args: Vec<String>, command: &str, usage: &str) -> ParsedArgs {
     let mut parsed = ParsedArgs::default();
     parsed.repeat = 3;
+    parsed.json = detect_json_flag(&args) || args.iter().any(|arg| arg == "--format=json");
+    parsed.progress_json = detect_progress_json_flag(&args);
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         if arg == "--json" {
             parsed.json = true;
+        } else if arg == "--progress=json" {
+            parsed.progress_json = true;
+        } else if arg.starts_with("--progress=") {
+            message_exit(
+                command,
+                parsed.json,
+                "unsupported progress mode",
+                Some(usage),
+            );
         } else if arg == "--check" {
             parsed.check = true;
         } else if arg == "--write" {
@@ -846,9 +989,15 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
         } else if let Some(value) = arg.strip_prefix("--baseline=") {
             parsed.baseline_mode = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--threshold-percent=") {
-            parsed.threshold_percent = Some(value.parse().unwrap_or_else(|_| usage_exit()));
+            parsed.threshold_percent = Some(
+                value
+                    .parse()
+                    .unwrap_or_else(|_| usage_exit(command, parsed.json, usage)),
+            );
         } else if let Some(value) = arg.strip_prefix("--repeat=") {
-            parsed.repeat = value.parse().unwrap_or_else(|_| usage_exit());
+            parsed.repeat = value
+                .parse()
+                .unwrap_or_else(|_| usage_exit(command, parsed.json, usage));
         } else if let Some(value) = arg.strip_prefix("--format=") {
             parsed.format = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--view=") {
@@ -860,11 +1009,15 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
         } else if arg == "--solver-exec" {
-            parsed.solver_executable = Some(iter.next().unwrap_or_else(|| usage_exit()));
+            parsed.solver_executable = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit(command, parsed.json, usage)),
+            );
         } else if arg == "--solver-arg" {
-            parsed
-                .solver_args
-                .push(iter.next().unwrap_or_else(|| usage_exit()));
+            parsed.solver_args.push(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit(command, parsed.json, usage)),
+            );
         } else if let Some(value) = arg.strip_prefix("--actions=") {
             parsed.actions = value
                 .split(',')
@@ -876,7 +1029,7 @@ fn parse_args(args: Vec<String>) -> ParsedArgs {
         } else if parsed.model.is_none() {
             parsed.model = Some(arg);
         } else {
-            usage_exit();
+            usage_exit(command, parsed.json, usage);
         }
     }
     parsed
@@ -906,16 +1059,26 @@ fn adapter_from_parsed_args(parsed: &ParsedArgs) -> Result<Option<AdapterConfig>
     }
 }
 
-fn find_model<'a>(models: &'a [RegisteredModel], model_name: Option<&str>) -> &'a RegisteredModel {
+fn find_model<'a>(
+    command: &str,
+    json: bool,
+    usage: &str,
+    models: &'a [RegisteredModel],
+    model_name: Option<&str>,
+) -> &'a RegisteredModel {
     let Some(model_name) = model_name else {
-        usage_exit();
+        usage_exit(command, json, usage);
     };
     models
         .iter()
         .find(|model| model.name == model_name)
         .unwrap_or_else(|| {
-            eprintln!("unknown model `{model_name}`");
-            process::exit(3);
+            message_exit(
+                command,
+                json,
+                &format!("unknown model `{model_name}`"),
+                Some(usage),
+            )
         })
 }
 
@@ -924,6 +1087,7 @@ fn registry_benchmark_baseline_outputs(
     baseline_id: &str,
     baseline_mode: &str,
     threshold_percent: u32,
+    json: bool,
 ) -> (Option<String>, Option<String>, bool) {
     match baseline_mode {
         "ignore" => (None, None, false),
@@ -990,8 +1154,12 @@ fn registry_benchmark_baseline_outputs(
             )
         }
         other => {
-            eprintln!("unsupported benchmark baseline mode `{other}`");
-            process::exit(3);
+            message_exit(
+                "benchmark",
+                json,
+                &format!("unsupported benchmark baseline mode `{other}`"),
+                Some(BENCHMARK_USAGE),
+            );
         }
     }
 }
@@ -1009,7 +1177,11 @@ fn registry_migration_output_path(model: &str, requested: &str) -> String {
 }
 
 fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
-    let json = args.iter().any(|a| a == "--json");
+    let json = detect_json_flag(&args);
+    reject_unsupported_progress_mode("contract", json, &args, CONTRACT_USAGE);
+    let progress = ProgressReporter::from_args("contract", &args);
+    let total = models.len();
+    progress.start(Some(total));
     let positional: Vec<&str> = args
         .iter()
         .filter(|a| !a.starts_with("--"))
@@ -1021,14 +1193,18 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
     match sub {
         "snapshot" => {
             let mut snapshots = Vec::new();
-            for model in models {
-                match (model.contract_snapshot)() {
-                    Ok(snapshot) => snapshots.push(snapshot),
-                    Err(message) => {
-                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
-                        process::exit(3);
-                    }
-                }
+            for (index, model) in models.iter().enumerate() {
+                progress.item_start(index, total, model.name);
+                let snapshot = (model.contract_snapshot)().unwrap_or_else(|message| {
+                    message_exit(
+                        "contract",
+                        json,
+                        &format!("contract snapshot failed for `{}`: {message}", model.name),
+                        Some(CONTRACT_USAGE),
+                    )
+                });
+                progress.item_complete(index, total, model.name, ExitCode::Success.code());
+                snapshots.push(snapshot);
             }
             if json {
                 let body = snapshots
@@ -1047,50 +1223,65 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                     println!("{}: {}", snapshot.model_id, snapshot.contract_hash);
                 }
             }
+            progress.finish(ExitCode::Success);
         }
         "lock" => {
             let output = lock_path.unwrap_or_else(|| "valid.lock.json".to_string());
             let mut snapshots = Vec::new();
-            for model in models {
-                match (model.contract_snapshot)() {
-                    Ok(snapshot) => snapshots.push(snapshot),
-                    Err(message) => {
-                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
-                        process::exit(3);
-                    }
-                }
+            for (index, model) in models.iter().enumerate() {
+                progress.item_start(index, total, model.name);
+                let snapshot = (model.contract_snapshot)().unwrap_or_else(|message| {
+                    message_exit(
+                        "contract",
+                        json,
+                        &format!("contract snapshot failed for `{}`: {message}", model.name),
+                        Some(CONTRACT_USAGE),
+                    )
+                });
+                progress.item_complete(index, total, model.name, ExitCode::Success.code());
+                snapshots.push(snapshot);
             }
             let lock = build_lock_file(snapshots);
             write_lock_file(&output, &lock).unwrap_or_else(|err| {
-                eprintln!("{err}");
-                process::exit(3);
+                message_exit("contract", json, &err.to_string(), Some(CONTRACT_USAGE))
             });
             if json {
                 println!("{}", render_lock_json(&lock));
             } else {
                 println!("lock written: {output}");
             }
+            progress.finish(ExitCode::Success);
         }
         "drift" | "check" => {
             let lock_file = lock_path.unwrap_or_else(|| "valid.lock.json".to_string());
             let lock_body = fs::read_to_string(&lock_file).unwrap_or_else(|err| {
-                eprintln!("failed to read lock file `{lock_file}`: {err}");
-                process::exit(3);
+                message_exit(
+                    "contract",
+                    json,
+                    &format!("failed to read lock file `{lock_file}`: {err}"),
+                    Some(CONTRACT_USAGE),
+                )
             });
             let lock = parse_lock_file(&lock_body).unwrap_or_else(|err| {
-                eprintln!("failed to parse lock file: {err}");
-                process::exit(3);
+                message_exit(
+                    "contract",
+                    json,
+                    &format!("failed to parse lock file: {err}"),
+                    Some(CONTRACT_USAGE),
+                )
             });
             let mut has_drift = false;
             let mut reports = Vec::new();
-            for model in models {
-                let snapshot = match (model.contract_snapshot)() {
-                    Ok(snapshot) => snapshot,
-                    Err(message) => {
-                        eprintln!("contract snapshot failed for `{}`: {message}", model.name);
-                        process::exit(3);
-                    }
-                };
+            for (index, model) in models.iter().enumerate() {
+                progress.item_start(index, total, model.name);
+                let snapshot = (model.contract_snapshot)().unwrap_or_else(|message| {
+                    message_exit(
+                        "contract",
+                        json,
+                        &format!("contract snapshot failed for `{}`: {message}", model.name),
+                        Some(CONTRACT_USAGE),
+                    )
+                });
                 let expected = lock
                     .entries
                     .iter()
@@ -1105,12 +1296,16 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                     }
                     reports.push(report);
                     has_drift = true;
+                    progress.item_complete(index, total, model.name, ExitCode::Fail.code());
                     continue;
                 };
                 let drift = compare_snapshot(expected, &snapshot);
-                if drift.status != "unchanged" {
+                let item_exit = if drift.status != "unchanged" {
                     has_drift = true;
-                }
+                    ExitCode::Fail
+                } else {
+                    ExitCode::Success
+                };
                 if json {
                     reports.push(render_drift_json(&drift));
                 } else {
@@ -1119,22 +1314,168 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                         println!("  changed: {change}");
                     }
                 }
+                progress.item_complete(index, total, model.name, item_exit.code());
             }
             if json {
                 println!("{{\"reports\":[{}]}}", reports.join(","));
             }
-            process::exit(if has_drift { 2 } else { 0 });
+            let exit_code = if has_drift {
+                ExitCode::Fail
+            } else {
+                ExitCode::Success
+            };
+            progress.finish(exit_code);
+            process::exit(exit_code.code());
         }
         _ => {
-            eprintln!(
-                "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json]"
-            );
-            process::exit(3);
+            usage_exit("contract", json, CONTRACT_USAGE);
         }
     }
 }
 
-fn usage_exit() -> ! {
-    eprintln!("usage: <registry-bin> <models|inspect|graph|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract> [model] [--json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]");
-    process::exit(3);
+fn usage_exit(command: &str, json: bool, usage: &str) -> ! {
+    if json {
+        eprintln!(
+            "{}",
+            render_cli_error_json(
+                command,
+                &[usage_diagnostic("invalid command arguments", usage)],
+                Some(usage),
+            )
+        );
+    } else {
+        eprintln!("{usage}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn reject_unsupported_progress_mode(command: &str, json: bool, args: &[String], usage: &str) {
+    if args
+        .iter()
+        .any(|arg| arg.starts_with("--progress=") && arg != "--progress=json")
+    {
+        message_exit(command, json, "unsupported progress mode", Some(usage));
+    }
+}
+
+fn message_exit(command: &str, json: bool, message: &str, usage: Option<&str>) -> ! {
+    if json {
+        eprintln!(
+            "{}",
+            render_cli_error_json(command, &[message_diagnostic(message)], usage)
+        );
+    } else {
+        if let Some(usage) = usage {
+            eprintln!("{usage}");
+        }
+        eprintln!("{message}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn cmd_commands(args: Vec<String>) {
+    let json = detect_json_flag(&args);
+    reject_unsupported_progress_mode("commands", json, &args, REGISTRY_USAGE);
+    if detect_json_flag(&args) {
+        println!("{}", render_commands_json(Surface::Registry));
+    } else {
+        println!("{}", render_commands_text(Surface::Registry));
+    }
+}
+
+fn cmd_schema(args: Vec<String>) {
+    let json = detect_json_flag(&args);
+    reject_unsupported_progress_mode("schema", json, &args, SCHEMA_USAGE);
+    let command = args
+        .iter()
+        .find(|arg| !arg.starts_with("--"))
+        .cloned()
+        .unwrap_or_else(|| usage_exit("schema", true, SCHEMA_USAGE));
+    match render_schema_json(Surface::Registry, &normalize_command(&command)) {
+        Ok(body) => println!("{body}"),
+        Err(message) => message_exit("schema", true, &message, Some(SCHEMA_USAGE)),
+    }
+}
+
+fn cmd_batch(args: Vec<String>) {
+    let json = detect_json_flag(&args);
+    reject_unsupported_progress_mode("batch", json, &args, BATCH_USAGE);
+    let progress = ProgressReporter::from_args("batch", &args);
+    let mut stdin = String::new();
+    io::stdin()
+        .read_to_string(&mut stdin)
+        .unwrap_or_else(|err| {
+            message_exit(
+                "batch",
+                json,
+                &format!("failed to read stdin: {err}"),
+                Some(BATCH_USAGE),
+            )
+        });
+    let request = parse_batch_request(&stdin)
+        .unwrap_or_else(|message| message_exit("batch", true, &message, Some(BATCH_USAGE)));
+    let total = request.operations.len();
+    progress.start(Some(total));
+    let current_exe = env::current_exe().unwrap_or_else(|err| {
+        message_exit(
+            "batch",
+            json,
+            &format!("failed to resolve current executable: {err}"),
+            Some(BATCH_USAGE),
+        )
+    });
+    let mut aggregate = ExitCode::Success;
+    let mut results = Vec::new();
+    for (index, operation) in request.operations.into_iter().enumerate() {
+        progress.item_start(index, total, &operation.command);
+        let mut child_args = vec![operation.command.clone()];
+        child_args.extend(operation.args.clone());
+        if operation.json
+            && !child_args
+                .iter()
+                .any(|arg| arg == "--json" || arg.starts_with("--format="))
+        {
+            if normalize_command(&operation.command) == "graph" {
+                child_args.push("--format=json".to_string());
+            } else {
+                child_args.push("--json".to_string());
+            }
+        }
+        let output = Command::new(&current_exe)
+            .args(&child_args)
+            .output()
+            .unwrap_or_else(|err| {
+                message_exit(
+                    "batch",
+                    true,
+                    &format!(
+                        "failed to execute batch operation `{}`: {err}",
+                        operation.command
+                    ),
+                    Some(BATCH_USAGE),
+                )
+            });
+        let exit_code = output.status.code().unwrap_or(ExitCode::Error.code());
+        aggregate = aggregate.aggregate(match exit_code {
+            0 => ExitCode::Success,
+            1 => ExitCode::Fail,
+            2 => ExitCode::Unknown,
+            _ => ExitCode::Error,
+        });
+        results.push(BatchResult {
+            index,
+            command: operation.command.clone(),
+            args: child_args.into_iter().skip(1).collect(),
+            exit_code,
+            stdout: child_stream_to_json(&output.stdout),
+            stderr: child_stream_to_json(&output.stderr),
+        });
+        progress.item_complete(index, total, &operation.command, exit_code);
+        if exit_code != 0 && !request.continue_on_error {
+            break;
+        }
+    }
+    progress.finish(aggregate);
+    println!("{}", render_batch_response(aggregate, results));
+    process::exit(aggregate.code());
 }

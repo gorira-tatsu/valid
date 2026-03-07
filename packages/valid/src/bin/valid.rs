@@ -1,4 +1,8 @@
-use std::{env, fs, process};
+use std::{
+    env, fs,
+    io::{self, Read},
+    process::{self, Command},
+};
 
 use valid::{
     api::{
@@ -13,15 +17,19 @@ use valid::{
         OrchestrateRequest, TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, is_bundled_model_ref},
+    cli::{
+        child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
+        parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
+        render_commands_text, render_schema_json, usage_diagnostic, BatchResult, ExitCode,
+        ProgressReporter, Surface,
+    },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
         snapshot_model, write_lock_file,
     },
     coverage::{collect_coverage, render_coverage_json, render_coverage_text},
     engine::CheckOutcome,
-    evidence::{
-        render_diagnostics_json, render_outcome_json, render_outcome_text, write_outcome_artifacts,
-    },
+    evidence::{render_outcome_json, render_outcome_text, write_outcome_artifacts},
     frontend::compile_model,
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
@@ -32,28 +40,34 @@ use valid::{
 };
 
 fn main() {
-    let mut args = env::args().skip(1);
-    let command = normalize_command(&args.next().unwrap_or_default());
-
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let command = normalize_command(args.first().map(String::as_str).unwrap_or_default());
+    let remaining = args.into_iter().skip(1).collect::<Vec<_>>();
     match command.as_str() {
-        "check" => cmd_check(args.collect()),
-        "inspect" => cmd_inspect(args.collect()),
-        "graph" => cmd_graph(args.collect()),
-        "lint" => cmd_lint(args.collect()),
-        "capabilities" => cmd_capabilities(args.collect()),
-        "explain" => cmd_explain(args.collect()),
-        "minimize" => cmd_minimize(args.collect()),
-        "contract" => cmd_contract(args.collect()),
-        "trace" => cmd_trace(args.collect()),
-        "orchestrate" => cmd_orchestrate(args.collect()),
-        "testgen" => cmd_testgen(args.collect()),
-        "replay" => cmd_replay(args.collect()),
-        "coverage" => cmd_coverage(args.collect()),
-        "clean" => cmd_clean(args.collect()),
-        "selfcheck" => cmd_selfcheck(),
+        "check" => cmd_check(remaining),
+        "inspect" => cmd_inspect(remaining),
+        "graph" => cmd_graph(remaining),
+        "lint" => cmd_lint(remaining),
+        "capabilities" => cmd_capabilities(remaining),
+        "explain" => cmd_explain(remaining),
+        "minimize" => cmd_minimize(remaining),
+        "contract" => cmd_contract(remaining),
+        "trace" => cmd_trace(remaining),
+        "orchestrate" => cmd_orchestrate(remaining),
+        "testgen" => cmd_testgen(remaining),
+        "replay" => cmd_replay(remaining),
+        "coverage" => cmd_coverage(remaining),
+        "clean" => cmd_clean(remaining),
+        "selfcheck" => cmd_selfcheck(remaining),
+        "commands" => cmd_commands(remaining),
+        "schema" => cmd_schema(remaining),
+        "batch" => cmd_batch(remaining),
         _ => {
-            eprintln!("usage: valid <inspect|graph|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck> ...");
-            process::exit(3);
+            usage_exit(
+                "valid",
+                detect_json_flag(&remaining),
+                "usage: valid <inspect|graph|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|clean|selfcheck|commands|schema|batch> ...",
+            );
         }
     }
 }
@@ -72,9 +86,11 @@ fn normalize_command(command: &str) -> String {
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
-    let source = read_source(&parsed.path);
+    let progress = ProgressReporter::new("check", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "check", parsed.json);
     let request = CheckRequest {
         request_id: "req-local-0001".to_string(),
         source_name: parsed.path.clone(),
@@ -85,8 +101,7 @@ fn cmd_check(args: Vec<String>) {
         solver_args: parsed.solver_args,
     };
     if let Err(message) = validate_check_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("check", parsed.json, &message, None);
     }
     let outcome = check_source(&request);
     let _ = write_outcome_artifacts(
@@ -100,23 +115,19 @@ fn cmd_check(args: Vec<String>) {
         print!("{}", render_outcome_text(&outcome));
         println!("model_ref: {}", parsed.path);
     }
-    let code = match outcome {
-        CheckOutcome::Completed(result) => match result.status {
-            valid::engine::RunStatus::Pass => 0,
-            valid::engine::RunStatus::Fail => 2,
-            valid::engine::RunStatus::Unknown => 4,
-        },
-        CheckOutcome::Errored(_) => 3,
-    };
-    process::exit(code);
+    let code = ExitCode::from_check_outcome(&outcome);
+    progress.finish(code);
+    process::exit(code.code());
 }
 
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
-    let source = read_source(&parsed.path);
+    let progress = ProgressReporter::new("explain", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "explain", parsed.json);
     match explain_source(&CheckRequest {
         request_id: "req-local-explain".to_string(),
         source_name: parsed.path.clone(),
@@ -128,22 +139,17 @@ fn cmd_explain(args: Vec<String>) {
     }) {
         Ok(response) => {
             if let Err(message) = validate_explain_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("explain", parsed.json, &message, None);
             }
             if parsed.json {
                 println!("{}", render_explain_json(&response));
             } else {
                 print!("{}", render_explain_text(&response));
             }
+            progress.finish(ExitCode::Success);
         }
         Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                print_diagnostics(&error.diagnostics);
-            }
-            process::exit(3);
+            diagnostics_exit("explain", parsed.json, &error.diagnostics, None);
         }
     }
 }
@@ -151,9 +157,11 @@ fn cmd_explain(args: Vec<String>) {
 fn cmd_minimize(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid minimize <model-file> [--json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid minimize <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
-    let source = read_source(&parsed.path);
+    let progress = ProgressReporter::new("minimize", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "minimize", parsed.json);
     match minimize_source(&MinimizeRequest {
         request_id: "req-local-minimize".to_string(),
         source_name: parsed.path.clone(),
@@ -165,8 +173,7 @@ fn cmd_minimize(args: Vec<String>) {
     }) {
         Ok(response) => {
             if let Err(message) = validate_minimize_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("minimize", parsed.json, &message, None);
             }
             if parsed.json {
                 println!(
@@ -183,49 +190,44 @@ fn cmd_minimize(args: Vec<String>) {
                 println!("original_steps: {}", response.original_steps);
                 println!("minimized_steps: {}", response.minimized_steps);
             }
+            progress.finish(ExitCode::Success);
         }
         Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                print_diagnostics(&error.diagnostics);
-            }
-            process::exit(3);
+            diagnostics_exit("minimize", parsed.json, &error.diagnostics, None);
         }
     }
 }
 
 fn cmd_inspect(args: Vec<String>) {
-    let parsed = parse_common_args(args, "usage: valid inspect <model-file> [--json]");
-    let source = read_source(&parsed.path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid inspect <model-file> [--json] [--progress=json]",
+    );
+    let progress = ProgressReporter::new("inspect", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "inspect", parsed.json);
     let request = InspectRequest {
         request_id: "req-local-inspect".to_string(),
         source_name: parsed.path.clone(),
         source,
     };
     if let Err(message) = validate_inspect_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("inspect", parsed.json, &message, None);
     }
     match inspect_source(&request) {
         Ok(response) => {
             if let Err(message) = validate_inspect_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("inspect", parsed.json, &message, None);
             }
             if parsed.json {
                 println!("{}", render_inspect_json(&response));
             } else {
                 print!("{}", render_inspect_text(&response));
             }
+            progress.finish(ExitCode::Success);
         }
         Err(diagnostics) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                print_diagnostics(&diagnostics);
-            }
-            process::exit(3);
+            diagnostics_exit("inspect", parsed.json, &diagnostics, None);
         }
     }
 }
@@ -233,13 +235,16 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic] [--json] [--progress=json]",
         |_arg, _parsed| false,
     );
+    let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
+    let progress = ProgressReporter::new("graph", parsed.progress_json);
+    progress.start(None);
     let source = if is_bundled_model_ref(&parsed.path) {
         String::new()
     } else {
-        read_source(&parsed.path)
+        read_source(&parsed.path, "graph", json_output)
     };
     let request = InspectRequest {
         request_id: "req-local-graph".to_string(),
@@ -261,28 +266,26 @@ fn cmd_graph(args: Vec<String>) {
             "svg" => println!("{}", render_model_svg_with_view(&response, view)),
             _ => println!("{}", render_model_mermaid_with_view(&response, view)),
         },
-        Err(diagnostics) => {
-            if parsed.json || matches!(parsed.format.as_deref(), Some("json")) {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                print_diagnostics(&diagnostics);
-            }
-            process::exit(3);
-        }
+        Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics, None),
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_lint(args: Vec<String>) {
-    let parsed = parse_common_args(args, "usage: valid lint <model-file> [--json]");
-    let source = read_source(&parsed.path);
+    let parsed = parse_common_args(
+        args,
+        "usage: valid lint <model-file> [--json] [--progress=json]",
+    );
+    let progress = ProgressReporter::new("lint", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "lint", parsed.json);
     let request = InspectRequest {
         request_id: "req-local-lint".to_string(),
         source_name: parsed.path.clone(),
         source,
     };
     if let Err(message) = validate_inspect_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("lint", parsed.json, &message, None);
     }
     match lint_source(&request) {
         Ok(response) => {
@@ -295,15 +298,16 @@ fn cmd_lint(args: Vec<String>) {
                 .findings
                 .iter()
                 .any(|finding| matches!(finding.severity.as_str(), "warn" | "error"));
-            process::exit(if has_findings { 2 } else { 0 });
+            let exit_code = if has_findings {
+                ExitCode::Fail
+            } else {
+                ExitCode::Success
+            };
+            progress.finish(exit_code);
+            process::exit(exit_code.code());
         }
         Err(diagnostics) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&diagnostics));
-            } else {
-                print_diagnostics(&diagnostics);
-            }
-            process::exit(3);
+            diagnostics_exit("lint", parsed.json, &diagnostics, None);
         }
     }
 }
@@ -311,9 +315,11 @@ fn cmd_lint(args: Vec<String>) {
 fn cmd_capabilities(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid capabilities [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid capabilities [--json] [--progress=json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
         |_arg, _parsed| false,
     );
+    let progress = ProgressReporter::new("capabilities", parsed.progress_json);
+    progress.start(None);
     let request = CapabilitiesRequest {
         request_id: "req-local-capabilities".to_string(),
         backend: parsed.backend,
@@ -321,14 +327,12 @@ fn cmd_capabilities(args: Vec<String>) {
         solver_args: parsed.solver_args,
     };
     if let Err(message) = validate_capabilities_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("capabilities", parsed.json, &message, None);
     }
     match capabilities_response(&request) {
         Ok(response) => {
             if let Err(message) = validate_capabilities_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("capabilities", parsed.json, &message, None);
             }
             if parsed.json {
                 print_capabilities_json(&response);
@@ -353,66 +357,106 @@ fn cmd_capabilities(args: Vec<String>) {
                     response.capabilities.selfcheck_compatible
                 );
             }
+            progress.finish(ExitCode::Success);
         }
         Err(message) => {
-            eprintln!("{message}");
-            process::exit(3);
+            message_exit("capabilities", parsed.json, &message, None);
         }
     }
 }
 
 fn cmd_contract(args: Vec<String>) {
-    let mut args = args.into_iter();
+    let json = detect_json_flag(&args);
+    let progress = ProgressReporter::from_args("contract", &args);
+    progress.start(None);
+    let positional = args
+        .into_iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .collect::<Vec<_>>();
+    let mut args = positional.into_iter();
     let sub = args.next().unwrap_or_else(|| "snapshot".to_string());
     let path = args.next().unwrap_or_else(|| {
-        eprintln!("usage: valid contract <snapshot|lock|drift> <model-file> [lock-file]");
-        process::exit(3);
+        usage_exit(
+            "contract",
+            json,
+            "usage: valid contract <snapshot|lock|drift> <model-file> [lock-file] [--json] [--progress=json]",
+        )
     });
-    let source = read_source(&path);
-    let model = compile_model(&source).unwrap_or_else(|diagnostics| {
-        print_diagnostics(&diagnostics);
-        process::exit(3);
-    });
+    let source = read_source(&path, "contract", json);
+    let model = compile_model(&source)
+        .unwrap_or_else(|diagnostics| diagnostics_exit("contract", json, &diagnostics, None));
     let snapshot = snapshot_model(&model);
     match sub.as_str() {
         "snapshot" => {
-            println!("model_id: {}", snapshot.model_id);
-            println!("contract_hash: {}", snapshot.contract_hash);
-            println!("state_fields: {}", snapshot.state_fields.join(", "));
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "model_id": snapshot.model_id,
+                        "contract_hash": snapshot.contract_hash,
+                        "state_fields": snapshot.state_fields,
+                    })
+                );
+            } else {
+                println!("model_id: {}", snapshot.model_id);
+                println!("contract_hash: {}", snapshot.contract_hash);
+                println!("state_fields: {}", snapshot.state_fields.join(", "));
+            }
+            progress.finish(ExitCode::Success);
         }
         "lock" => {
             let lock = build_lock_file(vec![snapshot]);
             let output = args.next().unwrap_or_else(|| "valid.lock.json".to_string());
-            write_lock_file(&output, &lock).unwrap_or_else(|err| {
-                eprintln!("{err}");
-                process::exit(3);
-            });
+            write_lock_file(&output, &lock)
+                .unwrap_or_else(|err| message_exit("contract", json, &err.to_string(), None));
             println!("{}", render_lock_json(&lock));
+            progress.finish(ExitCode::Success);
         }
         "drift" => {
             let lock_path = args.next().unwrap_or_else(|| {
-                eprintln!("usage: valid contract drift <model-file> <lock-file>");
-                process::exit(3);
+                usage_exit(
+                    "contract",
+                    json,
+                    "usage: valid contract drift <model-file> <lock-file> [--json] [--progress=json]",
+                )
             });
-            let lock_body = read_source(&lock_path);
+            let lock_body = read_source(&lock_path, "contract", json);
             let lock = parse_lock_file(&lock_body).unwrap_or_else(|err| {
-                eprintln!("failed to parse lock file: {err}");
-                process::exit(3);
+                message_exit(
+                    "contract",
+                    json,
+                    &format!("failed to parse lock file: {err}"),
+                    None,
+                )
             });
             let expected = lock
                 .entries
                 .into_iter()
                 .find(|entry| entry.model_id == snapshot.model_id)
                 .unwrap_or_else(|| {
-                    eprintln!("model `{}` not found in lock file", snapshot.model_id);
-                    process::exit(3);
+                    message_exit(
+                        "contract",
+                        json,
+                        &format!("model `{}` not found in lock file", snapshot.model_id),
+                        None,
+                    )
                 });
             let drift = compare_snapshot(&expected, &snapshot);
             println!("{}", render_drift_json(&drift));
+            let exit_code = if drift.status == "unchanged" {
+                ExitCode::Success
+            } else {
+                ExitCode::Fail
+            };
+            progress.finish(exit_code);
+            process::exit(exit_code.code());
         }
         _ => {
-            eprintln!("usage: valid contract <snapshot|lock|drift> <model-file> [lock-file]");
-            process::exit(3);
+            usage_exit(
+                "contract",
+                json,
+                "usage: valid contract <snapshot|lock|drift> <model-file> [lock-file] [--json] [--progress=json]",
+            );
         }
     }
 }
@@ -420,13 +464,15 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    let progress = ProgressReporter::new("testgen", parsed.progress_json);
+    progress.start(None);
     let strategy = parsed
         .extra
         .clone()
         .unwrap_or_else(|| "counterexample".to_string());
-    let source = read_source(&parsed.path);
+    let source = read_source(&parsed.path, "testgen", parsed.json);
     let request = TestgenRequest {
         request_id: "req-local-testgen".to_string(),
         source_name: parsed.path.clone(),
@@ -438,14 +484,12 @@ fn cmd_testgen(args: Vec<String>) {
         solver_args: parsed.solver_args.clone(),
     };
     if let Err(message) = validate_testgen_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("testgen", parsed.json, &message, None);
     }
     match testgen_source(&request) {
         Ok(response) => {
             if let Err(message) = validate_testgen_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("testgen", parsed.json, &message, None);
             }
             if parsed.json {
                 println!(
@@ -495,10 +539,10 @@ fn cmd_testgen(args: Vec<String>) {
                     println!("  {path}");
                 }
             }
+            progress.finish(ExitCode::Success);
         }
         Err(error) => {
-            print_diagnostics(&error.diagnostics);
-            process::exit(3);
+            diagnostics_exit("testgen", parsed.json, &error.diagnostics, None);
         }
     }
 }
@@ -506,17 +550,20 @@ fn cmd_testgen(args: Vec<String>) {
 fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
         |arg, options| {
             let _ = (arg, options);
             false
         },
     );
+    let progress = ProgressReporter::new("trace", parsed.progress_json);
+    progress.start(None);
     let format = parsed
         .format
         .clone()
         .unwrap_or_else(|| "mermaid-state".to_string());
-    let source = read_source(&parsed.path);
+    let json_output = parsed.json || format == "json";
+    let source = read_source(&parsed.path, "trace", json_output);
     let outcome = check_source(&CheckRequest {
         request_id: "req-local-trace".to_string(),
         source_name: parsed.path.clone(),
@@ -529,25 +576,24 @@ fn cmd_trace(args: Vec<String>) {
     let trace = match outcome {
         CheckOutcome::Completed(result) => result.trace,
         CheckOutcome::Errored(error) => {
-            print_diagnostics(&error.diagnostics);
-            process::exit(3);
+            diagnostics_exit("trace", json_output, &error.diagnostics, None);
         }
     }
     .unwrap_or_else(|| {
-        eprintln!("no trace available");
-        process::exit(3);
+        message_exit("trace", json_output, "no trace available", None);
     });
     match format.as_str() {
         "json" => println!("{}", valid::evidence::render_trace_json(&trace)),
         "mermaid-sequence" => println!("{}", render_trace_sequence_mermaid(&trace)),
         _ => println!("{}", render_trace_mermaid(&trace)),
     }
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_replay(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid replay <model-file> [--json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]",
+        "usage: valid replay <model-file> [--json] [--progress=json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]",
         |arg, parsed| {
             if let Some(value) = arg.strip_prefix("--actions=") {
                 parsed.actions = value
@@ -564,6 +610,8 @@ fn cmd_replay(args: Vec<String>) {
             }
         },
     );
+    let progress = ProgressReporter::new("replay", parsed.progress_json);
+    progress.start(None);
     let output = if is_bundled_model_ref(&parsed.path) {
         valid::bundled_models::replay_bundled_model(
             &parsed.path,
@@ -572,11 +620,9 @@ fn cmd_replay(args: Vec<String>) {
             parsed.focus_action_id.as_deref(),
         )
     } else {
-        let source = read_source(&parsed.path);
-        let model = compile_model(&source).unwrap_or_else(|diagnostics| {
-            print_diagnostics(&diagnostics);
-            process::exit(3);
-        });
+        let source = read_source(&parsed.path, "replay", true);
+        let model = compile_model(&source)
+            .unwrap_or_else(|diagnostics| diagnostics_exit("replay", true, &diagnostics, None));
         let property_id = parsed
             .property_id
             .as_deref()
@@ -588,10 +634,7 @@ fn cmd_replay(args: Vec<String>) {
             })
             .unwrap_or("P_SAFE");
         let terminal = valid::kernel::replay::replay_actions(&model, &parsed.actions)
-            .unwrap_or_else(|error| {
-                print_diagnostics(&[error]);
-                process::exit(3);
-            });
+            .unwrap_or_else(|error| diagnostics_exit("replay", true, &[error], None));
         let focus_enabled = parsed.focus_action_id.as_deref().map(|action_id| {
             valid::kernel::transition::apply_action(&model, &terminal, action_id)
                 .ok()
@@ -603,8 +646,12 @@ fn cmd_replay(args: Vec<String>) {
             .iter()
             .find(|candidate| candidate.property_id == property_id)
             .unwrap_or_else(|| {
-                eprintln!("unknown property `{property_id}`");
-                process::exit(3);
+                message_exit(
+                    "replay",
+                    true,
+                    &format!("unknown property `{property_id}`"),
+                    None,
+                )
             });
         let property_holds = matches!(
             valid::kernel::eval::eval_expr(&model, &terminal, &property.expr),
@@ -632,19 +679,19 @@ fn cmd_replay(args: Vec<String>) {
             &path_tags.into_iter().collect::<Vec<_>>(),
         ))
     }
-    .unwrap_or_else(|message| {
-        eprintln!("{message}");
-        process::exit(3);
-    });
+    .unwrap_or_else(|message| message_exit("replay", true, &message, None));
     println!("{output}");
+    progress.finish(ExitCode::Success);
 }
 
 fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid orchestrate <model-file> [--json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid orchestrate <model-file> [--json] [--progress=json] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
-    let source = read_source(&parsed.path);
+    let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "orchestrate", parsed.json);
     let request = OrchestrateRequest {
         request_id: "req-local-orchestrate".to_string(),
         source_name: parsed.path.clone(),
@@ -654,14 +701,12 @@ fn cmd_orchestrate(args: Vec<String>) {
         solver_args: parsed.solver_args,
     };
     if let Err(message) = validate_orchestrate_request(&request) {
-        eprintln!("{message}");
-        process::exit(3);
+        message_exit("orchestrate", parsed.json, &message, None);
     }
     match orchestrate_source(&request) {
         Ok(response) => {
             if let Err(message) = validate_orchestrate_response(&response) {
-                eprintln!("{message}");
-                process::exit(3);
+                message_exit("orchestrate", parsed.json, &message, None);
             }
             if parsed.json {
                 let body = response
@@ -693,14 +738,10 @@ fn cmd_orchestrate(args: Vec<String>) {
                     println!("{}", render_coverage_text(report));
                 }
             }
+            progress.finish(ExitCode::Success);
         }
         Err(error) => {
-            if parsed.json {
-                println!("{}", render_diagnostics_json(&error.diagnostics));
-            } else {
-                print_diagnostics(&error.diagnostics);
-            }
-            process::exit(3);
+            diagnostics_exit("orchestrate", parsed.json, &error.diagnostics, None);
         }
     }
 }
@@ -708,24 +749,24 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    let progress = ProgressReporter::new("coverage", parsed.progress_json);
+    progress.start(None);
     if is_bundled_model_ref(&parsed.path) {
-        let report = coverage_bundled_model(&parsed.path).unwrap_or_else(|message| {
-            eprintln!("{message}");
-            process::exit(3);
-        });
+        let report = coverage_bundled_model(&parsed.path)
+            .unwrap_or_else(|message| message_exit("coverage", parsed.json, &message, None));
         if parsed.json {
             println!("{}", render_coverage_json(&report));
         } else {
             println!("{}", render_coverage_text(&report));
         }
+        progress.finish(ExitCode::Success);
         return;
     }
-    let source = read_source(&parsed.path);
+    let source = read_source(&parsed.path, "coverage", parsed.json);
     let model = compile_model(&source).unwrap_or_else(|diagnostics| {
-        print_diagnostics(&diagnostics);
-        process::exit(3);
+        diagnostics_exit("coverage", parsed.json, &diagnostics, None)
     });
     let outcome = check_source(&CheckRequest {
         request_id: "req-local-coverage".to_string(),
@@ -745,10 +786,10 @@ fn cmd_coverage(args: Vec<String>) {
             } else {
                 println!("{}", render_coverage_text(&report));
             }
+            progress.finish(ExitCode::Success);
         }
         CheckOutcome::Errored(error) => {
-            print_diagnostics(&error.diagnostics);
-            process::exit(3);
+            diagnostics_exit("coverage", parsed.json, &error.diagnostics, None);
         }
     }
 }
@@ -756,6 +797,7 @@ fn cmd_coverage(args: Vec<String>) {
 #[derive(Default)]
 struct ParsedArgs {
     json: bool,
+    progress_json: bool,
     path: String,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -784,10 +826,21 @@ where
     F: FnMut(&str, &mut ParsedArgs) -> bool,
 {
     let mut parsed = ParsedArgs::default();
+    parsed.json = detect_json_flag(&args);
+    parsed.progress_json = detect_progress_json_flag(&args);
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         if arg == "--json" {
             parsed.json = true;
+        } else if arg == "--progress=json" {
+            parsed.progress_json = true;
+        } else if arg.starts_with("--progress=") {
+            message_exit(
+                "valid",
+                parsed.json,
+                "unsupported progress mode",
+                Some(usage),
+            );
         } else if let Some(value) = arg.strip_prefix("--format=") {
             parsed.format = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--view=") {
@@ -797,34 +850,31 @@ where
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
         } else if arg == "--solver-exec" {
-            parsed.solver_executable = Some(iter.next().unwrap_or_else(|| {
-                eprintln!("{usage}");
-                process::exit(3);
-            }));
+            parsed.solver_executable = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
         } else if arg == "--solver-arg" {
-            parsed.solver_args.push(iter.next().unwrap_or_else(|| {
-                eprintln!("{usage}");
-                process::exit(3);
-            }));
+            parsed.solver_args.push(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
         } else if extra_handler(&arg, &mut parsed) {
             continue;
         } else if parsed.path.is_empty() {
             parsed.path = arg;
         } else {
-            eprintln!("{usage}");
-            process::exit(3);
+            usage_exit("valid", parsed.json, usage);
         }
     }
     if parsed.path.is_empty() && !usage.contains("valid capabilities") {
-        eprintln!("{usage}");
-        process::exit(3);
+        usage_exit("valid", parsed.json, usage);
     }
     parsed
 }
 
-fn cmd_selfcheck() {
-    let args = env::args().skip(2).collect::<Vec<_>>();
-    let json = args.iter().any(|arg| arg == "--json");
+fn cmd_selfcheck(args: Vec<String>) {
+    let json = detect_json_flag(&args);
     let report = run_smoke_selfcheck();
     let _ = write_selfcheck_artifact(&report);
     if json {
@@ -840,10 +890,10 @@ fn cmd_selfcheck() {
 }
 
 fn cmd_clean(args: Vec<String>) {
-    let json = args.iter().any(|arg| arg == "--json");
+    let json = detect_json_flag(&args);
     let scope = args
         .iter()
-        .find(|arg| !arg.starts_with("--"))
+        .find(|arg| !arg.starts_with("--") && arg.as_str() != "clean")
         .map(String::as_str)
         .unwrap_or("all");
     let root = env::current_dir().unwrap_or_else(|_| ".".into());
@@ -856,8 +906,12 @@ fn cmd_clean(args: Vec<String>) {
         "generated" | "generated-tests" => removed.extend(clean_generated_tests(&root)),
         "artifacts" => removed.extend(clean_artifacts(&root)),
         other => {
-            eprintln!("usage: valid clean [generated|artifacts|all] [--json]\nunknown clean scope `{other}`");
-            process::exit(3);
+            message_exit(
+                "clean",
+                json,
+                &format!("unknown clean scope `{other}`"),
+                Some("usage: valid clean [generated|artifacts|all] [--json] [--progress=json]"),
+            );
         }
     }
     if json {
@@ -882,17 +936,29 @@ fn cmd_clean(args: Vec<String>) {
     }
 }
 
-fn read_source(path: &str) -> String {
+fn read_source(path: &str, command: &str, json: bool) -> String {
     if is_bundled_model_ref(path) {
         return String::new();
     }
     fs::read_to_string(path).unwrap_or_else(|err| {
-        eprintln!("error [frontend.parse]: failed to read `{path}`: {err}");
-        process::exit(3);
+        message_exit(
+            command,
+            json,
+            &format!("failed to read `{path}`: {err}"),
+            None,
+        )
     })
 }
 
-fn print_diagnostics(diagnostics: &[valid::support::diagnostics::Diagnostic]) {
+fn print_diagnostics(
+    command: &str,
+    json: bool,
+    diagnostics: &[valid::support::diagnostics::Diagnostic],
+) {
+    if json {
+        eprintln!("{}", render_cli_error_json(command, diagnostics, None));
+        return;
+    }
     for diagnostic in diagnostics {
         eprintln!("error: {}", diagnostic.message);
         eprintln!("  segment: {}", diagnostic.segment.as_str());
@@ -995,4 +1061,160 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         response.capabilities.supports_witness,
         response.capabilities.selfcheck_compatible
     );
+}
+
+fn usage_exit(command: &str, json: bool, usage: &str) -> ! {
+    if json {
+        eprintln!(
+            "{}",
+            render_cli_error_json(
+                command,
+                &[usage_diagnostic("invalid command arguments", usage)],
+                Some(usage),
+            )
+        );
+    } else {
+        eprintln!("{usage}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn message_exit(command: &str, json: bool, message: &str, usage: Option<&str>) -> ! {
+    if json {
+        eprintln!(
+            "{}",
+            render_cli_error_json(command, &[message_diagnostic(message)], usage)
+        );
+    } else {
+        if let Some(usage) = usage {
+            eprintln!("{usage}");
+        }
+        eprintln!("{message}");
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn diagnostics_exit(
+    command: &str,
+    json: bool,
+    diagnostics: &[valid::support::diagnostics::Diagnostic],
+    usage: Option<&str>,
+) -> ! {
+    if json {
+        eprintln!("{}", render_cli_error_json(command, diagnostics, usage));
+    } else {
+        print_diagnostics(command, false, diagnostics);
+        if let Some(usage) = usage {
+            eprintln!("{usage}");
+        }
+    }
+    process::exit(ExitCode::Error.code());
+}
+
+fn cmd_commands(args: Vec<String>) {
+    if detect_json_flag(&args) {
+        println!("{}", render_commands_json(Surface::Valid));
+    } else {
+        println!("{}", render_commands_text(Surface::Valid));
+    }
+}
+
+fn cmd_schema(args: Vec<String>) {
+    let command = args
+        .iter()
+        .find(|arg| !arg.starts_with("--"))
+        .cloned()
+        .unwrap_or_else(|| usage_exit("schema", true, "usage: valid schema <command>"));
+    match render_schema_json(Surface::Valid, &normalize_command(&command)) {
+        Ok(body) => println!("{body}"),
+        Err(message) => message_exit(
+            "schema",
+            true,
+            &message,
+            Some("usage: valid schema <command>"),
+        ),
+    }
+}
+
+fn cmd_batch(args: Vec<String>) {
+    let json = detect_json_flag(&args);
+    let progress = ProgressReporter::from_args("batch", &args);
+    let mut stdin = String::new();
+    io::stdin()
+        .read_to_string(&mut stdin)
+        .unwrap_or_else(|err| {
+            message_exit("batch", json, &format!("failed to read stdin: {err}"), None)
+        });
+    let request = parse_batch_request(&stdin).unwrap_or_else(|message| {
+        message_exit(
+            "batch",
+            true,
+            &message,
+            Some("usage: valid batch [--json] [--progress=json] < batch.json"),
+        )
+    });
+    let total = request.operations.len();
+    progress.start(Some(total));
+    let current_exe = env::current_exe().unwrap_or_else(|err| {
+        message_exit(
+            "batch",
+            json,
+            &format!("failed to resolve current executable: {err}"),
+            None,
+        )
+    });
+    let mut aggregate = ExitCode::Success;
+    let mut results = Vec::new();
+    for (index, operation) in request.operations.into_iter().enumerate() {
+        progress.item_start(index, total, &operation.command);
+        let mut child_args = vec![operation.command.clone()];
+        child_args.extend(operation.args.clone());
+        if operation.json
+            && !child_args
+                .iter()
+                .any(|arg| arg == "--json" || arg.starts_with("--format="))
+        {
+            if matches!(operation.command.as_str(), "graph" | "trace") {
+                child_args.push("--format=json".to_string());
+            } else {
+                child_args.push("--json".to_string());
+            }
+        }
+        let output = Command::new(&current_exe)
+            .args(&child_args)
+            .output()
+            .unwrap_or_else(|err| {
+                message_exit(
+                    "batch",
+                    true,
+                    &format!(
+                        "failed to execute batch operation `{}`: {err}",
+                        operation.command
+                    ),
+                    None,
+                )
+            });
+        let exit_code = output.status.code().unwrap_or(ExitCode::Error.code());
+        aggregate = aggregate.aggregate(match exit_code {
+            0 => ExitCode::Success,
+            1 => ExitCode::Fail,
+            2 => ExitCode::Unknown,
+            _ => ExitCode::Error,
+        });
+        results.push(BatchResult {
+            index,
+            command: operation.command.clone(),
+            args: child_args.into_iter().skip(1).collect(),
+            exit_code,
+            stdout: child_stream_to_json(&output.stdout),
+            stderr: child_stream_to_json(&output.stderr),
+        });
+        progress.item_complete(index, total, &operation.command, exit_code);
+        if exit_code != 0 && !request.continue_on_error {
+            break;
+        }
+    }
+    progress.finish(aggregate);
+    println!("{}", render_batch_response(aggregate, results));
+    process::exit(aggregate.code());
 }

@@ -51,7 +51,7 @@ fn real_cvc5_backend_finds_counterexample_when_available() {
 
     assert_eq!(
         output.status.code(),
-        Some(2),
+        Some(1),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

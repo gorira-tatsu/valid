@@ -103,7 +103,7 @@ fn enterprise_scale_regression_fails_with_review_summary() {
         .arg("--json")
         .output()
         .expect("cargo-valid verify should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"FAIL\""));
     assert!(stdout.contains("\"ci\":{\"exit_code\":2"));

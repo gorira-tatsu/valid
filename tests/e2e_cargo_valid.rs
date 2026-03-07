@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -273,7 +274,7 @@ fn cargo_valid_verifies_relation_map_regression() {
         .arg("--json")
         .output()
         .expect("cargo-valid verify tenant relation regression should run");
-    assert!(output.status.code() == Some(2));
+    assert!(output.status.code() == Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"FAIL\""));
     assert!(stdout.contains("\"property_id\":\"P_NO_CROSS_TENANT_ACCESS\""));
@@ -311,7 +312,7 @@ fn cargo_valid_readiness_reports_password_solver_limitations() {
         .arg("--json")
         .output()
         .expect("cargo-valid readiness password policy should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"code\":\"string_fields_require_explicit_backend\""));
     assert!(stdout.contains("\"code\":\"regex_match_requires_explicit_backend\""));
@@ -343,7 +344,7 @@ fn cargo_valid_verifies_password_policy_models() {
         .arg("--json")
         .output()
         .expect("cargo-valid verify regression password model should run");
-    assert_eq!(regression_output.status.code(), Some(2));
+    assert_eq!(regression_output.status.code(), Some(1));
     let regression_stdout = String::from_utf8_lossy(&regression_output.stdout);
     assert!(regression_stdout.contains("\"status\":\"FAIL\""));
     assert!(regression_stdout.contains("\"property_id\":\"P_PASSWORD_POLICY_MATCHES_FLAG\""));
@@ -444,7 +445,7 @@ fn cargo_valid_checks_registered_model() {
         .arg("--json")
         .output()
         .expect("cargo-valid check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
     assert!(stdout.contains("\"ci\":{\"exit_code\":2"));
@@ -482,7 +483,7 @@ fn cargo_valid_verifies_grouped_saas_regression() {
         .arg("--json")
         .output()
         .expect("cargo-valid verify saas regression should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"FAIL\""));
     assert!(stdout.contains("\"property_id\":\"P_NO_CROSS_TENANT_ACCESS\""));
@@ -539,7 +540,7 @@ fn cargo_valid_lints_registered_model_with_migration_hints() {
         .arg("--json")
         .output()
         .expect("cargo-valid lint should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"code\":\"opaque_step_closure\""));
     assert!(stdout.contains("\"code\":\"missing_declarative_transitions\""));
@@ -603,7 +604,7 @@ fn cargo_valid_migrate_check_marks_step_models_for_manual_review() {
         .arg("--json")
         .output()
         .expect("cargo-valid migrate check should run");
-    assert_eq!(output.status.code(), Some(6));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"check\":{"));
     assert!(stdout.contains("\"status\":\"candidate-complete\""));
@@ -681,7 +682,7 @@ fn cargo_valid_checks_example_model() {
         .arg("--json")
         .output()
         .expect("cargo-valid check for example registry should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
 }
@@ -716,7 +717,7 @@ fn cargo_valid_checks_all_example_models_from_file() {
         .arg("--json")
         .output()
         .expect("cargo-valid all for file-backed example registry should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"runs\":["));
     assert!(stdout.contains("\"model_id\":\"counter\""));
@@ -840,7 +841,7 @@ fn cargo_valid_check_can_target_specific_property() {
         .arg("--json")
         .output()
         .expect("cargo-valid property-specific check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
 }
@@ -866,7 +867,7 @@ fn cargo_valid_external_registry_can_use_command_backend() {
         .arg("--json")
         .output()
         .expect("cargo-valid command backend check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
     assert!(stdout.contains("\"status\":\"FAIL\""));
@@ -1193,7 +1194,7 @@ fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
         .arg("--json")
         .output()
         .expect("cargo-valid bundled declarative command backend check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
     assert!(stdout.contains("\"status\":\"FAIL\""));
@@ -1227,7 +1228,7 @@ fn cargo_valid_bundled_declarative_model_can_use_mock_cvc5_backend() {
         .arg("--json")
         .output()
         .expect("cargo-valid bundled mock cvc5 check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"backend_name\":\"smt-cvc5\""));
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
@@ -1263,7 +1264,7 @@ fn cargo_valid_external_registry_can_use_mock_cvc5_backend() {
         .arg("--json")
         .output()
         .expect("cargo-valid external mock cvc5 check should run");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"backend_name\":\"smt-cvc5\""));
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
@@ -1302,4 +1303,77 @@ fn cargo_valid_bundled_declarative_testgen_can_use_command_backend() {
         assert!(body.contains("assert_replay_output_json"));
     }
     cleanup_generated_files(&stdout);
+}
+
+#[test]
+fn cargo_valid_commands_and_schema_are_machine_readable() {
+    let _guard = cargo_guard();
+    let commands = Command::new(cargo_valid_path())
+        .arg("commands")
+        .arg("--json")
+        .output()
+        .expect("commands should run");
+    assert!(commands.status.success());
+    let commands_stdout = String::from_utf8_lossy(&commands.stdout);
+    assert!(commands_stdout.contains("\"surface\":\"cargo-valid\""));
+    assert!(commands_stdout.contains("\"name\":\"batch\""));
+    assert!(commands_stdout.contains("\"response\":\"schema.cli.batch_response\""));
+
+    let schema = Command::new(cargo_valid_path())
+        .arg("schema")
+        .arg("verify")
+        .output()
+        .expect("schema should run");
+    assert!(schema.status.success());
+    let schema_stdout = String::from_utf8_lossy(&schema.stdout);
+    assert!(schema_stdout.contains("\"command\":\"check\""));
+    assert!(schema_stdout
+        .contains("\"parameter_schema_id\":\"schema.cli.cargo-valid.check.parameters\""));
+    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.run_result\""));
+}
+
+#[test]
+fn cargo_valid_json_errors_go_to_stderr() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("inspect")
+        .arg("missing-model")
+        .arg("--json")
+        .output()
+        .expect("json error case should run");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("\"kind\":\"cli_error\""));
+    assert!(stderr.contains("\"unknown model `missing-model`\""));
+}
+
+#[test]
+fn cargo_valid_batch_runs_multiple_operations() {
+    let _guard = cargo_guard();
+    let request = "{\"schema_version\":\"1.0.0\",\"continue_on_error\":true,\"operations\":[{\"command\":\"inspect\",\"args\":[\"counter\",\"--registry\",\"examples/valid_models.rs\"],\"json\":true},{\"command\":\"verify\",\"args\":[\"failing-counter\",\"--registry\",\"examples/valid_models.rs\"],\"json\":true}]}";
+    let mut child = Command::new(cargo_valid_path())
+        .arg("batch")
+        .arg("--json")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("batch should spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(request.as_bytes())
+        .expect("write batch request");
+    let output = child.wait_with_output().expect("batch should complete");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"command\":\"inspect\""));
+    assert!(stdout.contains("\"command\":\"verify\""));
+    assert!(stdout.contains("\"exit_code\":0"));
+    assert!(stdout.contains("\"exit_code\":1"));
 }
