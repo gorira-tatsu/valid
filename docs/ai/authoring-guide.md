@@ -177,6 +177,14 @@ For MCP-driven authoring:
    named suites
 6. Verify only after capability/readiness is understood
 
+If your MCP client supports prompts, prefer this sequence:
+
+1. `clarify_requirement` when the requirement is still ambiguous
+2. `author_model` for new work or `review_model` for existing models
+3. `migrate_step_to_transitions` for step-heavy models
+4. `explain_readiness_failure` or `triage_conformance_failure` when a run
+   already failed
+
 ## Rules to follow
 
 - Prefer registry mode for new work.

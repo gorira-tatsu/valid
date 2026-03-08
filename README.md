@@ -198,6 +198,23 @@ Recommended AI flow:
 3. read one curated example through `valid_example_get`
 4. move to `valid_inspect`, `valid_lint`, and `valid_check`
 
+Available prompts:
+
+- `clarify_requirement`
+- `author_model`
+- `review_model`
+- `migrate_step_to_transitions`
+- `explain_readiness_failure`
+- `triage_conformance_failure`
+
+Prompt-driven flow:
+
+1. start with `clarify_requirement` when the requirement is still ambiguous
+2. move to `author_model` or `review_model`
+3. use `migrate_step_to_transitions` for step-heavy models
+4. use `explain_readiness_failure` or `triage_conformance_failure` when a run
+   already failed
+
 Available tools:
 
 - `valid_docs_index`

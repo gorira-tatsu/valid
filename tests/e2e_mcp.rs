@@ -250,11 +250,25 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .contains("AI Authoring Guide"));
 
     let prompts = client.request("prompts/list", json!({}));
-    assert!(prompts["prompts"]
+    let prompt_names = prompts["prompts"]
         .as_array()
         .expect("prompts should be present")
         .iter()
-        .any(|item| item["name"] == "author_model"));
+        .map(|item| item["name"].as_str().expect("prompt name should be text"))
+        .collect::<Vec<_>>();
+    for expected in [
+        "clarify_requirement",
+        "author_model",
+        "review_model",
+        "migrate_step_to_transitions",
+        "explain_readiness_failure",
+        "triage_conformance_failure",
+    ] {
+        assert!(
+            prompt_names.contains(&expected),
+            "missing prompt {expected}"
+        );
+    }
 
     let prompt = client.request(
         "prompts/get",
@@ -270,6 +284,36 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("prompt messages should be present")
         .iter()
         .any(|item| item["content"]["type"] == "resource"));
+
+    let clarify_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "clarify_requirement",
+            "arguments": {
+                "requirement": "users can retry failed exports after an approval step",
+                "risk_area": "auditability"
+            }
+        }),
+    );
+    assert!(clarify_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("clarify prompt text should be present")
+        .contains("Ask only the minimum follow-up questions"));
+
+    let conformance_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "triage_conformance_failure",
+            "arguments": {
+                "target": "registry:approval_flow",
+                "sut_surface": "api"
+            }
+        }),
+    );
+    assert!(conformance_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("conformance prompt text should be present")
+        .contains("conformance mismatch"));
 
     let logging = client.set_log_level("debug");
     assert_eq!(logging, json!({}));

@@ -72,6 +72,8 @@ Related documents:
 - The model can be explained from one example path
 - The finite domains are small enough to inspect mentally
 - The CLI/MCP commands suggested to the user match the chosen mode
+- If the requirement is still fuzzy, start again with the `clarify_requirement`
+  MCP prompt before editing the model further
 ## Task-specific follow-up
 
 - For review: [Review Workflow](./review-workflow.md)
