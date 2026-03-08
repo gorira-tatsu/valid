@@ -157,7 +157,9 @@ For MCP-driven authoring:
 2. Read this guide with `valid_docs_get`
 3. Read one example with `valid_example_get`
 4. Inspect or lint the concrete model
-5. Verify only after capability/readiness is understood
+5. Use `valid_suite_run` when the project declares critical properties or
+   named suites
+6. Verify only after capability/readiness is understood
 
 ## Rules to follow
 
@@ -167,6 +169,9 @@ For MCP-driven authoring:
 - Add `reads` and `writes` metadata to every action variant when possible.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
   generated vectors do not overstate business-flow coverage.
+- Keep project-level `critical_properties` and `property_suites` small and
+  reviewable. Treat them as CI targeting contracts, not a dump of every
+  property in the model.
 - Use `..state` only as explicit frame-condition sugar.
 - Keep domains finite and obvious.
 - Choose declarative transitions unless you are intentionally staying

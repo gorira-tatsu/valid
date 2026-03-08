@@ -29,6 +29,8 @@ pub struct ContractDriftReport {
     pub old_hash: String,
     pub new_hash: String,
     pub changes: Vec<String>,
+    pub affected_critical_properties: Vec<String>,
+    pub affected_property_suites: Vec<String>,
 }
 
 pub fn snapshot_model(model: &ModelIr) -> ContractSnapshot {
@@ -138,6 +140,22 @@ pub fn render_drift_json(report: &ContractDriftReport) -> String {
         }
         out.push_str(&format!("\"{}\"", change));
     }
+    out.push_str("]");
+    out.push_str(",\"affected_critical_properties\":[");
+    for (index, property) in report.affected_critical_properties.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", property));
+    }
+    out.push(']');
+    out.push_str(",\"affected_property_suites\":[");
+    for (index, suite_name) in report.affected_property_suites.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", suite_name));
+    }
     out.push_str("]}");
     out
 }
@@ -168,6 +186,8 @@ pub fn compare_snapshot(
         old_hash: expected.contract_hash.clone(),
         new_hash: actual.contract_hash.clone(),
         changes,
+        affected_critical_properties: Vec::new(),
+        affected_property_suites: Vec::new(),
     }
 }
 

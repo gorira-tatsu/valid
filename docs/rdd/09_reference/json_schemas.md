@@ -66,6 +66,17 @@
 - 定義箇所: `08_specs/testgen_contract_coverage_specs.md`
 - 本体: [schemas/contract_drift.schema.json](schemas/contract_drift.schema.json)
 
+主要フィールド:
+
+- `schema_version`
+- `status`
+- `contract_id`
+- `old_hash`
+- `new_hash`
+- `changes`
+- `affected_critical_properties`
+- `affected_property_suites`
+
 ## 7. CoverageReport
 
 - ID: `schema.coverage_report`

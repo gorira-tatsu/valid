@@ -438,6 +438,22 @@ fn main() {
 
 In a project, `valid.toml` points `cargo valid` at the registry file.
 
+Project-level verification targeting can also live in `valid.toml`:
+
+```toml
+registry = "examples/valid_models.rs"
+suite_models = ["refund-control", "approval-model"]
+
+[critical_properties]
+refund-control = ["P_EXPORT_REQUIRES_ENTERPRISE"]
+
+[property_suites.smoke]
+entries = [
+  { model = "approval-model", properties = ["P_APPROVAL_IS_BOOLEAN"] },
+  { model = "refund-control", properties = ["P_EXPORT_REQUIRES_ENTERPRISE"] }
+]
+```
+
 ## CLI Workflow
 
 Typical project-first flow:
@@ -456,6 +472,8 @@ cargo valid coverage refund-control
 cargo valid generate-tests refund-control --strategy=path
 cargo valid benchmark --baseline=compare
 cargo valid suite
+cargo valid suite --critical
+cargo valid suite --suite=smoke
 ```
 
 ## What Each Command Means
@@ -488,7 +506,9 @@ cargo valid suite
 - `benchmark`
   Runs repeated verification and compares against committed baselines.
 - `suite`
-  Runs verification across the configured suite.
+  Runs verification across the configured suite. `cargo valid suite
+  --critical` runs only `critical_properties`, and `cargo valid suite
+  --suite=<name>` runs one named entry from `property_suites`.
 
 ## Readiness and Capability Model
 

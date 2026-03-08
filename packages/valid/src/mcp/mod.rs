@@ -26,6 +26,7 @@ use crate::{
     frontend::compile_model,
     ir::Path,
     kernel::{eval::eval_expr, replay::replay_actions, transition::apply_action},
+    project::{rerun_recommendations, ProjectConfig},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
@@ -48,6 +49,7 @@ pub struct ServerConfig {
     pub server_name: String,
     pub default_model_file: Option<String>,
     pub default_registry_binary: Option<String>,
+    pub project_config: Option<ProjectConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -110,10 +112,14 @@ impl Default for SessionState {
 
 impl Default for ServerConfig {
     fn default() -> Self {
+        let project_config = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| crate::project::load_project_config(&cwd).ok().flatten());
         Self {
             server_name: "valid".to_string(),
             default_model_file: std::env::var("VALID_MCP_MODEL_FILE").ok(),
             default_registry_binary: std::env::var("VALID_MCP_REGISTRY_BINARY").ok(),
+            project_config,
         }
     }
 }
@@ -488,6 +494,13 @@ fn tool_definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "valid_suite_run",
+            "Run configured critical properties or a named property suite.",
+            input_schema_suite_run(),
+            output_schema_with_success_required(&["selection_mode", "runs"]),
+            false,
+        ),
+        tool(
             "valid_list_models",
             "List bundled models or models exported by a registry binary.",
             input_schema_list_models(),
@@ -859,6 +872,29 @@ fn input_schema_list_models() -> Value {
     })
 }
 
+fn input_schema_suite_run() -> Value {
+    let mut properties = common_target_properties();
+    properties.insert("critical".to_string(), json!({ "type": "boolean" }));
+    properties.insert("suite_name".to_string(), json!({ "type": "string" }));
+    properties.insert(
+        "backend".to_string(),
+        json!({
+            "type": "string",
+            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+        }),
+    );
+    properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
+    properties.insert(
+        "solver_args".to_string(),
+        json!({ "type": "array", "items": { "type": "string" } }),
+    );
+    json!({
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": false
+    })
+}
+
 fn input_schema_with_graph() -> Value {
     let mut properties = common_target_properties();
     properties.insert(
@@ -981,6 +1017,13 @@ fn handle_tool_call(config: &ServerConfig, params: &Value) -> ToolResult {
             let args = parse_args::<ListModelsArgs>(&arguments);
             match args {
                 Ok(args) => list_models_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
+        }
+        "valid_suite_run" => {
+            let args = parse_args::<SuiteRunArgs>(&arguments);
+            match args {
+                Ok(args) => suite_run_tool(config, &args),
                 Err(error) => Ok(ToolResult::error_message(error)),
             }
         }
@@ -1133,6 +1176,18 @@ struct ContractCheckArgs {
 #[serde(default, deny_unknown_fields)]
 struct ListModelsArgs {
     registry_binary: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SuiteRunArgs {
+    #[serde(flatten)]
+    target: TargetArgs,
+    critical: bool,
+    suite_name: Option<String>,
+    backend: Option<String>,
+    solver_executable: Option<String>,
+    solver_args: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -2105,6 +2160,7 @@ fn contract_check_tool(
             );
             let tool = match result {
                 Ok((code, value)) if matches!(code, 0 | 2) => {
+                    let value = augment_contract_check_value(config, value);
                     if let Some(model_name) = model_name.as_deref() {
                         match select_named_entry(value, "reports", model_name, &registry_binary) {
                             Ok(filtered) => ToolResult::success(filtered),
@@ -2153,7 +2209,14 @@ fn contract_check_tool(
                 .iter()
                 .find(|entry| entry.model_id == snapshot.model_id)
             {
-                let drift = compare_snapshot(expected, &snapshot);
+                let mut drift = compare_snapshot(expected, &snapshot);
+                let recommendations = config
+                    .project_config
+                    .as_ref()
+                    .map(|project_config| rerun_recommendations(project_config, &snapshot.model_id))
+                    .unwrap_or_default();
+                drift.affected_critical_properties = recommendations.affected_critical_properties;
+                drift.affected_property_suites = recommendations.affected_property_suites;
                 json!({
                     "schema_version": "1.0.0",
                     "status": drift.status,
@@ -2161,9 +2224,16 @@ fn contract_check_tool(
                     "old_hash": expected.contract_hash,
                     "new_hash": snapshot.contract_hash,
                     "changes": drift.changes,
+                    "affected_critical_properties": drift.affected_critical_properties,
+                    "affected_property_suites": drift.affected_property_suites,
                     "lock_file": args.lock_file
                 })
             } else {
+                let recommendations = config
+                    .project_config
+                    .as_ref()
+                    .map(|project_config| rerun_recommendations(project_config, &snapshot.model_id))
+                    .unwrap_or_default();
                 json!({
                     "schema_version": "1.0.0",
                     "status": "missing",
@@ -2171,6 +2241,8 @@ fn contract_check_tool(
                     "old_hash": Value::Null,
                     "new_hash": snapshot.contract_hash,
                     "changes": ["missing_from_lock_file"],
+                    "affected_critical_properties": recommendations.affected_critical_properties,
+                    "affected_property_suites": recommendations.affected_property_suites,
                     "lock_file": args.lock_file
                 })
             };
@@ -2183,15 +2255,332 @@ fn list_models_tool(config: &ServerConfig, args: &ListModelsArgs) -> Result<Tool
     let registry_binary =
         explicit_or_default(&args.registry_binary, &config.default_registry_binary);
     if let Some(registry_binary) = registry_binary {
-        return Ok(registry_tool_result(
+        let mut result = registry_tool_result(
             run_registry_json(&registry_binary, &["list", "--json"]),
             &[0],
-        ));
+        );
+        if !result.is_error {
+            result.structured_content =
+                augment_list_models_value(config, result.structured_content.clone());
+            result.text = default_text(&result.structured_content);
+        }
+        return Ok(result);
     }
 
-    Ok(ToolResult::success(json!({
-        "models": list_bundled_models()
-    })))
+    Ok(ToolResult::success(augment_list_models_value(
+        config,
+        json!({
+            "models": list_bundled_models()
+        }),
+    )))
+}
+
+fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResult, String> {
+    let mode = if args.critical {
+        "critical"
+    } else if args.suite_name.is_some() {
+        "named_suite"
+    } else {
+        "all"
+    };
+    if args.critical && args.suite_name.is_some() {
+        return Ok(ToolResult::error_message(
+            "use either `critical` or `suite_name`, not both".to_string(),
+        ));
+    }
+    let project_config = match &config.project_config {
+        Some(project_config) => project_config,
+        None if mode == "all" => {
+            return Ok(ToolResult::error_message(
+                "valid_suite_run requires project config for suite selection".to_string(),
+            ));
+        }
+        None => {
+            return Ok(ToolResult::error_message(
+                "valid_suite_run requires valid.toml project config".to_string(),
+            ));
+        }
+    };
+    let default_registry_binary = explicit_or_default(
+        &args.target.registry_binary,
+        &config.default_registry_binary,
+    );
+    if let Some(registry_binary) = default_registry_binary {
+        let catalog = registry_model_property_catalog(&registry_binary)?;
+        let runs = select_suite_runs(
+            project_config,
+            &catalog,
+            args.critical,
+            args.suite_name.as_deref(),
+        )?;
+        let mut outputs = Vec::new();
+        for run in runs {
+            let mut command = vec![
+                "check".to_string(),
+                run.model_id.clone(),
+                "--json".to_string(),
+            ];
+            if let Some(property_id) = &run.property_id {
+                command.push(format!("--property={property_id}"));
+            }
+            if let Some(backend) = &args.backend {
+                command.push(format!("--backend={backend}"));
+            }
+            if let Some(solver_executable) = &args.solver_executable {
+                command.push("--solver-exec".to_string());
+                command.push(solver_executable.clone());
+            }
+            for solver_arg in &args.solver_args {
+                command.push("--solver-arg".to_string());
+                command.push(solver_arg.clone());
+            }
+            let (code, mut value) = run_registry_json(
+                &registry_binary,
+                &command.iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("model_id".to_string(), Value::String(run.model_id));
+                object.insert(
+                    "property_id".to_string(),
+                    run.property_id.map(Value::String).unwrap_or(Value::Null),
+                );
+                object.insert("exit_code".to_string(), Value::from(code));
+            }
+            outputs.push(value);
+        }
+        Ok(ToolResult::success(json!({
+            "selection_mode": mode,
+            "suite_name": args.suite_name,
+            "runs": outputs
+        })))
+    } else {
+        match args.target.resolve(config)? {
+            ResolvedTarget::Registry { .. } => unreachable!("registry handled above"),
+            ResolvedTarget::Dsl {
+                source_name,
+                source,
+            } => {
+                let model = match compile_source(&source) {
+                    Ok(model) => model,
+                    Err(diagnostics) => {
+                        return Ok(ToolResult::error(parse_embedded_json(
+                            "diagnostics",
+                            &render_diagnostics_json(&diagnostics),
+                        )?));
+                    }
+                };
+                let catalog = std::collections::BTreeMap::from([(
+                    model.model_id.clone(),
+                    model
+                        .properties
+                        .iter()
+                        .map(|property| property.property_id.clone())
+                        .collect::<Vec<_>>(),
+                )]);
+                let runs = select_suite_runs(
+                    project_config,
+                    &catalog,
+                    args.critical,
+                    args.suite_name.as_deref(),
+                )?;
+                let mut outputs = Vec::new();
+                for run in runs {
+                    if run.model_id != model.model_id {
+                        return Ok(ToolResult::error_message(format!(
+                            "suite references model `{}` but DSL target is `{}`",
+                            run.model_id, model.model_id
+                        )));
+                    }
+                    let request = CheckRequest {
+                        request_id: "mcp-suite-run".to_string(),
+                        source_name: source_name.clone(),
+                        source: source.clone(),
+                        property_id: run.property_id.clone(),
+                        seed: None,
+                        backend: args.backend.clone(),
+                        solver_executable: args.solver_executable.clone(),
+                        solver_args: args.solver_args.clone(),
+                    };
+                    let outcome = check_source(&request);
+                    let mut value = parse_embedded_json(
+                        "check outcome",
+                        &render_outcome_json(&model.model_id, &outcome),
+                    )?;
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("model_id".to_string(), Value::String(run.model_id));
+                        object.insert(
+                            "property_id".to_string(),
+                            run.property_id.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                    outputs.push(value);
+                }
+                Ok(ToolResult::success(json!({
+                    "selection_mode": mode,
+                    "suite_name": args.suite_name,
+                    "runs": outputs
+                })))
+            }
+        }
+    }
+}
+
+fn augment_list_models_value(config: &ServerConfig, mut value: Value) -> Value {
+    if let Some(project_config) = &config.project_config {
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "critical_properties".to_string(),
+                json!(project_config.critical_properties),
+            );
+            object.insert(
+                "property_suites".to_string(),
+                json!(project_config.property_suites),
+            );
+        }
+    }
+    value
+}
+
+fn augment_contract_check_value(config: &ServerConfig, mut value: Value) -> Value {
+    let Some(project_config) = &config.project_config else {
+        return value;
+    };
+    if let Some(reports) = value.get_mut("reports").and_then(Value::as_array_mut) {
+        for report in reports {
+            if let Some(object) = report.as_object_mut() {
+                if let Some(contract_id) = object.get("contract_id").and_then(Value::as_str) {
+                    let recommendations = rerun_recommendations(project_config, contract_id);
+                    object.insert(
+                        "affected_critical_properties".to_string(),
+                        json!(recommendations.affected_critical_properties),
+                    );
+                    object.insert(
+                        "affected_property_suites".to_string(),
+                        json!(recommendations.affected_property_suites),
+                    );
+                }
+            }
+        }
+    } else if let Some(object) = value.as_object_mut() {
+        if let Some(contract_id) = object.get("contract_id").and_then(Value::as_str) {
+            let recommendations = rerun_recommendations(project_config, contract_id);
+            object.insert(
+                "affected_critical_properties".to_string(),
+                json!(recommendations.affected_critical_properties),
+            );
+            object.insert(
+                "affected_property_suites".to_string(),
+                json!(recommendations.affected_property_suites),
+            );
+        }
+    }
+    value
+}
+
+#[derive(Debug, Clone)]
+struct McpSuiteRun {
+    model_id: String,
+    property_id: Option<String>,
+}
+
+fn select_suite_runs(
+    project_config: &ProjectConfig,
+    model_catalog: &std::collections::BTreeMap<String, Vec<String>>,
+    critical: bool,
+    suite_name: Option<&str>,
+) -> Result<Vec<McpSuiteRun>, String> {
+    if critical {
+        if project_config.critical_properties.is_empty() {
+            return Err("valid.toml does not declare critical_properties".to_string());
+        }
+        return expand_mcp_property_targets(
+            model_catalog,
+            project_config
+                .critical_properties
+                .iter()
+                .flat_map(|(model, properties)| {
+                    properties
+                        .iter()
+                        .cloned()
+                        .map(|property| (model.clone(), property))
+                })
+                .collect(),
+        );
+    }
+    if let Some(suite_name) = suite_name {
+        let entries = project_config
+            .property_suites
+            .get(suite_name)
+            .ok_or_else(|| format!("unknown property suite `{suite_name}`"))?;
+        return expand_mcp_property_targets(
+            model_catalog,
+            entries
+                .iter()
+                .flat_map(|entry| {
+                    entry
+                        .properties
+                        .iter()
+                        .cloned()
+                        .map(|property| (entry.model.clone(), property))
+                })
+                .collect(),
+        );
+    }
+    Err("valid_suite_run requires `critical=true` or `suite_name`".to_string())
+}
+
+fn expand_mcp_property_targets(
+    model_catalog: &std::collections::BTreeMap<String, Vec<String>>,
+    requested: Vec<(String, String)>,
+) -> Result<Vec<McpSuiteRun>, String> {
+    let mut seen = BTreeSet::new();
+    let mut runs = Vec::new();
+    for (model_id, property_id) in requested {
+        let properties = model_catalog
+            .get(&model_id)
+            .ok_or_else(|| format!("unknown model `{model_id}` in valid.toml"))?;
+        if property_id.trim().is_empty() {
+            return Err(format!(
+                "empty property id configured for model `{model_id}`"
+            ));
+        }
+        if !properties.contains(&property_id) {
+            return Err(format!(
+                "unknown property `{property_id}` configured for model `{model_id}`"
+            ));
+        }
+        if seen.insert((model_id.clone(), property_id.clone())) {
+            runs.push(McpSuiteRun {
+                model_id,
+                property_id: Some(property_id),
+            });
+        }
+    }
+    Ok(runs)
+}
+
+fn registry_model_property_catalog(
+    registry_binary: &str,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let (_, value) = run_registry_json(registry_binary, &["list", "--json"])?;
+    let models = value["models"]
+        .as_array()
+        .ok_or_else(|| "registry list output missing models".to_string())?;
+    let mut catalog = std::collections::BTreeMap::new();
+    for model_name in models.iter().filter_map(Value::as_str) {
+        let (_, inspect) = run_registry_json(registry_binary, &["inspect", model_name, "--json"])?;
+        let properties = inspect["properties"]
+            .as_array()
+            .ok_or_else(|| {
+                format!("registry inspect output missing properties for `{model_name}`")
+            })?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        catalog.insert(model_name.to_string(), properties);
+    }
+    Ok(catalog)
 }
 
 fn normalized_option(value: &Option<String>) -> Option<String> {
@@ -2402,6 +2791,9 @@ fn run_registry_json(
     args: &[impl AsRef<str>],
 ) -> Result<(i32, Value), String> {
     let mut command = Command::new(registry_binary);
+    if let Ok(manifest_path) = std::env::var("VALID_MCP_MANIFEST_PATH") {
+        command.env("VALID_REGISTRY_MANIFEST_PATH", manifest_path);
+    }
     for arg in args {
         command.arg(arg.as_ref());
     }

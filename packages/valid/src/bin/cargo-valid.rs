@@ -129,6 +129,9 @@ fn main() {
         actions: parsed.actions,
         focus_action_id: parsed.focus_action_id,
         suite_models: parsed.suite_models,
+        critical: parsed.critical,
+        suite_name: parsed.suite_name,
+        project_config: parsed.project_config,
         write_path: parsed.write_path,
         check: parsed.check,
     };
@@ -157,7 +160,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -229,6 +232,9 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             bin: parsed.bin.clone(),
             file: parsed.file.clone(),
             suite_models: Vec::new(),
+            critical: parsed.critical,
+            suite_name: parsed.suite_name.clone(),
+            project_config: parsed.project_config.clone(),
             benchmark_models: Vec::new(),
             write_path: None,
             check: false,
@@ -275,21 +281,17 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
 
 fn run_external_all(parsed: CliArgs) -> ! {
     let progress = ProgressReporter::new("all", parsed.progress_json);
-    let models = if parsed.suite_models.is_empty() {
-        fetch_external_models(&parsed)
-    } else {
-        parsed.suite_models.clone()
-    };
-    let total = models.len();
+    let runs = build_suite_runs_for_external(&parsed);
+    let total = runs.len();
     let mut aggregate_status = ExitCode::Success;
     let mut json_runs = Vec::new();
     progress.start(Some(total));
 
-    for (index, model) in models.into_iter().enumerate() {
-        progress.item_start(index, total, &model);
+    for (index, run) in runs.into_iter().enumerate() {
+        progress.item_start(index, total, &run.model_id);
         let mut command = build_external_command(&CliArgs {
             command: "check".to_string(),
-            model: Some(model.clone()),
+            model: Some(run.model_id.clone()),
             seed: parsed.seed,
             repeat: 0,
             baseline_mode: None,
@@ -297,7 +299,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
             strategy: None,
             format: parsed.format.clone(),
             view: parsed.view.clone(),
-            property_id: parsed.property_id.clone(),
+            property_id: run.property_id.clone(),
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
             solver_args: parsed.solver_args.clone(),
@@ -310,6 +312,9 @@ fn run_external_all(parsed: CliArgs) -> ! {
             bin: parsed.bin.clone(),
             file: parsed.file.clone(),
             suite_models: Vec::new(),
+            critical: parsed.critical,
+            suite_name: parsed.suite_name.clone(),
+            project_config: parsed.project_config.clone(),
             benchmark_models: Vec::new(),
             write_path: None,
             check: false,
@@ -326,22 +331,43 @@ fn run_external_all(parsed: CliArgs) -> ! {
         let code = to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code()));
         aggregate_status = aggregate_status.aggregate(code);
         if parsed.json {
-            json_runs.push(preferred_child_json(&output));
+            let mut item = preferred_child_json(&output);
+            if let Some(object) = item.as_object_mut() {
+                object.insert("model_id".to_string(), Value::String(run.model_id.clone()));
+                object.insert(
+                    "property_id".to_string(),
+                    run.property_id
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            json_runs.push(item);
         } else {
-            println!("== {model} ==");
+            println!("== {} ==", run.model_id);
             print!("{}", String::from_utf8_lossy(&output.stdout));
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.trim().is_empty() {
                 eprint!("{stderr}");
             }
         }
-        progress.item_complete(index, total, &model, code.code());
+        progress.item_complete(index, total, &run.model_id, code.code());
     }
 
     if parsed.json {
+        let mode = match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+            SuiteSelectionMode::All => "all",
+            SuiteSelectionMode::Critical => "critical",
+            SuiteSelectionMode::Named => "named_suite",
+        };
         println!(
             "{}",
-            serde_json::to_string(&json!({ "runs": json_runs })).expect("suite json")
+            serde_json::to_string(&json!({
+                "selection_mode": mode,
+                "suite_name": parsed.suite_name,
+                "runs": json_runs
+            }))
+            .expect("suite json")
         );
     }
     progress.finish(aggregate_status);
@@ -547,6 +573,9 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         bin: parsed.bin.clone(),
         file: parsed.file.clone(),
         suite_models: Vec::new(),
+        critical: false,
+        suite_name: None,
+        project_config: parsed.project_config.clone(),
         benchmark_models: Vec::new(),
         write_path: None,
         check: false,
@@ -568,29 +597,282 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
     parse_models_json(&String::from_utf8_lossy(&output.stdout))
 }
 
+#[derive(Debug, Clone)]
+struct SuiteRun {
+    model_id: String,
+    property_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuiteSelectionMode {
+    All,
+    Critical,
+    Named,
+}
+
+fn build_suite_runs_for_external(parsed: &CliArgs) -> Vec<SuiteRun> {
+    match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+        SuiteSelectionMode::All => {
+            let models = if parsed.suite_models.is_empty() {
+                fetch_external_models(parsed)
+            } else {
+                parsed.suite_models.clone()
+            };
+            models
+                .into_iter()
+                .map(|model_id| SuiteRun {
+                    model_id,
+                    property_id: parsed.property_id.clone(),
+                })
+                .collect()
+        }
+        SuiteSelectionMode::Critical => {
+            let config = parsed.project_config.as_ref().unwrap_or_else(|| {
+                usage_exit("`cargo valid suite --critical` requires valid.toml critical_properties")
+            });
+            let ordered_models = if parsed.suite_models.is_empty() {
+                config
+                    .critical_properties
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                parsed
+                    .suite_models
+                    .iter()
+                    .filter(|model| config.critical_properties.contains_key(model.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            ordered_models
+                .into_iter()
+                .flat_map(|model_id| {
+                    config
+                        .critical_properties
+                        .get(&model_id)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(move |property_id| SuiteRun {
+                            model_id: model_id.clone(),
+                            property_id: Some(property_id),
+                        })
+                })
+                .collect()
+        }
+        SuiteSelectionMode::Named => {
+            let config = parsed.project_config.as_ref().unwrap_or_else(|| {
+                usage_exit("`cargo valid suite --suite=<name>` requires valid.toml property_suites")
+            });
+            let suite_name = parsed.suite_name.as_deref().expect("named suite");
+            let entries = config.property_suites.get(suite_name).unwrap_or_else(|| {
+                usage_exit(&format!("unknown property suite `{suite_name}`"));
+            });
+            entries
+                .iter()
+                .flat_map(|entry| {
+                    entry
+                        .properties
+                        .iter()
+                        .cloned()
+                        .map(|property_id| SuiteRun {
+                            model_id: entry.model.clone(),
+                            property_id: Some(property_id),
+                        })
+                })
+                .collect()
+        }
+    }
+}
+
+fn build_suite_runs_for_bundled(parsed: &ParsedArgs) -> Vec<SuiteRun> {
+    let model_catalog = bundled_model_property_catalog();
+    build_suite_runs_from_catalog(
+        parsed.project_config.as_ref(),
+        &model_catalog,
+        &parsed.suite_models,
+        parsed.property_id.as_ref(),
+        parsed.critical,
+        parsed.suite_name.as_deref(),
+    )
+}
+
+fn build_suite_runs_from_catalog(
+    config: Option<&ProjectConfig>,
+    model_catalog: &std::collections::BTreeMap<String, Vec<String>>,
+    suite_models: &[String],
+    property_id: Option<&String>,
+    critical: bool,
+    suite_name: Option<&str>,
+) -> Vec<SuiteRun> {
+    let selection = suite_selection_mode(critical, suite_name);
+    match selection {
+        SuiteSelectionMode::All => {
+            let models = if suite_models.is_empty() {
+                model_catalog.keys().cloned().collect::<Vec<_>>()
+            } else {
+                suite_models.to_vec()
+            };
+            models
+                .into_iter()
+                .map(|model_id| SuiteRun {
+                    model_id,
+                    property_id: property_id.cloned(),
+                })
+                .collect()
+        }
+        SuiteSelectionMode::Critical => {
+            let config = config.unwrap_or_else(|| {
+                usage_exit("`cargo valid suite --critical` requires valid.toml critical_properties")
+            });
+            let ordered_models = if suite_models.is_empty() {
+                config
+                    .critical_properties
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                suite_models
+                    .iter()
+                    .filter(|model| config.critical_properties.contains_key(model.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            if ordered_models.is_empty() {
+                usage_exit("no critical properties matched the selected suite models");
+            }
+            expand_property_targets(
+                model_catalog,
+                ordered_models
+                    .into_iter()
+                    .flat_map(|model| {
+                        config
+                            .critical_properties
+                            .get(&model)
+                            .cloned()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(move |property| (model.clone(), property))
+                    })
+                    .collect(),
+            )
+        }
+        SuiteSelectionMode::Named => {
+            let config = config.unwrap_or_else(|| {
+                usage_exit("`cargo valid suite --suite=<name>` requires valid.toml property_suites")
+            });
+            let suite_name = suite_name.expect("named suite");
+            let entries = config.property_suites.get(suite_name).unwrap_or_else(|| {
+                usage_exit(&format!("unknown property suite `{suite_name}`"));
+            });
+            if entries.is_empty() {
+                usage_exit(&format!("property suite `{suite_name}` has no entries"));
+            }
+            let allowed_models = if suite_models.is_empty() {
+                None
+            } else {
+                Some(
+                    suite_models
+                        .iter()
+                        .cloned()
+                        .collect::<std::collections::BTreeSet<_>>(),
+                )
+            };
+            expand_property_targets(
+                model_catalog,
+                entries
+                    .iter()
+                    .filter(|entry| {
+                        allowed_models
+                            .as_ref()
+                            .map(|models| models.contains(&entry.model))
+                            .unwrap_or(true)
+                    })
+                    .flat_map(|entry| {
+                        entry
+                            .properties
+                            .iter()
+                            .cloned()
+                            .map(|property| (entry.model.clone(), property))
+                    })
+                    .collect(),
+            )
+        }
+    }
+}
+
+fn suite_selection_mode(critical: bool, suite_name: Option<&str>) -> SuiteSelectionMode {
+    if critical {
+        SuiteSelectionMode::Critical
+    } else if suite_name.is_some() {
+        SuiteSelectionMode::Named
+    } else {
+        SuiteSelectionMode::All
+    }
+}
+
+fn expand_property_targets(
+    model_catalog: &std::collections::BTreeMap<String, Vec<String>>,
+    requested: Vec<(String, String)>,
+) -> Vec<SuiteRun> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut runs = Vec::new();
+    for (model_id, property_id) in requested {
+        let properties = model_catalog
+            .get(&model_id)
+            .unwrap_or_else(|| usage_exit(&format!("unknown model `{model_id}` in valid.toml")));
+        if property_id.trim().is_empty() {
+            usage_exit(&format!(
+                "empty property id configured for model `{model_id}`"
+            ));
+        }
+        if !properties.contains(&property_id) {
+            usage_exit(&format!(
+                "unknown property `{property_id}` configured for model `{model_id}`"
+            ));
+        }
+        if seen.insert((model_id.clone(), property_id.clone())) {
+            runs.push(SuiteRun {
+                model_id,
+                property_id: Some(property_id),
+            });
+        }
+    }
+    runs
+}
+
+fn bundled_model_property_catalog() -> std::collections::BTreeMap<String, Vec<String>> {
+    list_bundled_models()
+        .into_iter()
+        .map(|model| {
+            let request = InspectRequest {
+                request_id: format!("cargo-valid-suite-catalog-{model}"),
+                source_name: normalized_model_ref(model),
+                source: String::new(),
+            };
+            let inspect = inspect_source(&request).unwrap_or_else(|_| {
+                usage_exit(&format!("failed to inspect bundled model `{model}`"))
+            });
+            (model.to_string(), inspect.properties)
+        })
+        .collect()
+}
+
 fn cmd_all(parsed: ParsedArgs) {
     let progress = ProgressReporter::new("all", parsed.progress_json);
-    let models = if parsed.suite_models.is_empty() {
-        list_bundled_models()
-    } else {
-        parsed
-            .suite_models
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-    };
-    let total = models.len();
+    let runs = build_suite_runs_for_bundled(&parsed);
+    let total = runs.len();
     let mut aggregate_status = ExitCode::Success;
     let mut json_runs = Vec::new();
     progress.start(Some(total));
 
-    for (index, model) in models.into_iter().enumerate() {
-        progress.item_start(index, total, model);
+    for (index, run) in runs.into_iter().enumerate() {
+        progress.item_start(index, total, &run.model_id);
         let request = CheckRequest {
-            request_id: format!("cargo-valid-check-{model}"),
-            source_name: normalized_model_ref(model),
+            request_id: format!("cargo-valid-check-{}", run.model_id),
+            source_name: normalized_model_ref(&run.model_id),
             source: String::new(),
-            property_id: parsed.property_id.clone(),
+            property_id: run.property_id.clone(),
             seed: parsed.seed,
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
@@ -600,16 +882,42 @@ fn cmd_all(parsed: ParsedArgs) {
         let exit_code = ExitCode::from_check_outcome(&outcome);
         aggregate_status = aggregate_status.aggregate(exit_code);
         if parsed.json {
-            json_runs.push(render_outcome_json(model, &outcome));
+            let mut item: Value =
+                serde_json::from_str(&render_outcome_json(&run.model_id, &outcome))
+                    .expect("check outcome json");
+            if let Some(object) = item.as_object_mut() {
+                object.insert("model_id".to_string(), Value::String(run.model_id.clone()));
+                object.insert(
+                    "property_id".to_string(),
+                    run.property_id
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            json_runs.push(item);
         } else {
-            println!("== {model} ==");
+            println!("== {} ==", run.model_id);
             print!("{}", render_outcome_text(&outcome));
         }
-        progress.item_complete(index, total, model, exit_code.code());
+        progress.item_complete(index, total, &run.model_id, exit_code.code());
     }
 
     if parsed.json {
-        println!("{{\"runs\":[{}]}}", json_runs.join(","));
+        let mode = match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+            SuiteSelectionMode::All => "all",
+            SuiteSelectionMode::Critical => "critical",
+            SuiteSelectionMode::Named => "named_suite",
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "selection_mode": mode,
+                "suite_name": parsed.suite_name,
+                "runs": json_runs
+            }))
+            .expect("suite json")
+        );
     }
     progress.finish(aggregate_status);
     process::exit(aggregate_status.code());
@@ -618,14 +926,14 @@ fn cmd_all(parsed: ParsedArgs) {
 fn cmd_list(parsed: ParsedArgs) {
     let models = list_bundled_models();
     if parsed.json {
-        println!(
-            "{{\"models\":[{}]}}",
-            models
-                .iter()
-                .map(|model| format!("\"{}\"", model))
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        let mut body = json!({
+            "models": models
+        });
+        if let Some(config) = &parsed.project_config {
+            body["critical_properties"] = json!(config.critical_properties);
+            body["property_suites"] = json!(config.property_suites);
+        }
+        println!("{}", serde_json::to_string(&body).expect("list json"));
     } else {
         for model in models {
             println!("{model}");
@@ -1226,6 +1534,9 @@ struct ParsedArgs {
     actions: Vec<String>,
     focus_action_id: Option<String>,
     suite_models: Vec<String>,
+    critical: bool,
+    suite_name: Option<String>,
+    project_config: Option<ProjectConfig>,
     write_path: Option<String>,
     check: bool,
 }
@@ -1255,6 +1566,9 @@ struct CliArgs {
     json: bool,
     progress_json: bool,
     suite_models: Vec<String>,
+    critical: bool,
+    suite_name: Option<String>,
+    project_config: Option<ProjectConfig>,
     benchmark_models: Vec<String>,
     write_path: Option<String>,
     check: bool,
@@ -1343,6 +1657,11 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             _ if arg.starts_with("--property=") => {
                 parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())
             }
+            "--critical" => parsed.critical = true,
+            "--suite" => parsed.suite_name = Some(next_arg(&mut iter, "--suite")),
+            _ if arg.starts_with("--suite=") => {
+                parsed.suite_name = Some(arg.trim_start_matches("--suite=").to_string())
+            }
             _ if arg.starts_with("--seed=") => {
                 parsed.seed = Some(
                     arg.trim_start_matches("--seed=")
@@ -1377,6 +1696,9 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
     }
     if parsed.file.is_some() && (parsed.example.is_some() || parsed.bin.is_some()) {
         usage_exit("use either --file or --example/--bin, not both");
+    }
+    if parsed.critical && parsed.suite_name.is_some() {
+        usage_exit("use either --critical or --suite=<name>, not both");
     }
     parsed
 }
@@ -1428,6 +1750,7 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
                 let explicit_registry_target =
                     parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some();
                 apply_project_runtime_config(&config);
+                parsed.project_config = Some(config.clone());
                 if parsed.backend.is_none() {
                     parsed.backend = config.default_backend.clone();
                 }

@@ -128,6 +128,59 @@ fn main() {{
     .expect("temp valid_models example");
 }
 
+fn write_multi_property_fixture(project_dir: &Path, model_name: &str) {
+    fs::create_dir_all(project_dir.join("examples")).expect("temp examples dir");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"valid-suite-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nvalid = {{ path = {:?}, features = [\"verification-runtime\"] }}\n",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+    )
+    .expect("temp Cargo.toml");
+    fs::write(
+        project_dir.join("examples").join("valid_models.rs"),
+        format!(
+            r#"use valid::{{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state}};
+
+valid_state! {{
+    struct State {{
+        ready: bool,
+        retries: u8 [range = "0..=2"],
+    }}
+}}
+
+valid_actions! {{
+    enum Action {{
+        Enable => "ENABLE" [reads = ["ready"], writes = ["ready"]],
+        Retry => "RETRY" [reads = ["retries"], writes = ["retries"]],
+    }}
+}}
+
+valid_model! {{
+    model AutoDiscoverModel<State, Action>;
+    init [State {{ ready: false, retries: 0 }}];
+    transitions {{
+        transition Enable [tags = ["allow_path"]] when |state| state.ready == false => [State {{ ready: true, ..state }}];
+        transition Retry [role = setup] [tags = ["setup_path"]] when |state| state.retries < 2 => [State {{ retries: state.retries + 1, ..state }}];
+    }}
+    properties {{
+        invariant P_READY_BOOLEAN |state| state.ready == false || state.ready == true;
+        invariant P_RETRIES_BOUNDED |state| state.retries <= 2;
+    }}
+}}
+
+fn main() {{
+    run_registry_cli(valid_models![
+        "{model_name}" => AutoDiscoverModel,
+    ]);
+}}
+"#
+        ),
+    )
+    .expect("temp valid_models example");
+}
+
 #[test]
 fn cargo_valid_lists_registered_models() {
     let _guard = cargo_guard();
@@ -1151,6 +1204,71 @@ fn cargo_valid_suite_uses_valid_toml_suite_models() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"model_id\":\"suite-only-model\""));
     assert!(!stdout.contains("\"model_id\":\"counter\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_suite_can_run_critical_properties_from_valid_toml() {
+    let _guard = cargo_guard();
+    let project_dir = unique_temp_project_dir("valid-critical-suite");
+    write_multi_property_fixture(&project_dir, "critical-suite-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\n\n[critical_properties]\ncritical-suite-model = [\"P_READY_BOOLEAN\"]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("suite")
+        .arg("--critical")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid critical suite should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"selection_mode\":\"critical\""));
+    assert!(stdout.contains("\"property_id\":\"P_READY_BOOLEAN\""));
+    assert!(!stdout.contains("\"property_id\":\"P_RETRIES_BOUNDED\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_suite_can_run_named_property_suite_from_valid_toml() {
+    let _guard = cargo_guard();
+    let project_dir = unique_temp_project_dir("valid-named-suite");
+    write_multi_property_fixture(&project_dir, "named-suite-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\n\n[property_suites.smoke]\nentries = [{ model = \"named-suite-model\", properties = [\"P_RETRIES_BOUNDED\"] }]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("suite")
+        .arg("--suite=smoke")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid named suite should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"selection_mode\":\"named_suite\""));
+    assert!(stdout.contains("\"suite_name\":\"smoke\""));
+    assert!(stdout.contains("\"property_id\":\"P_RETRIES_BOUNDED\""));
+    assert!(!stdout.contains("\"property_id\":\"P_READY_BOOLEAN\""));
 
     let _ = fs::remove_dir_all(project_dir);
 }

@@ -475,6 +475,16 @@ if [ "$cmd" = "list" ]; then
   exit 0
 fi
 
+if [ "$cmd" = "inspect" ] && [ "$2" = "mock-safe" ]; then
+  printf '%s\n' '{"schema_version":"1.0.0","request_id":"registry-inspect","status":"ok","model_id":"mock-safe","machine_ir_ready":true,"machine_ir_error":null,"capabilities":{"parse_ready":true,"parse":{"reason":"","migration_hint":null,"unsupported_features":[]},"explicit_ready":true,"explicit":{"reason":"","migration_hint":null,"unsupported_features":[]},"ir_ready":true,"ir":{"reason":"","migration_hint":null,"unsupported_features":[]},"solver_ready":true,"solver":{"reason":"","migration_hint":null,"unsupported_features":[]},"coverage_ready":true,"coverage":{"reason":"","migration_hint":null,"unsupported_features":[]},"explain_ready":true,"explain":{"reason":"","migration_hint":null,"unsupported_features":[]},"testgen_ready":true,"testgen":{"reason":"","migration_hint":null,"unsupported_features":[]},"reasons":[]},"state_fields":["ready"],"actions":["ENABLE"],"properties":["P_SAFE"],"state_field_details":[],"action_details":[],"transition_details":[],"property_details":[]}'
+  exit 0
+fi
+
+if [ "$cmd" = "inspect" ] && [ "$2" = "mock-broken" ]; then
+  printf '%s\n' '{"schema_version":"1.0.0","request_id":"registry-inspect","status":"ok","model_id":"mock-broken","machine_ir_ready":true,"machine_ir_error":null,"capabilities":{"parse_ready":true,"parse":{"reason":"","migration_hint":null,"unsupported_features":[]},"explicit_ready":true,"explicit":{"reason":"","migration_hint":null,"unsupported_features":[]},"ir_ready":true,"ir":{"reason":"","migration_hint":null,"unsupported_features":[]},"solver_ready":true,"solver":{"reason":"","migration_hint":null,"unsupported_features":[]},"coverage_ready":true,"coverage":{"reason":"","migration_hint":null,"unsupported_features":[]},"explain_ready":true,"explain":{"reason":"","migration_hint":null,"unsupported_features":[]},"testgen_ready":true,"testgen":{"reason":"","migration_hint":null,"unsupported_features":[]},"reasons":[]},"state_fields":["ready"],"actions":["ENABLE"],"properties":["P_FAIL","P_GUARD"],"state_field_details":[],"action_details":[],"transition_details":[],"property_details":[]}'
+  exit 0
+fi
+
 if [ "$cmd" = "check" ]; then
   printf '%s\n' '{"kind":"completed","model_id":"mock-broken","manifest":{"request_id":"registry-check","run_id":"run-registry","schema_version":"1.0.0","source_hash":"sha256:source","contract_hash":"sha256:contract","engine_version":"0.1.0","backend_name":"explicit","backend_version":"0.1.0","seed":null},"status":"FAIL","assurance_level":"COMPLETE","explored_states":3,"explored_transitions":2,"property_result":{"property_id":"P_FAIL","property_kind":"invariant","status":"FAIL","assurance_level":"COMPLETE","reason_code":"MOCK_COUNTEREXAMPLE","unknown_reason":null,"terminal_state_id":"s2","evidence_id":"ev-1","summary":"mock registry fail"},"trace":null,"ci":{"exit_code":2,"status":"FAIL","backend":"explicit"},"review_summary":{"headline":"FAIL P_FAIL for mock-broken","trace_steps":0,"failing_action_id":null,"action_sequence":[],"next_steps":[]}}'
   exit 2
@@ -572,6 +582,46 @@ fn valid_mcp_allows_explicit_dsl_calls_when_default_registry_is_configured() {
         .expect("bundled models should be present")
         .iter()
         .any(|item| item == "counter"));
+}
+
+#[cfg(unix)]
+#[test]
+fn valid_mcp_exposes_project_property_metadata_and_suite_runs() {
+    let temp = TempDir::new("mcp-suite-runs");
+    let registry = make_mock_registry(&temp);
+    fs::write(
+        temp.path().join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\n\n[critical_properties]\nmock-broken = [\"P_FAIL\"]\n\n[property_suites.smoke]\nentries = [{ model = \"mock-broken\", properties = [\"P_GUARD\"] }]\n",
+    )
+    .expect("valid.toml");
+    let registry_str = registry.to_string_lossy().to_string();
+    let mut client = McpClient::spawn(&["--registry-binary", &registry_str], temp.path());
+    client.initialize();
+
+    let listed = structured_content(client.call_tool("valid_list_models", json!({})));
+    assert_eq!(listed["critical_properties"]["mock-broken"][0], "P_FAIL");
+    assert_eq!(
+        listed["property_suites"]["smoke"][0]["properties"][0],
+        "P_GUARD"
+    );
+
+    let suite =
+        structured_content(client.call_tool("valid_suite_run", json!({ "suite_name": "smoke" })));
+    assert_eq!(suite["selection_mode"], "named_suite");
+    assert_eq!(suite["suite_name"], "smoke");
+    assert_eq!(suite["runs"][0]["property_id"], "P_GUARD");
+
+    let lock_file = temp.path().join("mock.lock.json");
+    fs::write(&lock_file, "{}").expect("placeholder lock file should be written");
+    let drift = structured_content(client.call_tool(
+        "valid_contract_check",
+        json!({
+            "model_name": "mock-broken",
+            "lock_file": lock_file.to_string_lossy().to_string()
+        }),
+    ));
+    assert_eq!(drift["affected_critical_properties"][0], "P_FAIL");
+    assert_eq!(drift["affected_property_suites"][0], "smoke");
 }
 
 #[test]

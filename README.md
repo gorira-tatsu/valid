@@ -83,6 +83,13 @@ default_property = ""
 default_solver_executable = ""
 default_solver_args = []
 suite_models = []
+
+[critical_properties]
+# approval-model = ["P_APPROVAL_IS_BOOLEAN"]
+
+[property_suites.smoke]
+entries = []
+
 benchmark_models = []
 benchmark_repeats = 3
 generated_tests_dir = "generated-tests"
@@ -137,6 +144,14 @@ Use `--json` for CI, scripts, or AI integrations:
 cargo valid verify failing-counter --json
 ```
 
+Target critical properties or named suites from `valid.toml`:
+
+```sh
+cargo valid suite --critical
+cargo valid suite --suite=smoke
+cargo valid list --json
+```
+
 Try the legacy `.valid` path:
 
 ```sh
@@ -171,6 +186,7 @@ Available tools:
 - `valid_replay`
 - `valid_contract_snapshot`
 - `valid_contract_check`
+- `valid_suite_run`
 - `valid_list_models`
 - `valid_graph`
 - `valid_lint`
@@ -239,6 +255,10 @@ call.
 `valid_contract_snapshot` and `valid_contract_check` can operate on one
 registry model when `model_name` is provided, or on the full registry when it
 is omitted.
+
+If `valid.toml` declares `critical_properties` or `property_suites`, MCP
+clients can discover them through `valid_list_models`, run them through
+`valid_suite_run`, and read rerun recommendations from `valid_contract_check`.
 
 Configuration templates live at:
 

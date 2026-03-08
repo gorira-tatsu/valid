@@ -35,6 +35,7 @@ use crate::{
         collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
         property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
+    project::{load_project_config, rerun_recommendations},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
@@ -184,13 +185,16 @@ fn normalize_command(command: &str) -> String {
 fn cmd_list(models: &[RegisteredModel], args: Vec<String>) {
     let parsed = parse_args(args, "list", LIST_USAGE);
     if parsed.json {
+        let mut body = serde_json::json!({
+            "models": models.iter().map(|model| model.name).collect::<Vec<_>>()
+        });
+        if let Some(config) = registry_project_config() {
+            body["critical_properties"] = serde_json::json!(config.critical_properties);
+            body["property_suites"] = serde_json::json!(config.property_suites);
+        }
         println!(
-            "{{\"models\":[{}]}}",
-            models
-                .iter()
-                .map(|model| format!("\"{}\"", model.name))
-                .collect::<Vec<_>>()
-                .join(",")
+            "{}",
+            serde_json::to_string(&body).expect("registry list json")
         );
     } else {
         for model in models {
@@ -1389,6 +1393,7 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
             });
             let mut has_drift = false;
             let mut reports = Vec::new();
+            let project_config = registry_project_config();
             for (index, model) in models.iter().enumerate() {
                 progress.item_start(index, total, model.name);
                 let snapshot = (model.contract_snapshot)().unwrap_or_else(|message| {
@@ -1416,7 +1421,13 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                     progress.item_complete(index, total, model.name, ExitCode::Fail.code());
                     continue;
                 };
-                let drift = compare_snapshot(expected, &snapshot);
+                let mut drift = compare_snapshot(expected, &snapshot);
+                let recommendations = project_config
+                    .as_ref()
+                    .map(|config| rerun_recommendations(config, &snapshot.model_id))
+                    .unwrap_or_default();
+                drift.affected_critical_properties = recommendations.affected_critical_properties;
+                drift.affected_property_suites = recommendations.affected_property_suites;
                 let item_exit = if drift.status != "unchanged" {
                     has_drift = true;
                     ExitCode::Fail
@@ -1448,6 +1459,12 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
             usage_exit("contract", json, CONTRACT_USAGE);
         }
     }
+}
+
+fn registry_project_config() -> Option<crate::project::ProjectConfig> {
+    let manifest_path = env::var("VALID_REGISTRY_MANIFEST_PATH").ok()?;
+    let root = std::path::Path::new(&manifest_path).parent()?;
+    load_project_config(root).ok().flatten()
 }
 
 fn usage_exit(command: &str, json: bool, usage: &str) -> ! {

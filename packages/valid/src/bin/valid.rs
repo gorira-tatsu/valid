@@ -43,6 +43,7 @@ use valid::{
     },
     frontend::compile_model,
     mcp::{serve_stdio, ServerConfig},
+    project::{load_project_config, rerun_recommendations},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
@@ -536,6 +537,14 @@ fn cmd_mcp_from_parsed(args: McpArgs) {
             );
         }
         config.default_model_file = Some(model_file);
+        if let Some(root) = args
+            .model_file
+            .as_deref()
+            .and_then(|path| std::path::Path::new(path).parent())
+        {
+            config.project_config = load_project_config(root)
+                .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
+        }
     } else {
         let discovered = discover_external_project(&ExternalTargetOptions {
             manifest_path: args.manifest_path.clone(),
@@ -544,6 +553,10 @@ fn cmd_mcp_from_parsed(args: McpArgs) {
             bin: args.bin.clone(),
         })
         .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
+        if let Some(manifest_path) = &discovered.options.manifest_path {
+            env::set_var("VALID_MCP_MANIFEST_PATH", manifest_path);
+        }
+        config.project_config = discovered.config.clone();
         let target = resolve_external_target(&discovered.options)
             .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
         let registry_binary = build_registry_binary(&target, &build_options)
@@ -1183,7 +1196,16 @@ fn cmd_contract(args: Vec<String>) {
                         None,
                     )
                 });
-            let drift = compare_snapshot(&expected, &snapshot);
+            let mut drift = compare_snapshot(&expected, &snapshot);
+            let project_config = std::path::Path::new(&path)
+                .parent()
+                .and_then(|root| load_project_config(root).ok().flatten());
+            let recommendations = project_config
+                .as_ref()
+                .map(|config| rerun_recommendations(config, &snapshot.model_id))
+                .unwrap_or_default();
+            drift.affected_critical_properties = recommendations.affected_critical_properties;
+            drift.affected_property_suites = recommendations.affected_property_suites;
             println!("{}", render_drift_json(&drift));
             let exit_code = if drift.status == "unchanged" {
                 ExitCode::Success

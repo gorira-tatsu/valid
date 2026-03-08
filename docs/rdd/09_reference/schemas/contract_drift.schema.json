@@ -2,13 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.contract_drift",
   "type": "object",
-  "required": ["schema_version", "status", "contract_id", "old_hash", "new_hash", "changes"],
+  "required": [
+    "schema_version",
+    "status",
+    "contract_id",
+    "old_hash",
+    "new_hash",
+    "changes",
+    "affected_critical_properties",
+    "affected_property_suites"
+  ],
   "properties": {
     "schema_version": { "type": "string" },
     "status": { "type": "string" },
     "contract_id": { "type": "string" },
     "old_hash": { "type": "string" },
     "new_hash": { "type": "string" },
-    "changes": { "type": "object" }
+    "changes": { "type": "object" },
+    "affected_critical_properties": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "affected_property_suites": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
   }
 }
