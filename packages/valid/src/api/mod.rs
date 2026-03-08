@@ -18,7 +18,7 @@ use crate::{
     },
     engine::{build_run_manifest, CheckErrorEnvelope, CheckOutcome, PropertySelection, RunPlan},
     frontend,
-    ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind},
+    ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, PropertyLayer},
     modeling::CapabilityDetail,
     orchestrator::run_all_properties_with_backend,
     solver::{
@@ -170,6 +170,7 @@ pub struct InspectNamedExpr {
 pub struct InspectProperty {
     pub property_id: String,
     pub kind: String,
+    pub layer: String,
     pub expr: Option<String>,
     pub scope_expr: Option<String>,
     pub action_filter: Option<String>,
@@ -243,6 +244,7 @@ pub struct ExplainResponse {
     pub status: String,
     pub evidence_id: String,
     pub property_id: String,
+    pub property_layer: String,
     pub breakpoint_kind: String,
     pub breakpoint_note: Option<String>,
     pub failure_step_index: usize,
@@ -656,6 +658,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .map(|property| InspectProperty {
                 property_id: property.property_id.clone(),
                 kind: property_kind_label(&property.kind).to_string(),
+                layer: property_layer_label(property.layer).to_string(),
                 expr: property_expr_for_inspect(property),
                 scope_expr: property.scope.as_ref().map(render_expr_ir),
                 action_filter: property.action_filter.clone(),
@@ -670,6 +673,10 @@ pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
 
 pub(crate) fn property_kind_label(kind: &PropertyKind) -> &'static str {
     kind.as_str()
+}
+
+pub(crate) fn property_layer_label(layer: PropertyLayer) -> &'static str {
+    layer.as_str()
 }
 
 fn property_expr_for_inspect(property: &crate::ir::PropertyIr) -> Option<String> {
@@ -1108,6 +1115,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             let property_kind = selected_property
                 .map(|property| property.kind)
                 .unwrap_or(crate::ir::PropertyKind::Invariant);
+            let property_layer = selected_property
+                .map(|property| property.layer)
+                .unwrap_or(crate::ir::PropertyLayer::Assert);
             let review_context = build_review_context(
                 compiled_model.as_ref(),
                 selected_property,
@@ -1282,10 +1292,17 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             let mut repair_hints = vec![
                 "review the guard and update set of the failing action".to_string(),
                 format!(
-                    "verify {} property {} is intended",
-                    property_kind, trace.property_id
+                    "verify {} {} property {} is intended",
+                    property_layer_label(property_layer),
+                    property_kind,
+                    trace.property_id
                 ),
             ];
+            if property_layer == PropertyLayer::Assume {
+                repair_hints.push(
+                    "if this assumption is expected to hold in production, tighten the environment contract or fixture boundaries; otherwise promote it to an assert-style guarantee".to_string(),
+                );
+            }
             if let Some(action_id) = &failure_step.action_id {
                 repair_hints.push(format!(
                     "inspect the postcondition or implementation of action {action_id}"
@@ -1316,6 +1333,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             }
             let repair_targets = build_repair_targets(
                 property_kind,
+                property_layer,
                 failure_step.action_id.as_deref(),
                 &changed_fields,
                 &write_overlap,
@@ -1355,6 +1373,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 status: "ok".to_string(),
                 evidence_id: trace.evidence_id.clone(),
                 property_id: trace.property_id.clone(),
+                property_layer: property_layer_label(property_layer).to_string(),
                 breakpoint_kind: breakpoint_kind.to_string(),
                 breakpoint_note: failure_step.note.clone(),
                 failure_step_index: failure_step.index,
@@ -1975,9 +1994,10 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"property_id\":\"{}\",\"kind\":\"{}\",\"expr\":{},\"scope_expr\":{},\"action_filter\":{}}}",
+            "{{\"property_id\":\"{}\",\"kind\":\"{}\",\"layer\":\"{}\",\"expr\":{},\"scope_expr\":{},\"action_filter\":{}}}",
             escape_json(&property.property_id),
             escape_json(&property.kind),
+            escape_json(&property.layer),
             property
                 .expr
                 .as_ref()
@@ -2174,7 +2194,10 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
     if !response.property_details.is_empty() {
         out.push_str("properties:\n");
         for property in &response.property_details {
-            out.push_str(&format!("- {} ({})\n", property.property_id, property.kind));
+            out.push_str(&format!(
+                "- {} ({}, layer={})\n",
+                property.property_id, property.kind, property.layer
+            ));
             if let Some(expr) = &property.expr {
                 out.push_str(&format!(
                     "  expr:\n{}\n",
@@ -2197,12 +2220,13 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"property_layer\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
         escape_json(&response.evidence_id),
         escape_json(&response.property_id),
+        escape_json(&response.property_layer),
         escape_json(&response.breakpoint_kind),
         render_optional_string(response.breakpoint_note.as_deref()),
         response.failure_step_index,
@@ -2292,6 +2316,7 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
 pub fn render_explain_text(response: &ExplainResponse) -> String {
     let mut out = String::new();
     out.push_str(&format!("property_id: {}\n", response.property_id));
+    out.push_str(&format!("property_layer: {}\n", response.property_layer));
     out.push_str(&format!("evidence_id: {}\n", response.evidence_id));
     out.push_str(&format!("breakpoint_kind: {}\n", response.breakpoint_kind));
     if let Some(note) = &response.breakpoint_note {
@@ -3822,12 +3847,22 @@ fn build_review_context(
 
 fn build_repair_targets(
     property_kind: PropertyKind,
+    property_layer: PropertyLayer,
     action_id: Option<&str>,
     changed_fields: &[String],
     write_overlap_fields: &[String],
     review_context: &ExplainReviewContext,
 ) -> Vec<ExplainRepairTargetHint> {
     let mut targets = Vec::new();
+    if property_layer == PropertyLayer::Assume {
+        targets.push(ExplainRepairTargetHint {
+            target: "requirement_fix".to_string(),
+            reason: "the failing property is modeled as an environment assumption; review contract boundaries and fixture expectations before tightening system guarantees".to_string(),
+            priority: "high".to_string(),
+            action_id: action_id.map(str::to_string),
+            fields: changed_fields.to_vec(),
+        });
+    }
     if property_kind == PropertyKind::Reachability
         || property_kind == PropertyKind::Cover
         || review_context.vacuous
@@ -4214,6 +4249,22 @@ mod tests {
     }
 
     #[test]
+    fn inspect_reports_assume_and_assert_layers() {
+        let response = inspect_source(&InspectRequest {
+            request_id: "req-inspect-layer".to_string(),
+            source_name: "layered.valid".to_string(),
+            source: "model Access\nstate:\n  ready: bool\ninit:\n  ready = true\nassume ENV_READY:\n  invariant: ready == true\nassert P_READY:\n  invariant: ready == true\n".to_string(),
+        })
+        .unwrap();
+        assert_eq!(response.property_details.len(), 2);
+        assert_eq!(response.property_details[0].layer, "assume");
+        assert_eq!(response.property_details[1].layer, "assert");
+        let json = render_inspect_json(&response);
+        assert!(json.contains("\"layer\":\"assume\""));
+        assert!(json.contains("\"layer\":\"assert\""));
+    }
+
+    #[test]
     fn scenario_scoped_checks_and_cover_report_scope_metadata() {
         let source = "model PostFlow\nstate:\n  visible: bool\n  deleted: bool\ninit:\n  visible = true\n  deleted = false\npredicates:\n  deleted_view: visible == false && deleted == true\nscenarios:\n  DeletedPost: deleted == true\naction Delete:\n  pre: visible == true\n  post:\n    visible = false\n    deleted = true\nproperty P_VISIBLE_ONLY_AFTER_DELETE:\n  invariant: visible == false\nproperty C_DELETED_VIEW:\n  cover: deleted_view\n";
         let scoped = check_source(&CheckRequest {
@@ -4448,6 +4499,11 @@ mod tests {
                 .map(|index| InspectProperty {
                     property_id: format!("P_{index}"),
                     kind: "invariant".to_string(),
+                    layer: if index % 2 == 0 {
+                        "assert".to_string()
+                    } else {
+                        "assume".to_string()
+                    },
                     expr: Some("state.approved == false && state.retries < 2".to_string()),
                     scope_expr: None,
                     action_filter: None,
@@ -4616,6 +4672,7 @@ mod tests {
             property_details: vec![super::InspectProperty {
                 property_id: "P_PASSWORD_POLICY_MATCHES_FLAG".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: Some(
                     "iff(state.compliant, state.password_set && len(&state.password) >= 10 && regex_match(&state.password, r\"[A-Z]\"))"
                         .to_string(),
@@ -4666,7 +4723,7 @@ mod tests {
           writes: password, password_set, compliant
           path_tags: allow_path, password_policy_path
         properties:
-        - P_PASSWORD_POLICY_MATCHES_FLAG (invariant)
+        - P_PASSWORD_POLICY_MATCHES_FLAG (invariant, layer=assert)
           expr:
             iff(state.compliant,
             state.password_set && len(&state.password) >= 10 && regex_match(&state.password,
@@ -4786,7 +4843,7 @@ mod tests {
         assert!(response
             .repair_hints
             .iter()
-            .any(|hint| hint.contains("verify reachability property P_REACH is intended")));
+            .any(|hint| hint.contains("verify assert reachability property P_REACH is intended")));
         assert!(response
             .repair_targets
             .iter()
@@ -4796,6 +4853,28 @@ mod tests {
             .iter()
             .any(|cause| cause.message.contains("target state")));
         validate_explain_response(&response).unwrap();
+    }
+
+    #[test]
+    fn explain_surfaces_assumption_layer_and_requirement_fix_hint() {
+        let source = "model Access\nstate:\n  ready: bool\ninit:\n  ready = true\naction Break:\n  pre: true\n  post:\n    ready = false\nassume ENV_READY:\n  invariant: ready == true\n";
+        let request = CheckRequest {
+            request_id: "req-explain-assume".to_string(),
+            source_name: "access.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("ENV_READY".to_string()),
+            scenario_id: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+            seed: None,
+        };
+        let response = explain_source(&request).unwrap();
+        assert_eq!(response.property_layer, "assume");
+        assert!(response
+            .repair_targets
+            .iter()
+            .any(|target| target.target == "requirement_fix" && target.priority == "high"));
     }
 
     #[test]

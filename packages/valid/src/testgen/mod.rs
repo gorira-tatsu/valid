@@ -1505,6 +1505,7 @@ mod tests {
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
+                layer: crate::ir::PropertyLayer::Assert,
                 expr: ExprIr::Binary {
                     op: BinaryOp::LessThanOrEqual,
                     left: Box::new(ExprIr::FieldRef("x".to_string())),

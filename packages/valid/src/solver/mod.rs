@@ -870,6 +870,12 @@ fn normalize_protocol_result(
         .find(|property| property.property_id == property_id)
         .map(|property| property.kind.clone())
         .ok_or_else(|| format!("unknown property `{}`", property_id))?;
+    let property_layer = model
+        .properties
+        .iter()
+        .find(|property| property.property_id == property_id)
+        .map(|property| property.layer)
+        .ok_or_else(|| format!("unknown property `{}`", property_id))?;
     let assurance_level = protocol
         .assurance_level
         .as_deref()
@@ -920,6 +926,7 @@ fn normalize_protocol_result(
             property_result: PropertyResult {
                 property_id: property_id.clone(),
                 property_kind: property_kind.clone(),
+                property_layer,
                 status: RunStatus::Pass,
                 assurance_level,
                 scenario_id: run_plan.scenario_selection.clone(),
@@ -968,6 +975,7 @@ fn normalize_protocol_result(
                 property_result: PropertyResult {
                     property_id: property_id.clone(),
                     property_kind: property_kind.clone(),
+                    property_layer,
                     status: RunStatus::Fail,
                     assurance_level,
                     scenario_id: run_plan.scenario_selection.clone(),
@@ -998,6 +1006,7 @@ fn normalize_protocol_result(
             property_result: PropertyResult {
                 property_id,
                 property_kind,
+                property_layer,
                 status: RunStatus::Unknown,
                 assurance_level,
                 scenario_id: run_plan.scenario_selection.clone(),
