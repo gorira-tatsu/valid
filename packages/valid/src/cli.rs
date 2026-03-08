@@ -501,6 +501,16 @@ const MANIFEST_ARG: ArgSpec = ArgSpec {
     description: "Cargo manifest path for project execution.",
     values: &[],
 };
+const PROJECT_ARG: ArgSpec = ArgSpec {
+    name: "project",
+    syntax: "--project <dir>",
+    value_type: "string",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Project directory containing Cargo.toml for MCP startup.",
+    values: &[],
+};
 const REGISTRY_ARG: ArgSpec = ArgSpec {
     name: "registry",
     syntax: "--registry <path>",
@@ -560,6 +570,46 @@ const NAME_ARG: ArgSpec = ArgSpec {
     positional: false,
     description: "Override the MCP server name.",
     values: &[],
+};
+const LOCKED_ARG: ArgSpec = ArgSpec {
+    name: "locked",
+    syntax: "--locked",
+    value_type: "boolean",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Pass --locked through to cargo build for registry startup.",
+    values: &[],
+};
+const OFFLINE_ARG: ArgSpec = ArgSpec {
+    name: "offline",
+    syntax: "--offline",
+    value_type: "boolean",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Pass --offline through to cargo build for registry startup.",
+    values: &[],
+};
+const FEATURE_ARG: ArgSpec = ArgSpec {
+    name: "feature",
+    syntax: "--feature <name>",
+    value_type: "string",
+    required: false,
+    multiple: true,
+    positional: false,
+    description: "Additional cargo feature to enable when building the registry target.",
+    values: &[],
+};
+const PRINT_CONFIG_ARG: ArgSpec = ArgSpec {
+    name: "print_config",
+    syntax: "--print-config <codex|claude-code|claude-desktop>",
+    value_type: "string",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Print a ready-to-paste MCP client config snippet instead of starting the server.",
+    values: &["codex", "claude-code", "claude-desktop"],
 };
 const CLEAN_SCOPE_ARG: ArgSpec = ArgSpec {
     name: "scope",
@@ -680,6 +730,7 @@ const SCHEMA_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const COMMANDS_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const BATCH_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
 const MCP_OPTIONS: &[ArgSpec] = &[
+    PROJECT_ARG,
     MANIFEST_ARG,
     REGISTRY_ARG,
     FILE_ARG,
@@ -687,6 +738,10 @@ const MCP_OPTIONS: &[ArgSpec] = &[
     BIN_ARG,
     MODEL_FILE_OPTION_ARG,
     NAME_ARG,
+    LOCKED_ARG,
+    OFFLINE_ARG,
+    FEATURE_ARG,
+    PRINT_CONFIG_ARG,
 ];
 const BENCHMARK_OPTIONS: &[ArgSpec] = &[
     JSON_ARG,
@@ -909,7 +964,7 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         name: "mcp",
         aliases: &[],
         description: "Start the MCP server with project-first target discovery.",
-        usage: "valid mcp [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] [--model-file <path>] [--name <server-name>]",
+        usage: "valid mcp [--project <dir>|--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] [--model-file <path>] [--name <server-name>] [--locked] [--offline] [--feature <name>] [--print-config <client>]",
         positional: &[],
         options: MCP_OPTIONS,
         request_schema: None,

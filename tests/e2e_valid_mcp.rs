@@ -259,14 +259,9 @@ fn valid_mcp_supports_project_first_registry_mode() {
     let _guard = build_guard();
     let temp = TempDir::new("valid-mcp-registry");
     write_registry_fixture(temp.path(), "temp-counter");
-    let manifest_path = temp.path().join("Cargo.toml");
 
     let mut client = McpClient::spawn(
-        &[
-            "mcp",
-            "--manifest-path",
-            manifest_path.to_string_lossy().as_ref(),
-        ],
+        &["mcp", "--project", temp.path().to_string_lossy().as_ref()],
         temp.path(),
     );
 
@@ -292,4 +287,57 @@ fn valid_mcp_supports_project_first_registry_mode() {
         inspect["properties"][0].as_str(),
         Some("P_READY_IS_BOOLEAN")
     );
+}
+
+#[test]
+fn valid_mcp_prints_codex_config_for_project_mode() {
+    let temp = TempDir::new("valid-mcp-config-project");
+    write_registry_fixture(temp.path(), "temp-counter");
+    let output = Command::new(valid_path())
+        .args([
+            "mcp",
+            "--project",
+            temp.path().to_string_lossy().as_ref(),
+            "--locked",
+            "--offline",
+            "--feature",
+            "varisat-backend",
+            "--print-config",
+            "codex",
+            "--name",
+            "valid-registry",
+        ])
+        .output()
+        .expect("config should print");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[mcp_servers.valid-registry]"));
+    assert!(stdout.contains("command = \"valid\""));
+    assert!(stdout.contains("\"mcp\""));
+    assert!(stdout.contains("\"--manifest-path\""));
+    assert!(stdout.contains("\"--locked\""));
+    assert!(stdout.contains("\"--offline\""));
+    assert!(stdout.contains("\"--feature\", \"varisat-backend\""));
+}
+
+#[test]
+fn valid_mcp_prints_claude_config_for_dsl_mode() {
+    let output = Command::new(valid_path())
+        .args([
+            "mcp",
+            "--model-file",
+            fixture("safe_counter.valid").to_string_lossy().as_ref(),
+            "--print-config",
+            "claude-desktop",
+            "--name",
+            "valid-dsl",
+        ])
+        .output()
+        .expect("dsl config should print");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"valid-dsl\""));
+    assert!(stdout.contains("\"command\": \"valid\""));
+    assert!(stdout.contains("\"--model-file\""));
+    assert!(stdout.contains("\"env\": {}"));
 }

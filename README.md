@@ -212,6 +212,26 @@ valid mcp --manifest-path /absolute/path/to/project/Cargo.toml --bin my_registry
 valid mcp --manifest-path /absolute/path/to/project/Cargo.toml --registry examples/custom_registry.rs
 ```
 
+If you prefer a project root over a manifest path, use:
+
+```sh
+valid mcp --project /absolute/path/to/project
+```
+
+To print a ready-to-paste client snippet instead of assembling config by hand:
+
+```sh
+valid mcp --project /absolute/path/to/project --print-config codex --name valid-registry
+valid mcp --model-file /absolute/path/to/model.valid --print-config claude-desktop --name valid-dsl
+```
+
+For reproducible registry startup, you can pass build policy through to Cargo:
+
+```sh
+valid mcp --project /absolute/path/to/project --locked --offline
+valid mcp --project /absolute/path/to/project --feature varisat-backend
+```
+
 When registry mode is configured at startup, tool calls only need `model_name`.
 Without startup configuration, pass `registry_binary` and `model_name` per
 call.

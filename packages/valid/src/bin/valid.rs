@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     io::{self, Read},
+    path::PathBuf,
     process::{self, Command},
 };
 
@@ -38,7 +39,7 @@ use valid::{
     evidence::{render_outcome_json, render_outcome_text, write_outcome_artifacts},
     external_registry::{
         build_registry_binary, discover_external_project, resolve_external_target,
-        ExternalTargetOptions,
+        ExternalTargetOptions, RegistryBuildOptions,
     },
     frontend::compile_model,
     mcp::{serve_stdio, ServerConfig},
@@ -247,6 +248,8 @@ struct SchemaArgs {
 
 #[derive(Args, Debug, Clone)]
 struct McpArgs {
+    #[arg(long)]
+    project: Option<String>,
     #[arg(long = "manifest-path")]
     manifest_path: Option<String>,
     #[arg(long = "registry", alias = "file")]
@@ -259,6 +262,14 @@ struct McpArgs {
     model_file: Option<String>,
     #[arg(long)]
     name: Option<String>,
+    #[arg(long)]
+    locked: bool,
+    #[arg(long)]
+    offline: bool,
+    #[arg(long = "feature")]
+    features: Vec<String>,
+    #[arg(long = "print-config")]
+    print_config: Option<String>,
 }
 
 fn main() {
@@ -494,11 +505,28 @@ fn cmd_batch_from_parsed(args: JsonProgressArgs) {
 }
 
 fn cmd_mcp_from_parsed(args: McpArgs) {
+    let args = normalized_mcp_args(args).unwrap_or_else(|message| {
+        message_exit("mcp", false, &message, None);
+    });
+    if let Some(client) = &args.print_config {
+        println!(
+            "{}",
+            render_mcp_config(client, &args).unwrap_or_else(|message| {
+                message_exit("mcp", false, &message, None);
+            })
+        );
+        process::exit(0);
+    }
     let mut config = ServerConfig::default();
-    if let Some(name) = args.name {
+    if let Some(name) = args.name.clone() {
         config.server_name = name;
     }
-    if let Some(model_file) = args.model_file {
+    let build_options = RegistryBuildOptions {
+        locked: args.locked,
+        offline: args.offline,
+        extra_features: args.features.clone(),
+    };
+    if let Some(model_file) = args.model_file.clone() {
         if args.registry.is_some() || args.example.is_some() || args.bin.is_some() {
             message_exit(
                 "mcp",
@@ -510,15 +538,15 @@ fn cmd_mcp_from_parsed(args: McpArgs) {
         config.default_model_file = Some(model_file);
     } else {
         let discovered = discover_external_project(&ExternalTargetOptions {
-            manifest_path: args.manifest_path,
-            file: args.registry,
-            example: args.example,
-            bin: args.bin,
+            manifest_path: args.manifest_path.clone(),
+            file: args.registry.clone(),
+            example: args.example.clone(),
+            bin: args.bin.clone(),
         })
         .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
         let target = resolve_external_target(&discovered.options)
             .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
-        let registry_binary = build_registry_binary(&target, &[])
+        let registry_binary = build_registry_binary(&target, &build_options)
             .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
         config.default_registry_binary = Some(registry_binary);
     }
@@ -527,6 +555,97 @@ fn cmd_mcp_from_parsed(args: McpArgs) {
         process::exit(1);
     }
     process::exit(0);
+}
+
+fn normalized_mcp_args(mut args: McpArgs) -> Result<McpArgs, String> {
+    if args.project.is_some() && args.manifest_path.is_some() {
+        return Err("use either --project or --manifest-path, not both".to_string());
+    }
+    if let Some(project) = args.project.take() {
+        args.manifest_path = Some(
+            PathBuf::from(project)
+                .join("Cargo.toml")
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    Ok(args)
+}
+
+fn render_mcp_config(client: &str, args: &McpArgs) -> Result<String, String> {
+    let server_name = args.name.as_deref().unwrap_or("valid");
+    let command = "valid";
+    let mut command_args = vec!["mcp".to_string()];
+    if let Some(name) = &args.name {
+        command_args.push("--name".to_string());
+        command_args.push(name.clone());
+    }
+    if args.locked {
+        command_args.push("--locked".to_string());
+    }
+    if args.offline {
+        command_args.push("--offline".to_string());
+    }
+    for feature in &args.features {
+        command_args.push("--feature".to_string());
+        command_args.push(feature.clone());
+    }
+    if let Some(model_file) = &args.model_file {
+        command_args.push("--model-file".to_string());
+        command_args.push(model_file.clone());
+    } else {
+        if let Some(manifest_path) = &args.manifest_path {
+            command_args.push("--manifest-path".to_string());
+            command_args.push(manifest_path.clone());
+        }
+        if let Some(registry) = &args.registry {
+            command_args.push("--registry".to_string());
+            command_args.push(registry.clone());
+        } else if let Some(example) = &args.example {
+            command_args.push("--example".to_string());
+            command_args.push(example.clone());
+        } else if let Some(bin) = &args.bin {
+            command_args.push("--bin".to_string());
+            command_args.push(bin.clone());
+        }
+    }
+    if command_args.len() == 1 {
+        return Err(
+            "print-config requires either --model-file or a registry project target via --project/--manifest-path/--registry/--example/--bin"
+                .to_string(),
+        );
+    }
+
+    match client {
+        "codex" => Ok(format!(
+            "[mcp_servers.{server_name}]\ncommand = {command:?}\nargs = [{}]\n",
+            command_args
+                .iter()
+                .map(|arg| format!("{arg:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        "claude-code" | "claude" => Ok(format!(
+            "{{\n  \"mcpServers\": {{\n    {server_name:?}: {{\n      \"command\": {command:?},\n      \"args\": [{}]\n    }}\n  }}\n}}",
+            command_args
+                .iter()
+                .map(|arg| format!("{arg:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        "claude-desktop" => Ok(format!(
+            "{{\n  \"mcpServers\": {{\n    {server_name:?}: {{\n      \"command\": {command:?},\n      \"args\": [{}],\n      \"env\": {{}}\n    }}\n  }}\n}}",
+            command_args
+                .iter()
+                .map(|arg| format!("{arg:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        _ => Err(
+            "unknown client for --print-config; expected codex, claude-code, or claude-desktop"
+                .to_string(),
+        ),
+    }
 }
 fn cmd_clean_from_parsed(args: CleanArgs) {
     let mut values = flags_to_args(args.json_progress);

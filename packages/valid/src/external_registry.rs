@@ -51,6 +51,13 @@ pub struct ExternalTarget {
     pub name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryBuildOptions {
+    pub locked: bool,
+    pub offline: bool,
+    pub extra_features: Vec<String>,
+}
+
 pub fn project_root(manifest_path: Option<&str>) -> PathBuf {
     if let Some(manifest_path) = manifest_path {
         let path = PathBuf::from(manifest_path);
@@ -132,15 +139,21 @@ pub fn resolve_external_target(options: &ExternalTargetOptions) -> Result<Extern
 
 pub fn build_registry_binary(
     target: &ExternalTarget,
-    extra_features: &[&str],
+    options: &RegistryBuildOptions,
 ) -> Result<String, String> {
     let mut command = Command::new("cargo");
     command.arg("build");
     let mut features = default_build_features(target);
-    for feature in extra_features {
+    for feature in &options.extra_features {
         if !features.iter().any(|existing| existing == feature) {
-            features.push((*feature).to_string());
+            features.push(feature.clone());
         }
+    }
+    if options.locked {
+        command.arg("--locked");
+    }
+    if options.offline {
+        command.arg("--offline");
     }
     if !features.is_empty() {
         command.arg("--features").arg(features.join(","));
