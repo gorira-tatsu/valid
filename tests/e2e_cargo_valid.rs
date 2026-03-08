@@ -253,6 +253,34 @@ fn cargo_valid_inspects_registered_model() {
 }
 
 #[test]
+fn cargo_valid_artifacts_lists_existing_run_history() {
+    let _guard = cargo_guard();
+    let temp_dir = unique_temp_project_dir("cargo-valid-artifacts");
+    fs::create_dir_all(&temp_dir).expect("temp project dir");
+
+    let selfcheck = Command::new(env!("CARGO_BIN_EXE_valid"))
+        .arg("selfcheck")
+        .arg("--json")
+        .current_dir(&temp_dir)
+        .output()
+        .expect("selfcheck should run");
+    assert!(selfcheck.status.success());
+
+    let output = Command::new(cargo_valid_path())
+        .arg("artifacts")
+        .arg("--json")
+        .current_dir(&temp_dir)
+        .output()
+        .expect("cargo valid artifacts should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"run_id\": \"selfcheck-local-0001\""));
+    assert!(stdout.contains("\"artifact_kind\": \"selfcheck_report\""));
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn cargo_valid_inspects_fizzbuzz_as_solver_ready() {
     let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())

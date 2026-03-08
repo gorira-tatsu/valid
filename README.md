@@ -21,6 +21,8 @@ authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-gui
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
+Artifact inventory and run-history guidance lives in
+[docs/artifacts.md](./docs/artifacts.md).
 
 The product story is now:
 

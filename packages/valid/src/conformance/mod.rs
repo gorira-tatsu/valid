@@ -108,6 +108,7 @@ pub fn build_vector_from_actions(
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!("vec-conformance-{}", model.model_id),
+        run_id: format!("run-conformance-{}", model.model_id),
         source_kind: "spec_conformance".to_string(),
         strictness: "strict".to_string(),
         derivation: "spec_replay".to_string(),
@@ -243,6 +244,7 @@ mod tests {
         TestVector {
             schema_version: "1.0.0".to_string(),
             vector_id: "vec-1".to_string(),
+            run_id: "run-1".to_string(),
             source_kind: "counterexample".to_string(),
             strictness: "strict".to_string(),
             derivation: "counterexample_trace".to_string(),

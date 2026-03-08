@@ -7,6 +7,8 @@
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
+- [Artifact Inventory and Run History](./artifacts.md)
+  Artifact index layout, run-history files, and CLI listing surfaces.
 - [Rust DSL Guide](./dsl/README.md)
   User-facing documentation for writing and operating models with the `valid`
   Rust DSL.

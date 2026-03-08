@@ -296,6 +296,7 @@ pub fn testgen_bundled_model(
             .iter()
             .map(|vector| crate::api::TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
+                run_id: vector.run_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
