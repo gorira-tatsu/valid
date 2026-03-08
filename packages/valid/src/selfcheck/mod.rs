@@ -330,6 +330,7 @@ fn selfcheck_model() -> ModelIr {
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Binary {
                 op: BinaryOp::LessThanOrEqual,
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
@@ -400,6 +401,7 @@ fn predecessor_selfcheck_model() -> ModelIr {
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Binary {
                 op: BinaryOp::LessThanOrEqual,
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
@@ -470,6 +472,7 @@ fn coverage_selfcheck_model() -> ModelIr {
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Binary {
                 op: BinaryOp::LessThanOrEqual,
                 left: Box::new(ExprIr::FieldRef("x".to_string())),

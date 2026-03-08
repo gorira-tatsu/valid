@@ -373,6 +373,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: Some("state.x <= 3".to_string()),
                 scope_expr: None,
                 action_filter: None,

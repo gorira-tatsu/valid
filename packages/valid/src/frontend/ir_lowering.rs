@@ -2,7 +2,8 @@ use crate::{
     frontend::typecheck::TypedModel,
     ir::{
         ActionIr, ActionRole, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PredicateIr,
-        PropertyIr, PropertyKind, ScenarioIr, SourceSpan, StateField, UpdateIr, Value,
+        PropertyIr, PropertyKind, PropertyLayer, ScenarioIr, SourceSpan, StateField, UpdateIr,
+        Value,
     },
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span},
 };
@@ -152,6 +153,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
 
     let mut properties = Vec::new();
     for property in &parsed.properties {
+        let layer = PropertyLayer::parse(&property.layer).unwrap_or(PropertyLayer::Assert);
         match lower_property_kind(&property.kind) {
             Some(PropertyKind::Invariant)
             | Some(PropertyKind::Reachability)
@@ -166,6 +168,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
                                 properties.push(PropertyIr {
                                     property_id: property.name.clone(),
                                     kind: PropertyKind::parse(&property.kind).unwrap(),
+                                    layer,
                                     expr,
                                     scope: Some(scope),
                                     action_filter: None,
@@ -183,6 +186,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
                             properties.push(PropertyIr {
                                 property_id: property.name.clone(),
                                 kind: PropertyKind::parse(&property.kind).unwrap(),
+                                layer,
                                 expr,
                                 scope: None,
                                 action_filter: None,
@@ -205,6 +209,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
                     (Some(expr), Some(Some(scope))) => properties.push(PropertyIr {
                         property_id: property.name.clone(),
                         kind: PropertyKind::Transition,
+                        layer,
                         expr,
                         scope: Some(scope),
                         action_filter: property.action_filter.clone(),
@@ -212,6 +217,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
                     (Some(expr), None) => properties.push(PropertyIr {
                         property_id: property.name.clone(),
                         kind: PropertyKind::Transition,
+                        layer,
                         expr,
                         scope: None,
                         action_filter: property.action_filter.clone(),
@@ -232,6 +238,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
             Some(PropertyKind::DeadlockFreedom) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
                 kind: PropertyKind::DeadlockFreedom,
+                layer,
                 expr: ExprIr::Literal(Value::Bool(true)),
                 scope: property
                     .scope_expr

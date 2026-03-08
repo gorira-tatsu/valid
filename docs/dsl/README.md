@@ -409,12 +409,24 @@ Current practical first-class property kind:
 
 - `invariant`
 
+In Rust-first models, invariants can now be layered as either:
+
+- `assume`
+- `assert`
+
+`assert` is the default guarantee surface. Use `assume` for environment
+contracts or fixture boundaries that are expected to hold before the system
+guarantee is evaluated.
+
 Example:
 
 ```rust
 properties {
     invariant P_EXPORT_REQUIRES_APPROVAL |state|
         state.export_enabled == false || state.approved;
+    assume ENV_BOUNDARY_ATTACHED |state| state.boundary_attached;
+    assert P_EXPORT_REQUIRES_ENTERPRISE |state|
+        state.export_enabled == false || state.plan == Plan::Enterprise;
 }
 ```
 

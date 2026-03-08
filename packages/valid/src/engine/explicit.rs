@@ -34,6 +34,7 @@ pub struct ExplicitRunResult {
 pub struct PropertyResult {
     pub property_id: String,
     pub property_kind: PropertyKind,
+    pub property_layer: crate::ir::PropertyLayer,
     pub status: RunStatus,
     pub assurance_level: AssuranceLevel,
     pub scenario_id: Option<String>,
@@ -261,6 +262,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
             property_kind: property.kind,
+            property_layer: property.layer,
             status: RunStatus::Pass,
             assurance_level: assurance,
             scenario_id: plan.scenario_selection.clone(),
@@ -502,6 +504,7 @@ fn temporal_result(
             property_result: PropertyResult {
                 property_id: property.property_id.clone(),
                 property_kind: property.kind,
+                property_layer: property.layer,
                 status: RunStatus::Pass,
                 assurance_level: assurance,
                 scenario_id: plan.scenario_selection.clone(),
@@ -735,6 +738,7 @@ fn fail_result(
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
             property_kind: property.kind,
+            property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
             scenario_id: plan.scenario_selection.clone(),
@@ -782,6 +786,7 @@ fn deadlock_result(
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
             property_kind: property.kind,
+            property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
             scenario_id: plan.scenario_selection.clone(),
@@ -830,6 +835,10 @@ fn unknown_result(
                 .as_ref()
                 .map(|property| property.kind)
                 .unwrap_or(PropertyKind::Invariant),
+            property_layer: property
+                .as_ref()
+                .map(|property| property.layer)
+                .unwrap_or(crate::ir::PropertyLayer::Assert),
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
             scenario_id: plan.scenario_selection.clone(),
@@ -882,6 +891,7 @@ fn cover_hit_result(
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
             property_kind: property.kind,
+            property_layer: property.layer,
             status: RunStatus::Pass,
             assurance_level: assurance,
             scenario_id: plan.scenario_selection.clone(),
@@ -923,6 +933,7 @@ fn cover_miss_result(
         property_result: PropertyResult {
             property_id: property.property_id.clone(),
             property_kind: property.kind,
+            property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
             scenario_id: plan.scenario_selection.clone(),
@@ -1216,6 +1227,7 @@ mod tests {
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
+                layer: crate::ir::PropertyLayer::Assert,
                 expr: ExprIr::Binary {
                     op: BinaryOp::LessThanOrEqual,
                     left: Box::new(ExprIr::FieldRef("x".to_string())),
@@ -1239,6 +1251,7 @@ mod tests {
         model.properties = vec![PropertyIr {
             property_id: "REACH".to_string(),
             kind: PropertyKind::Reachability,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Binary {
                 op: BinaryOp::Equal,
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
@@ -1404,6 +1417,7 @@ mod tests {
         model.properties = vec![PropertyIr {
             property_id: "P_LIVE".to_string(),
             kind: PropertyKind::DeadlockFreedom,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Literal(Value::Bool(true)),
             scope: None,
             action_filter: None,
@@ -1435,6 +1449,7 @@ mod tests {
         model.properties = vec![PropertyIr {
             property_id: "P_LIVE".to_string(),
             kind: PropertyKind::DeadlockFreedom,
+            layer: crate::ir::PropertyLayer::Assert,
             expr: ExprIr::Literal(Value::Bool(true)),
             scope: None,
             action_filter: None,
@@ -1473,6 +1488,7 @@ mod tests {
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
+                layer: crate::ir::PropertyLayer::Assert,
                 expr: ExprIr::Literal(Value::Bool(true)),
                 scope: None,
                 action_filter: None,
@@ -1551,6 +1567,7 @@ mod tests {
             properties: vec![PropertyIr {
                 property_id: "P_EVENTUAL".to_string(),
                 kind: PropertyKind::Temporal,
+                layer: crate::ir::PropertyLayer::Assert,
                 expr: ExprIr::Unary {
                     op: crate::ir::UnaryOp::TemporalEventually,
                     expr: Box::new(ExprIr::Binary {

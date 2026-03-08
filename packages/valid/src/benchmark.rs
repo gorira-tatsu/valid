@@ -551,6 +551,7 @@ mod tests {
                     property_result: PropertyResult {
                         property_id: "P_SAFE".to_string(),
                         property_kind: crate::ir::PropertyKind::Invariant,
+                        property_layer: crate::ir::PropertyLayer::Assert,
                         status: RunStatus::Pass,
                         assurance_level: AssuranceLevel::Complete,
                         scenario_id: None,
@@ -654,6 +655,7 @@ mod tests {
             property_result: PropertyResult {
                 property_id: "P_SAFE".to_string(),
                 property_kind: crate::ir::PropertyKind::Invariant,
+                property_layer: crate::ir::PropertyLayer::Assert,
                 status,
                 assurance_level: AssuranceLevel::Complete,
                 scenario_id: None,

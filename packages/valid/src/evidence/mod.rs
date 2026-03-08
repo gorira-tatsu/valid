@@ -232,6 +232,10 @@ fn validate_manifest(manifest: &crate::engine::RunManifest) -> Result<(), String
 
 fn validate_property_result(result: &crate::engine::PropertyResult) -> Result<(), String> {
     require_non_empty(&result.property_id, "property_result.property_id")?;
+    require_non_empty(
+        crate::api::property_layer_label(result.property_layer),
+        "property_result.property_layer",
+    )?;
     require_non_empty(&result.summary, "property_result.summary")?;
     Ok(())
 }
@@ -448,6 +452,10 @@ fn render_completed_text(result: &ExplicitRunResult) -> String {
         "property_id: {}\n",
         result.property_result.property_id
     ));
+    out.push_str(&format!(
+        "property_layer: {}\n",
+        crate::api::property_layer_label(result.property_result.property_layer)
+    ));
     out.push_str(&format!("summary: {}\n", result.property_result.summary));
     out.push_str(&format!("explored_states: {}\n", result.explored_states));
     out.push_str(&format!(
@@ -599,6 +607,10 @@ fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
     out.push_str(&format!(
         ",\"property_kind\":\"{}\"",
         property_kind_label(&result.property_result.property_kind)
+    ));
+    out.push_str(&format!(
+        ",\"property_layer\":\"{}\"",
+        crate::api::property_layer_label(result.property_result.property_layer)
     ));
     out.push_str(&format!(
         ",\"status\":\"{}\"",
@@ -1173,6 +1185,7 @@ mod tests {
             property_result: PropertyResult {
                 property_id: "SAFE".to_string(),
                 property_kind: crate::ir::PropertyKind::Invariant,
+                property_layer: crate::ir::PropertyLayer::Assert,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
                 scenario_id: None,
@@ -1236,6 +1249,7 @@ mod tests {
             property_result: PropertyResult {
                 property_id: "SAFE".to_string(),
                 property_kind: crate::ir::PropertyKind::Invariant,
+                property_layer: crate::ir::PropertyLayer::Assert,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
                 scenario_id: None,

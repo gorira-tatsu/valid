@@ -43,6 +43,8 @@ When generating new models:
 - treat `step |state, action| { ... }` as explicit-first or migration-oriented
 - always write `model Name<State, Action>;`
 - prefer small finite domains with explicit metadata
+- use `assume` for environment constraints and `assert` for guarantees you want
+  the system to preserve
 
 Why:
 
@@ -50,6 +52,8 @@ Why:
 - it gives better `inspect`, `graph`, `readiness`, `explain`, `coverage`, and
   `testgen`
 - `step` is still supported, but carries weaker structural information
+- assumption-vs-guarantee layering makes `inspect` and `explain` easier to act
+  on during review
 
 ## Minimal registry model skeleton
 
