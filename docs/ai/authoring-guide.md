@@ -153,6 +153,9 @@ Useful expressions:
   capability reasons, plus advisory maintainability findings such as missing
   model intent comments, repeated conditions, oversized models, and setup-heavy
   structure
+- for cross-domain reviews, use lint guidance to decide whether a big model
+  should stay standalone, split into smaller standalone models, or move the
+  shared-state question into a dedicated integration model
 - declarative models with unsupported expressions will be flagged by readiness
   and may fail solver-backed verification
 
@@ -206,6 +209,9 @@ If your MCP client supports prompts, prefer this sequence:
   local and inspect output stays readable.
 - Start each long-lived model with a short intent comment, then keep the model
   vocabulary explicit with named predicates, scenarios, and clear action ids.
+- For integration models, document the participating subdomains, the shared
+  state being restated, and the cross-domain properties that justify the extra
+  model. This works today without full compose syntax.
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.

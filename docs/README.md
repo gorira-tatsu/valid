@@ -15,7 +15,7 @@
   critical properties close to the source.
 - [Project Organization Guide](./project-organization.md)
   Recommended layout for model files, registries, shared types, integration
-  models, and generated artifacts.
+  models, generated artifacts, and the pre-compose integration-model pattern.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.

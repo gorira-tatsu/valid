@@ -153,6 +153,19 @@ As a rule of thumb:
 - use shared predicates and shared types for common vocabulary
 - use an integration model when the real review question is cross-boundary
 
+For shared-state cross-domain checks, keep the integration model explicit about
+why it exists:
+
+- name the participating subdomains in the opening comment
+- state which shared fields are restated here and which source models still own
+  the local rules
+- call out the cross-domain properties that justify the extra model
+- keep the transition set narrow; do not re-encode every local workflow unless
+  that workflow is part of the shared-state contract under review
+- if the review question is implementation conformance rather than model
+  interaction, prefer a contract-only check instead of growing the integration
+  model
+
 ## Keep registries thin
 
 Registry files should mostly register models.
