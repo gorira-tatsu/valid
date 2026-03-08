@@ -71,7 +71,10 @@ declare `reads` and `writes` metadata when possible.
 
 Current boundary:
 
-- bounded parameterized actions are not implemented yet
+- bounded action choices are supported through `choose <name>: v1, v2, ...`
+  inside an `action` block. Use `{{name}}` placeholders in `pre:` and `post:`
+  expressions; lowering expands the conceptual action into one concrete finite
+  action per choice combination.
 - richer payload actions are not implemented yet
 - examples that use multiple variants for bounded choices should be treated as
   teaching or regression fixtures, not as the recommended shape for open-ended

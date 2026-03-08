@@ -11,6 +11,9 @@
       "type": "object",
       "required": [
         "backend_name",
+        "builtin",
+        "compiled_in",
+        "available",
         "supports_explicit",
         "supports_bmc",
         "supports_certificate",
@@ -21,6 +24,11 @@
       ],
       "properties": {
         "backend_name": { "type": "string", "minLength": 1 },
+        "builtin": { "type": "boolean" },
+        "compiled_in": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "availability_reason": { "type": ["string", "null"] },
+        "remediation": { "type": ["string", "null"] },
         "supports_explicit": { "type": "boolean" },
         "supports_bmc": { "type": "boolean" },
         "supports_certificate": { "type": "boolean" },

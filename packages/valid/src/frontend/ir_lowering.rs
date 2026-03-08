@@ -52,63 +52,88 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
 
     let mut actions = Vec::new();
     for action in &parsed.actions {
-        let guard = match action.pre.as_deref() {
-            Some(expr) => match lower_expr(expr, &predicate_defs, ExprMode::Current) {
-                Some(expr) => expr,
-                None => {
-                    errors.push(lowering_error(
-                        format!("unsupported guard expression `{}`", expr),
-                        action.line,
-                    ));
-                    continue;
+        let choice_bindings = expand_choice_bindings(action);
+        for binding in choice_bindings {
+            let rendered_pre = action
+                .pre
+                .as_deref()
+                .map(|expr| substitute_choices(expr, &binding));
+            let guard = match rendered_pre.as_deref() {
+                Some(expr) => match lower_expr(expr, &predicate_defs, ExprMode::Current) {
+                    Some(expr) => expr,
+                    None => {
+                        errors.push(lowering_error(
+                            format!("unsupported guard expression `{}`", expr),
+                            action.line,
+                        ));
+                        continue;
+                    }
+                },
+                None => ExprIr::Literal(Value::Bool(true)),
+            };
+
+            let mut updates = Vec::new();
+            let mut reads = Vec::new();
+            let mut writes = Vec::new();
+            let rendered_posts = action
+                .posts
+                .iter()
+                .map(|post| (post, substitute_choices(&post.expr, &binding)))
+                .collect::<Vec<_>>();
+
+            for (post, rendered_expr) in &rendered_posts {
+                writes.push(post.field.clone());
+                reads.push(post.field.clone());
+                match lower_expr(rendered_expr, &predicate_defs, ExprMode::Current) {
+                    Some(expr) => updates.push(UpdateIr {
+                        field: post.field.clone(),
+                        value: expr,
+                    }),
+                    None => errors.push(lowering_error(
+                        format!("unsupported update expression `{}`", rendered_expr),
+                        post.line,
+                    )),
                 }
-            },
-            None => ExprIr::Literal(Value::Bool(true)),
-        };
-
-        let mut updates = Vec::new();
-        let mut reads = Vec::new();
-        let mut writes = Vec::new();
-
-        for post in &action.posts {
-            writes.push(post.field.clone());
-            reads.push(post.field.clone());
-            match lower_expr(&post.expr, &predicate_defs, ExprMode::Current) {
-                Some(expr) => updates.push(UpdateIr {
-                    field: post.field.clone(),
-                    value: expr,
-                }),
-                None => errors.push(lowering_error(
-                    format!("unsupported update expression `{}`", post.expr),
-                    post.line,
-                )),
             }
-        }
 
-        actions.push(ActionIr {
-            action_id: action.name.clone(),
-            label: action.name.clone(),
-            role: ActionRole::parse(&action.role).unwrap_or(ActionRole::Business),
-            reads,
-            writes,
-            path_tags: crate::modeling::decision_path_tags(
-                &[],
-                &action.name,
-                action.posts.iter().map(|post| post.field.as_str()),
-                action.posts.iter().map(|post| post.field.as_str()),
-                action.pre.as_deref(),
-                Some(
-                    &action
-                        .posts
+            let action_id = if binding.is_empty() {
+                action.name.clone()
+            } else {
+                format!(
+                    "{}[{}]",
+                    action.name,
+                    binding
                         .iter()
-                        .map(|post| format!("{}={}", post.field, post.expr))
+                        .map(|(name, value)| format!("{name}={value}"))
                         .collect::<Vec<_>>()
-                        .join(", "),
+                        .join(",")
+                )
+            };
+
+            actions.push(ActionIr {
+                action_id,
+                label: action.name.clone(),
+                role: ActionRole::parse(&action.role).unwrap_or(ActionRole::Business),
+                reads,
+                writes,
+                path_tags: crate::modeling::decision_path_tags(
+                    &[],
+                    &action.name,
+                    action.posts.iter().map(|post| post.field.as_str()),
+                    action.posts.iter().map(|post| post.field.as_str()),
+                    rendered_pre.as_deref(),
+                    Some(
+                        &rendered_posts
+                            .iter()
+                            .map(|(post, rendered)| format!("{}={}", post.field, rendered))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
                 ),
-            ),
-            guard,
-            updates,
-        });
+                guard,
+                updates,
+            });
+        }
     }
 
     let predicates = parsed
@@ -266,6 +291,32 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
     } else {
         Err(errors)
     }
+}
+
+fn expand_choice_bindings(
+    action: &crate::frontend::parser::ParsedAction,
+) -> Vec<Vec<(String, String)>> {
+    let mut bindings = vec![Vec::new()];
+    for choice in &action.choices {
+        let mut next = Vec::new();
+        for binding in &bindings {
+            for value in &choice.values {
+                let mut expanded = binding.clone();
+                expanded.push((choice.name.clone(), value.clone()));
+                next.push(expanded);
+            }
+        }
+        bindings = next;
+    }
+    bindings
+}
+
+fn substitute_choices(input: &str, binding: &[(String, String)]) -> String {
+    let mut rendered = input.to_string();
+    for (name, value) in binding {
+        rendered = rendered.replace(&format!("{{{{{name}}}}}"), value);
+    }
+    rendered
 }
 
 fn lower_type(input: &str) -> Option<FieldType> {

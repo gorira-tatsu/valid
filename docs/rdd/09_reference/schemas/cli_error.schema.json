@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.cli.error",
+  "type": "object",
+  "required": ["schema_version", "kind", "command", "status", "exit_code", "diagnostics"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "kind": { "type": "string", "enum": ["cli_error"] },
+    "command": { "type": "string" },
+    "status": { "type": "string", "enum": ["ERROR"] },
+    "exit_code": { "type": "integer", "enum": [3] },
+    "usage": { "type": "string" },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["error_code", "segment", "severity", "message", "conflicts", "help", "best_practices"],
+        "properties": {
+          "error_code": { "type": "string" },
+          "segment": { "type": "string" },
+          "severity": { "type": "string" },
+          "message": { "type": "string" },
+          "primary_span": { "type": ["object", "null"] },
+          "conflicts": { "type": "array", "items": { "type": "string" } },
+          "help": { "type": "array", "items": { "type": "string" } },
+          "best_practices": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

@@ -15,9 +15,9 @@ mod prompts_catalog;
 use crate::{
     api::{
         check_source, compile_source, distinguish_source, explain_source, inspect_source,
-        lint_source, render_distinguish_json, render_explain_json, render_inspect_json,
-        render_lint_json, testgen_source, CheckRequest, DistinguishRequest, InspectRequest,
-        OrchestrateRequest, TestgenRequest, orchestrate_source,
+        lint_source, orchestrate_source, render_distinguish_json, render_explain_json,
+        render_inspect_json, render_lint_json, testgen_source, CheckRequest, DistinguishRequest,
+        InspectRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::list_bundled_models,
     contract::{compare_snapshot, parse_lock_file, snapshot_model},
@@ -741,7 +741,7 @@ fn input_schema_with_backend() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -772,7 +772,7 @@ fn input_schema_with_backend_and_property() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -800,13 +800,13 @@ fn input_schema_with_testgen() -> Value {
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
     properties.insert("strategy".to_string(), json!({
         "type": "string",
-        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random"]
+        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random", "deadlock"]
     }));
     properties.insert(
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -922,7 +922,7 @@ fn input_schema_suite_run() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -1687,6 +1687,10 @@ fn prompt_messages(
         docs_catalog::doc_entry("ai-requirement-refinement-workflow").ok_or_else(|| {
             "ai-requirement-refinement-workflow is missing from docs catalog".to_string()
         })?;
+    let comparison =
+        docs_catalog::doc_entry("ai-candidate-comparison-workflow").ok_or_else(|| {
+            "ai-candidate-comparison-workflow is missing from docs catalog".to_string()
+        })?;
     let args = arguments
         .iter()
         .map(|(key, value)| format!("- {key}: {}", render_prompt_value(value)))
@@ -1706,6 +1710,11 @@ fn prompt_messages(
         ),
         "refine_requirement_from_evidence" => format!(
             "Refine the current requirement brief using model evidence instead of patching the model blindly.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the requirement refinement workflow, AI authoring guide, and modeling checklist.\n2. Translate the evidence into requirement-level hypotheses before proposing model edits.\n3. Ask only the targeted follow-up questions needed to resolve the semantics exposed by the counterexample, dead action, vacuity clue, coverage gap, or mismatch.\n4. End with: what the evidence means, what requirement decision changed, which properties/scenarios should be added or revised, and which open questions remain.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "compare_candidate_models" => format!(
+            "Compare two plausible candidate models before committing to one interpretation.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the candidate comparison workflow, review workflow, and AI authoring guide.\n2. Inspect both candidates and confirm they are comparable at the same state/action boundary.\n3. Run valid_distinguish to find the shortest shared-prefix divergence.\n4. Summarize the differing assumption in product language, not only model language.\n5. End with: shared brief, differing assumption, divergence kind, affected property or state slice, and the next requirement question or model choice.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),
@@ -1752,6 +1761,17 @@ fn prompt_messages(
                     "uri": "valid://docs/ai-requirement-refinement-workflow",
                     "mimeType": "text/markdown",
                     "text": refinement.body_markdown
+                }
+            }
+        }),
+        json!({
+            "role": "user",
+            "content": {
+                "type": "resource",
+                "resource": {
+                    "uri": "valid://docs/ai-candidate-comparison-workflow",
+                    "mimeType": "text/markdown",
+                    "text": comparison.body_markdown
                 }
             }
         }),

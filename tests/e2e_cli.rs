@@ -122,6 +122,31 @@ fn failing_counter_explains_and_generates_vectors() {
 }
 
 #[test]
+fn cli_testgen_supports_deadlock_strategy() {
+    let temp_dir = unique_temp_dir("valid-deadlock-testgen");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+    let model_path = temp_dir.join("deadlock.valid");
+    fs::write(
+        &model_path,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n",
+    )
+    .expect("model should be written");
+
+    let output = Command::new(binary_path())
+        .arg("testgen")
+        .arg(&model_path)
+        .arg("--strategy=deadlock")
+        .arg("--json")
+        .output()
+        .expect("deadlock testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"strategy\":\"deadlock\""));
+    assert!(stdout.contains("\"source_kind\":\"deadlock\""));
+    assert!(stdout.contains("\"generated_files\":["));
+}
+
+#[test]
 fn multi_property_orchestrate_returns_aggregate_coverage() {
     let source = read_fixture("tests/fixtures/models/multi_property.valid");
     let response = orchestrate_source(&OrchestrateRequest {
@@ -232,6 +257,34 @@ fn cli_capabilities_reports_temporal_backend_details() {
 }
 
 #[test]
+fn cli_capabilities_reports_sat_backend_availability() {
+    let output = Command::new(binary_path())
+        .arg("capabilities")
+        .arg("--backend")
+        .arg("sat-varisat")
+        .arg("--json")
+        .output()
+        .expect("capabilities should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"backend\":\"sat-varisat\""));
+    #[cfg(feature = "varisat-backend")]
+    {
+        assert!(stdout.contains("\"compiled_in\":true"));
+        assert!(stdout.contains("\"available\":true"));
+    }
+    #[cfg(not(feature = "varisat-backend"))]
+    {
+        assert!(stdout.contains("\"compiled_in\":false"));
+        assert!(stdout.contains("\"available\":false"));
+        assert!(stdout.contains(
+            "\"availability_reason\":\"this binary was built without the varisat-backend feature\""
+        ));
+        assert!(stdout.contains("\"remediation\":\"reinstall or rebuild valid with `--features varisat-backend`, or use `cargo valid --backend=sat-varisat` so the feature is added automatically\""));
+    }
+}
+
+#[test]
 fn cli_distinguish_reports_divergence_as_json() {
     let temp_root = unique_temp_dir("valid-cli-distinguish");
     fs::create_dir_all(&temp_root).expect("temp root");
@@ -311,6 +364,44 @@ fn cli_check_accepts_scenario_selection() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"scenario_id\":\"DeletedPost\""));
     assert!(stdout.contains("\"vacuous\":false"));
+
+    let _ = fs::remove_file(&model_path);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn cli_inspect_and_check_support_bounded_action_choices() {
+    let temp_dir = unique_temp_dir("valid-bounded-choice");
+    let model_path = temp_dir.join("choice.valid");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    fs::write(
+        &model_path,
+        "model Counter\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Add:\n  choose delta: 1, 2\n  pre: x + {{delta}} <= 2\n  post:\n    x = x + {{delta}}\nproperty P_REACH_TWO:\n  reachability: x == 2\n",
+    )
+    .expect("model file should be written");
+
+    let inspect = Command::new(binary_path())
+        .arg("inspect")
+        .arg(&model_path)
+        .arg("--json")
+        .output()
+        .expect("inspect should run");
+    assert!(inspect.status.success());
+    let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
+    assert!(inspect_stdout.contains("Add[delta=1]"));
+    assert!(inspect_stdout.contains("Add[delta=2]"));
+
+    let check = Command::new(binary_path())
+        .arg("check")
+        .arg(&model_path)
+        .arg("--property=P_REACH_TWO")
+        .arg("--json")
+        .output()
+        .expect("check should run");
+    let check_stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(check.status.code(), Some(1));
+    assert!(check_stdout.contains("\"property_kind\":\"reachability\""));
+    assert!(check_stdout.contains("\"reason_code\":\"TARGET_REACHED\""));
 
     let _ = fs::remove_file(&model_path);
     let _ = fs::remove_dir_all(&temp_dir);
@@ -735,10 +826,12 @@ fn bundled_rust_models_run_via_main_cli_path() {
         .output()
         .expect("check should run");
     assert_eq!(check.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"traceback\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"changed_fields\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"breakpoint_kind\""));
+    let check_stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(check_stdout.contains("\"kind\":\"completed\""));
+    assert!(check_stdout.contains("\"property_id\":\"P_FAIL\""));
+    assert!(check_stdout.contains("\"traceback\""));
+    assert!(check_stdout.contains("\"changed_fields\""));
+    assert!(check_stdout.contains("\"breakpoint_kind\""));
 
     let coverage = Command::new(binary_path())
         .arg("coverage")
@@ -882,7 +975,7 @@ fn cli_commands_and_schema_are_machine_readable() {
     assert!(commands_stdout.contains("\"surface\":\"valid\""));
     assert!(commands_stdout.contains("\"name\":\"check\""));
     assert!(commands_stdout.contains("\"name\":\"mcp\""));
-    assert!(commands_stdout.contains("\"response\":\"schema.run_result\""));
+    assert!(commands_stdout.contains("\"response\":\"schema.cli.completed\""));
 
     let schema = Command::new(binary_path())
         .arg("schema")
@@ -893,7 +986,8 @@ fn cli_commands_and_schema_are_machine_readable() {
     let schema_stdout = String::from_utf8_lossy(&schema.stdout);
     assert!(schema_stdout.contains("\"command\":\"check\""));
     assert!(schema_stdout.contains("\"parameter_schema_id\":\"schema.cli.valid.check.parameters\""));
-    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.run_result\""));
+    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.cli.completed\""));
+    assert!(schema_stdout.contains("\"error_schema_id\":\"schema.cli.error\""));
 }
 
 #[test]

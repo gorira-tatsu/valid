@@ -592,6 +592,7 @@ fn cargo_valid_checks_registered_model() {
         .expect("cargo-valid check should run");
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"kind\":\"completed\""));
     assert!(stdout.contains("\"property_id\":\"P_FAIL\""));
     assert!(stdout.contains("\"ci\":{\"exit_code\":2"));
     assert!(stdout.contains("\"review_summary\""));
@@ -1731,6 +1732,7 @@ fn cargo_valid_commands_and_schema_are_machine_readable() {
     assert!(commands_stdout.contains("\"surface\":\"cargo-valid\""));
     assert!(commands_stdout.contains("\"name\":\"batch\""));
     assert!(commands_stdout.contains("\"response\":\"schema.cli.batch_response\""));
+    assert!(commands_stdout.contains("\"response\":\"schema.cli.completed\""));
 
     let schema = Command::new(cargo_valid_path())
         .arg("schema")
@@ -1742,7 +1744,8 @@ fn cargo_valid_commands_and_schema_are_machine_readable() {
     assert!(schema_stdout.contains("\"command\":\"check\""));
     assert!(schema_stdout
         .contains("\"parameter_schema_id\":\"schema.cli.cargo-valid.check.parameters\""));
-    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.run_result\""));
+    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.cli.completed\""));
+    assert!(schema_stdout.contains("\"error_schema_id\":\"schema.cli.error\""));
 }
 
 #[test]
