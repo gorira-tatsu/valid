@@ -1,6 +1,6 @@
 //! Machine-readable API layer for AI and CLI integration.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
@@ -211,13 +211,13 @@ pub struct CheckRequest {
     pub solver_args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainCandidateCause {
     pub kind: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainFieldDiff {
     pub field: String,
     pub before: crate::ir::Value,
@@ -243,13 +243,24 @@ pub struct ExplainReviewContext {
     pub vacuous: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainRepairTargetHint {
     pub target: String,
     pub reason: String,
     pub priority: String,
     pub action_id: Option<String>,
     pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TracebackSummary {
+    pub breakpoint_kind: String,
+    pub breakpoint_note: Option<String>,
+    pub failure_step_index: usize,
+    pub failing_action_id: Option<String>,
+    pub changed_fields: Vec<String>,
+    pub field_diffs: Vec<ExplainFieldDiff>,
+    pub involved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1582,7 +1593,7 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
             request.request_id.clone(),
             format!(
                 "run-{}",
-            stable_hash_hex(&request.request_id).replace("sha256:", "")
+                stable_hash_hex(&request.request_id).replace("sha256:", "")
             ),
             stable_hash_hex(&verification_source),
             "sha256:unknown".to_string(),
@@ -1626,7 +1637,11 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
             };
             return Err(error);
         };
-        let trace_steps = result.trace.as_ref().map(|trace| trace.steps.len()).unwrap_or(0);
+        let trace_steps = result
+            .trace
+            .as_ref()
+            .map(|trace| trace.steps.len())
+            .unwrap_or(0);
         let mut action_sequence = Vec::new();
         let mut ambiguity_flags = Vec::new();
         let mut candidate_causes = Vec::new();
@@ -1670,11 +1685,13 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
                 message: result
                     .property_result
                     .unknown_reason
-                    .map(|reason| format!(
-                        "property {} remained UNKNOWN because {}",
-                        result.property_result.property_id,
-                        review_unknown_reason_label(reason)
-                    ))
+                    .map(|reason| {
+                        format!(
+                            "property {} remained UNKNOWN because {}",
+                            result.property_result.property_id,
+                            review_unknown_reason_label(reason)
+                        )
+                    })
                     .unwrap_or_else(|| {
                         format!(
                             "property {} remained UNKNOWN and needs reviewer follow-up",
@@ -1696,14 +1713,20 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
             next_steps = explain.next_steps.clone();
             confidence = Some(explain.confidence);
             if explain.review_context.vacuous {
-                push_unique(&mut ambiguity_flags, "scope_or_scenario_mismatch".to_string());
+                push_unique(
+                    &mut ambiguity_flags,
+                    "scope_or_scenario_mismatch".to_string(),
+                );
             }
             if explain
                 .repair_targets
                 .iter()
                 .any(|target| target.target == "requirement_fix")
             {
-                push_unique(&mut ambiguity_flags, "requirement_interpretation".to_string());
+                push_unique(
+                    &mut ambiguity_flags,
+                    "requirement_interpretation".to_string(),
+                );
                 ambiguities.push(ReviewAmbiguity {
                     kind: "requirement_interpretation".to_string(),
                     severity: "info".to_string(),
@@ -1717,7 +1740,10 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
                 });
             }
         } else {
-            next_steps.push("review the model intent and property wording before expanding the model".to_string());
+            next_steps.push(
+                "review the model intent and property wording before expanding the model"
+                    .to_string(),
+            );
             if result.property_result.vacuous {
                 next_steps.push(
                     "confirm the scenario or property scope matches the intended requirement slice"
@@ -1768,9 +1794,7 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
             reason: if trace_count == 0 {
                 "no trace evidence executed this action in the reviewed run set".to_string()
             } else {
-                format!(
-                    "action did not appear in any of the {trace_count} collected trace(s)"
-                )
+                format!("action did not appear in any of the {trace_count} collected trace(s)")
             },
             observed_trace_count: trace_count,
         })
@@ -1798,25 +1822,40 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
         format!(
             "review flagged {} failing propert{} for {}",
             failing_properties.len(),
-            if failing_properties.len() == 1 { "y" } else { "ies" },
+            if failing_properties.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
             inspect.model_id
         )
     } else if !unknown_properties.is_empty() {
         format!(
             "review found {} unknown propert{} for {}",
             unknown_properties.len(),
-            if unknown_properties.len() == 1 { "y" } else { "ies" },
+            if unknown_properties.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
             inspect.model_id
         )
     } else if !vacuous_properties.is_empty() {
         format!(
             "review found {} vacuous propert{} for {}",
             vacuous_properties.len(),
-            if vacuous_properties.len() == 1 { "y" } else { "ies" },
+            if vacuous_properties.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
             inspect.model_id
         )
     } else {
-        format!("review found no blocking validity gaps for {}", inspect.model_id)
+        format!(
+            "review found no blocking validity gaps for {}",
+            inspect.model_id
+        )
     };
 
     Ok(ReviewResponse {
@@ -5022,10 +5061,7 @@ pub fn validate_review_response(response: &ReviewResponse) -> Result<(), String>
     }
     for dead_action in &response.dead_actions {
         require_non_empty(&dead_action.action_id, "dead_actions[].action_id")?;
-        require_non_empty(
-            &dead_action.evidence_basis,
-            "dead_actions[].evidence_basis",
-        )?;
+        require_non_empty(&dead_action.evidence_basis, "dead_actions[].evidence_basis")?;
         require_non_empty(&dead_action.reason, "dead_actions[].reason")?;
     }
     for disagreement in &response.candidate_disagreements {
@@ -5033,10 +5069,7 @@ pub fn validate_review_response(response: &ReviewResponse) -> Result<(), String>
             &disagreement.property_id,
             "candidate_disagreements[].property_id",
         )?;
-        require_non_empty(
-            &disagreement.reason,
-            "candidate_disagreements[].reason",
-        )?;
+        require_non_empty(&disagreement.reason, "candidate_disagreements[].reason")?;
         if disagreement.targets.len() < 2 {
             return Err(
                 "candidate_disagreements[].targets must contain at least two entries".to_string(),
@@ -5074,7 +5107,6 @@ fn render_review_summary_json(summary: &ReviewSummary) -> String {
 pub fn validate_review_request(request: &CheckRequest) -> Result<(), String> {
     validate_check_request(request)
 }
-
 
 fn render_path_json(path: &Path) -> String {
     let mut out = String::from("{\"decisions\":[");
