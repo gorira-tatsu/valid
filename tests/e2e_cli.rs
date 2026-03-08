@@ -661,6 +661,62 @@ fn main_cli_doc_check_reports_drift_structurally() {
 }
 
 #[test]
+fn main_cli_handoff_check_reports_drift_structurally() {
+    let model = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output_path = std::env::temp_dir().join(format!(
+        "valid-handoff-check-{}.md",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first = Command::new(binary_path())
+        .arg("handoff")
+        .arg(&model)
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--json")
+        .output()
+        .expect("handoff generation should run");
+    assert!(first.status.success());
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first_stdout.contains("\"model_id\":\"SafeCounter\""));
+    assert!(first_stdout.contains("\"contract_hash\""));
+    assert!(first_stdout.contains("\"markdown\""));
+
+    let unchanged = Command::new(binary_path())
+        .arg("handoff")
+        .arg(&model)
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("handoff check should run");
+    assert_eq!(unchanged.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&unchanged.stdout).contains("\"status\":\"unchanged\""));
+
+    let mut body = std::fs::read_to_string(&output_path).expect("handoff body");
+    body.push_str("\nmanual drift\n");
+    std::fs::write(&output_path, body).expect("handoff drift written");
+
+    let changed = Command::new(binary_path())
+        .arg("handoff")
+        .arg(&model)
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("handoff drift check should run");
+    assert_eq!(changed.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&changed.stdout);
+    assert!(stdout.contains("\"status\":\"changed\""));
+    assert!(stdout.contains("\"drift_sections\""));
+    let _ = std::fs::remove_file(output_path);
+}
+
+#[test]
 fn main_cli_lints_bundled_step_model() {
     let lint = Command::new(binary_path())
         .arg("lint")

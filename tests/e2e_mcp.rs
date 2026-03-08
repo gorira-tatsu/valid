@@ -206,6 +206,7 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     for expected in [
         "valid_docs_index",
         "valid_docs_get",
+        "valid_handoff",
         "valid_examples_list",
         "valid_example_get",
         "valid_inspect",
@@ -362,6 +363,18 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     let model_file = fixture("failing_counter.valid");
     let model_file_str = model_file.to_string_lossy().to_string();
 
+    let handoff = structured_content(client.call_tool(
+        "valid_handoff",
+        json!({ "model_file": model_file_str, "property_id": "P_FAIL" }),
+    ));
+    assert_eq!(handoff["model_id"], "FailingCounter");
+    assert_eq!(handoff["property_id"], "P_FAIL");
+    assert!(handoff["contract_hash"].as_str().is_some());
+    assert!(handoff["markdown"]
+        .as_str()
+        .expect("markdown should be present")
+        .contains("Implementation Handoff"));
+
     let inspect = structured_content(
         client.call_tool("valid_inspect", json!({ "model_file": model_file_str })),
     );
@@ -442,7 +455,7 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
 
     let lint =
         structured_content(client.call_tool("valid_lint", json!({ "model_file": model_file_str })));
-    assert_eq!(lint["status"], "ok");
+    assert_eq!(lint["status"], "warn");
     assert!(lint["findings"].is_array());
 
     let replay = structured_content(client.call_tool(

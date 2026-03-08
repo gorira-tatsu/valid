@@ -30,6 +30,11 @@ use crate::{
     },
     engine::CheckOutcome,
     evidence::{render_outcome_json, render_outcome_text},
+    handoff::{
+        check_handoff, default_handoff_path, generate_handoff, render_handoff_check_json,
+        render_handoff_check_text, render_handoff_json, render_handoff_text, write_handoff,
+        HandoffInputs,
+    },
     modeling::{
         build_machine_test_vectors_for_strategy, check_machine_outcome,
         check_machine_outcome_for_property, check_machine_outcomes, check_machine_with_adapter,
@@ -70,12 +75,14 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
 const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--json] [--progress=json]";
 const DOC_USAGE: &str =
     "usage: <registry-bin> doc <model> [--json] [--progress=json] [--write[=<path>]] [--check]";
+const HANDOFF_USAGE: &str =
+    "usage: <registry-bin> handoff <model> [--json] [--progress=json] [--property=<id>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>] [--write[=<path>]] [--check]";
 const LINT_USAGE: &str = "usage: <registry-bin> lint <model> [--json] [--progress=json]";
 const BENCHMARK_USAGE: &str = "usage: <registry-bin> benchmark <model> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
 const MIGRATE_USAGE: &str =
@@ -154,6 +161,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "inspect" => cmd_inspect(&models, remaining),
         "graph" => cmd_graph(&models, remaining),
         "doc" => cmd_doc(&models, remaining),
+        "handoff" => cmd_handoff(&models, remaining),
         "lint" => cmd_lint(&models, remaining),
         "benchmark" => cmd_benchmark(&models, remaining),
         "migrate" => cmd_migrate(&models, remaining),
@@ -385,6 +393,93 @@ fn cmd_doc(models: &[RegisteredModel], args: Vec<String>) {
                 &generated,
                 parsed.write_path.as_ref().map(|_| output_path.as_str())
             )
+        );
+    }
+    progress.finish(ExitCode::Success);
+}
+
+fn cmd_handoff(models: &[RegisteredModel], args: Vec<String>) {
+    let parsed = parse_args(args, "handoff", HANDOFF_USAGE);
+    let progress = ProgressReporter::new("handoff", parsed.progress_json);
+    progress.start(None);
+    let model = find_model(
+        "handoff",
+        parsed.json,
+        HANDOFF_USAGE,
+        models,
+        parsed.model.as_deref(),
+    );
+    let inspect = (model.inspect)("registry-handoff");
+    let adapter = adapter_from_parsed_args(&parsed).unwrap_or_else(|message| {
+        message_exit("handoff", parsed.json, &message, Some(HANDOFF_USAGE))
+    });
+    let orchestrated =
+        (model.orchestrate)("registry-handoff", adapter.as_ref()).unwrap_or_else(|message| {
+            message_exit("handoff", parsed.json, &message, Some(HANDOFF_USAGE))
+        });
+    let explanations = (model.explain)("registry-handoff")
+        .ok()
+        .into_iter()
+        .filter(|response| {
+            parsed
+                .property_id
+                .as_deref()
+                .map(|candidate| candidate == response.property_id.as_str())
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    let coverage = orchestrated
+        .aggregate_coverage
+        .clone()
+        .unwrap_or_else(|| (model.coverage)());
+    let contract_hash = (model.contract_snapshot)()
+        .map(|snapshot| snapshot.contract_hash)
+        .unwrap_or_else(|_| stable_hash_hex(model.name));
+    let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract_hash));
+    let generated = generate_handoff(HandoffInputs {
+        inspect: &inspect,
+        runs: &orchestrated.runs,
+        coverage: &coverage,
+        explanations: &explanations,
+        property_id: parsed.property_id.as_deref(),
+        source_hash: &source_hash,
+        contract_hash: &contract_hash,
+    });
+    let output_path = parsed
+        .write_path
+        .clone()
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| default_handoff_path(&generated.model_id));
+    if parsed.check {
+        let existing = fs::read_to_string(&output_path).ok();
+        let report = check_handoff(output_path.clone(), existing.as_deref(), &generated);
+        let code = if report.status == "unchanged" {
+            ExitCode::Success
+        } else {
+            ExitCode::Unknown
+        };
+        if parsed.json {
+            println!("{}", render_handoff_check_json(&report));
+        } else {
+            print!("{}", render_handoff_check_text(&report));
+        }
+        progress.finish(code);
+        process::exit(code.code());
+    }
+    if parsed.write_path.is_some() {
+        if let Err(message) = write_handoff(&output_path, &generated) {
+            message_exit("handoff", parsed.json, &message, Some(HANDOFF_USAGE));
+        }
+    }
+    if parsed.json {
+        println!(
+            "{}",
+            render_handoff_json(&generated, Some(output_path.as_str()))
+        );
+    } else {
+        print!(
+            "{}",
+            render_handoff_text(&generated, Some(output_path.as_str()))
         );
     }
     progress.finish(ExitCode::Success);
