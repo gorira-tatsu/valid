@@ -11,6 +11,7 @@ Related documents:
 - [Modeling Checklist](./modeling-checklist.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Examples Curriculum](./examples-curriculum.md)
+- [Project Organization Guide](../project-organization.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
 
@@ -179,6 +180,9 @@ For MCP-driven authoring:
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.
+- Keep registry files thin. Prefer one model per file and move shared enums or
+  reusable domain vocabulary into a dedicated shared module instead of copying
+  them across models.
 - Use `..state` only as explicit frame-condition sugar.
 - Keep domains finite and obvious.
 - Choose declarative transitions unless you are intentionally staying
@@ -199,4 +203,5 @@ For MCP-driven authoring:
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)
 - If you need examples in learning order: [Examples Curriculum](./examples-curriculum.md)
+- If you need project layout guidance: [Project Organization Guide](../project-organization.md)
 - If you need the full supported surface: [DSL Language Spec](../dsl/language-spec.md)

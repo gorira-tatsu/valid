@@ -9,6 +9,7 @@ This is not the design spec. For requirements and architecture, see the RDD.
 Related documents:
 
 - [AI Authoring Guide](../ai/authoring-guide.md)
+- [Project Organization Guide](../project-organization.md)
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
@@ -437,6 +438,12 @@ fn main() {
 ```
 
 In a project, `valid.toml` points `cargo valid` at the registry file.
+
+For long-lived projects, keep the registry file thin and put real model logic
+under a dedicated module tree such as `src/models/`. See the
+[Project Organization Guide](../project-organization.md) for recommended
+layouts for standalone models, integration models, shared types, and generated
+artifacts.
 
 Project-level verification targeting can also live in `valid.toml`:
 
