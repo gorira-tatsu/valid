@@ -1,0 +1,43 @@
+name: template-cargo-valid-inspect-check
+
+on:
+  workflow_call:
+    inputs:
+      project_manifest:
+        description: Path to the fixture or downstream project Cargo.toml.
+        required: true
+        type: string
+      model:
+        description: Registry model id to inspect and check.
+        required: true
+        type: string
+      property_id:
+        description: Property id passed to `cargo valid check`.
+        required: true
+        type: string
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: valid-inspect-check
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run inspect/check template
+        run: ./scripts/ci/template_inspect_check.sh "${{ inputs.project_manifest }}" "${{ inputs.model }}" "${{ inputs.property_id }}"
+      - name: Upload inspect/check artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: template-artifacts/inspect-check/

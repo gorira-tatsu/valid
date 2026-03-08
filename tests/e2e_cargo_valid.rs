@@ -488,6 +488,40 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
 }
 
 #[test]
+fn cargo_valid_graph_supports_failure_view() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("graph")
+        .arg("failing-counter")
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .output()
+        .expect("cargo-valid failure graph should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Failure Slice"));
+    assert!(stdout.contains("P_FAIL"));
+
+    let json_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("graph")
+        .arg("failing-counter")
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .arg("--format=json")
+        .output()
+        .expect("cargo-valid failure graph json should run");
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(json_stdout.contains("\"graph_view\":\"failure\""));
+    assert!(json_stdout.contains("\"graph_slice\""));
+    assert!(json_stdout.contains("\"property_id\":\"P_FAIL\""));
+}
+
+#[test]
 fn cargo_valid_checks_registered_model() {
     let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())

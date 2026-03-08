@@ -1,0 +1,39 @@
+name: template-valid-doc-check
+
+on:
+  workflow_call:
+    inputs:
+      model_file:
+        description: Path to the `.valid` model file.
+        required: true
+        type: string
+      output_path:
+        description: Where the generated Markdown document should live.
+        required: true
+        type: string
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: valid-doc-check
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  doc-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run doc-check template
+        run: ./scripts/ci/template_doc_check.sh "${{ inputs.model_file }}" "${{ inputs.output_path }}"
+      - name: Upload doc-check artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: template-artifacts/doc-check/
