@@ -17,7 +17,11 @@ User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
 [docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md).
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
+and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
+file-splitting guidance lives in
+[docs/project-organization.md](./docs/project-organization.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
@@ -27,6 +31,7 @@ The product story is now:
 - declarative `transitions { ... }` models are the canonical analysis path
 - free-form `step` models are still supported, but may remain explicit-only
 - `inspect` reports a capability matrix so you can see which path a model can use
+- `lint` / `readiness` now reports both capability blockers and maintainability guidance
 
 ## What It Can Do
 
@@ -73,8 +78,11 @@ cargo install --path . --features varisat-backend
 cargo valid init
 ```
 
-`cargo valid init` creates a minimal `valid.toml` and scaffolds a starter
-registry file under `examples/valid_models.rs`:
+`cargo valid init` creates a minimal `valid.toml`, scaffolds a starter
+registry file under `examples/valid_models.rs`, creates the default
+`generated-tests/`, `artifacts/`, and `benchmarks/baselines/` directories, and
+writes project-local AI/MCP bootstrap snippets under `.mcp/` plus
+`docs/ai/bootstrap.md`:
 
 ```toml
 registry = "examples/valid_models.rs"
@@ -100,6 +108,25 @@ benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
 
+After init, the shortest AI-assisted setup path is:
+
+```sh
+cargo valid models
+cargo valid inspect approval-model
+cat .mcp/codex.toml
+```
+
+The generated `.mcp/` snippets use `valid mcp --project .`, so they avoid
+hard-coded local build paths and keep the project root as the source of truth.
+Reusable CI workflow templates for `inspect`, `check`, `generate-tests`,
+`conformance`, and `doc --check` now live in
+[`.github/workflows/`](.github/workflows/) with usage notes under
+[docs/ci/README.md](docs/ci/README.md). The repository validates them against a
+fixture project in
+[`tests/fixtures/projects/ci_template_project/`](tests/fixtures/projects/ci_template_project/).
+Keep the registry file thin and move real model logic into `src/models/` or
+another explicit module tree. The recommended project layout is documented in
+[docs/project-organization.md](./docs/project-organization.md).
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
 
@@ -108,6 +135,7 @@ cargo valid models
 cargo valid inspect counter
 cargo valid graph counter
 cargo valid readiness counter
+cargo valid lint counter --json
 cargo valid migrate counter
 cargo valid migrate counter --write
 cargo valid migrate counter --check
@@ -168,9 +196,26 @@ Desktop, and other MCP clients can call it as tools.
 Recommended AI flow:
 
 1. call `valid_docs_index`
-2. read `ai-authoring-guide` through `valid_docs_get`
+2. read `ai-authoring-guide` and `ai-curriculum` through `valid_docs_get`
 3. read one curated example through `valid_example_get`
 4. move to `valid_inspect`, `valid_lint`, and `valid_check`
+
+Available prompts:
+
+- `clarify_requirement`
+- `author_model`
+- `review_model`
+- `migrate_step_to_transitions`
+- `explain_readiness_failure`
+- `triage_conformance_failure`
+
+Prompt-driven flow:
+
+1. start with `clarify_requirement` when the requirement is still ambiguous
+2. move to `author_model` or `review_model`
+3. use `migrate_step_to_transitions` for step-heavy models
+4. use `explain_readiness_failure` or `triage_conformance_failure` when a run
+   already failed
 
 Available tools:
 
@@ -247,6 +292,13 @@ For reproducible registry startup, you can pass build policy through to Cargo:
 valid mcp --project /absolute/path/to/project --locked --offline
 valid mcp --project /absolute/path/to/project --feature varisat-backend
 ```
+
+Fresh `cargo valid init` projects now also include local snippets at:
+
+- `.mcp/codex.toml`
+- `.mcp/claude-code.json`
+- `.mcp/claude-desktop.json`
+- `docs/ai/bootstrap.md`
 
 When registry mode is configured at startup, tool calls only need `model_name`.
 Without startup configuration, pass `registry_binary` and `model_name` per

@@ -83,6 +83,15 @@
 - 定義箇所: `08_specs/testgen_contract_coverage_specs.md`
 - 本体: [schemas/coverage_report.schema.json](schemas/coverage_report.schema.json)
 
+主要フィールド:
+
+- `summary.transition_coverage_percent`
+- `summary.business_transition_coverage_percent`
+- `summary.setup_transition_coverage_percent`
+- `summary.requirement_tag_coverage_percent`
+- `requirement_tags`
+- `path_tags`
+
 ## 8. AI Inspect Request/Response
 
 - ID: `schema.ai.inspect`

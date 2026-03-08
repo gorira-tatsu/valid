@@ -39,10 +39,15 @@ use valid::{
         resolve_external_target as resolve_external_registry_target, ExternalTarget,
         ExternalTargetKind, ExternalTargetOptions,
     },
-    project::{render_project_config_template, render_registry_source_template, ProjectConfig},
+    project::{
+        render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
+        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
+        render_project_config_template, render_registry_source_template, ProjectConfig,
+    },
     reporter::{
-        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
+        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_failure, GraphView,
     },
     support::{
         artifact::{benchmark_baseline_path, benchmark_report_path},
@@ -160,7 +165,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -501,7 +506,15 @@ fn command_supports_solver(command: &str) -> bool {
 fn command_supports_property(command: &str) -> bool {
     matches!(
         command,
-        "check" | "verify" | "benchmark" | "testgen" | "trace" | "coverage" | "replay" | "all"
+        "check"
+            | "verify"
+            | "benchmark"
+            | "graph"
+            | "testgen"
+            | "trace"
+            | "coverage"
+            | "replay"
+            | "all"
     )
 }
 
@@ -969,9 +982,9 @@ fn cmd_inspect(parsed: ParsedArgs) {
 fn cmd_graph(parsed: ParsedArgs) {
     let progress = ProgressReporter::new("graph", parsed.progress_json);
     progress.start(None);
-    let model = parsed.model.unwrap_or_else(|| {
+    let model = parsed.model.clone().unwrap_or_else(|| {
         usage_exit(
-            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
+            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>]",
         )
     });
     let request = InspectRequest {
@@ -988,16 +1001,91 @@ fn cmd_graph(parsed: ParsedArgs) {
     let json_output = parsed.json || default_format == "json";
     let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
-        Ok(response) => match default_format {
-            "json" => println!("{}", render_inspect_json(&response)),
-            "text" => print!("{}", render_inspect_text(&response)),
-            "dot" => println!("{}", render_model_dot_with_view(&response, view)),
-            "svg" => println!("{}", render_model_svg_with_view(&response, view)),
-            _ => println!("{}", render_model_mermaid_with_view(&response, view)),
-        },
+        Ok(response) => {
+            match render_cargo_graph_output(&response, &request, &parsed, default_format, view) {
+                Ok(body) => print!("{body}"),
+                Err(message) => message_exit("cargo-valid", json_output, &message, None),
+            }
+        }
         Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics),
     }
     progress.finish(ExitCode::Success);
+}
+
+fn render_cargo_graph_output(
+    response: &valid::api::InspectResponse,
+    request: &InspectRequest,
+    parsed: &ParsedArgs,
+    render_format: &str,
+    view: GraphView,
+) -> Result<String, String> {
+    if view != GraphView::Failure {
+        return Ok(match render_format {
+            "json" => format!("{}\n", render_inspect_json(response)),
+            "text" => render_inspect_text(response),
+            "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
+            "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
+            _ => format!("{}\n", render_model_mermaid_with_view(response, view)),
+        });
+    }
+
+    let property_id = parsed
+        .property_id
+        .as_ref()
+        .ok_or_else(|| "failure graph view requires --property=<id>".to_string())?;
+    let outcome = check_source(&CheckRequest {
+        request_id: "cargo-valid-graph-failure".to_string(),
+        source_name: request.source_name.clone(),
+        source: request.source.clone(),
+        property_id: Some(property_id.clone()),
+        scenario_id: None,
+        seed: parsed.seed,
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+    });
+    let result = match outcome {
+        valid::engine::CheckOutcome::Completed(result) => result,
+        valid::engine::CheckOutcome::Errored(error) => {
+            return Err(error
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "failure graph check failed".to_string()))
+        }
+    };
+    let trace = result
+        .trace
+        .as_ref()
+        .ok_or_else(|| format!("property `{property_id}` did not produce evidence trace"))?;
+    let slice = build_failure_graph_slice(response, trace, property_id)?;
+
+    Ok(match render_format {
+        "json" => {
+            let mut body: Value = serde_json::from_str(&render_inspect_json(response))
+                .map_err(|err| format!("failed to prepare graph json: {err}"))?;
+            body["graph_view"] = Value::String("failure".to_string());
+            body["graph_slice"] = json!({
+                "property_id": slice.property_id,
+                "failing_action_id": slice.failing_action_id,
+                "failing_step_index": slice.failing_step_index,
+                "focused_fields": slice.focused_fields,
+                "focused_reads": slice.focused_reads,
+                "focused_writes": slice.focused_writes,
+                "focused_path_tags": slice.focused_path_tags,
+                "focused_transition_indexes": slice.focused_transition_indexes,
+                "summary": slice.summary,
+            });
+            format!(
+                "{}\n",
+                serde_json::to_string(&body).map_err(|err| err.to_string())?
+            )
+        }
+        "text" => render_model_text_failure(response, &slice),
+        "dot" => format!("{}\n", render_model_dot_failure(response, &slice)),
+        "svg" => format!("{}\n", render_model_svg_failure(response, &slice)),
+        _ => format!("{}\n", render_model_mermaid_failure(response, &slice)),
+    })
 }
 
 fn cmd_doc(parsed: ParsedArgs) {
@@ -2120,6 +2208,110 @@ fn cmd_init(parsed: &CliArgs) -> ! {
             )
         });
     }
+    let artifacts_dir = root.join("artifacts");
+    fs::create_dir_all(&artifacts_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", artifacts_dir.display()),
+            None,
+        )
+    });
+    let artifacts_gitkeep = artifacts_dir.join(".gitkeep");
+    if !artifacts_gitkeep.exists() {
+        fs::write(&artifacts_gitkeep, "").unwrap_or_else(|err| {
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", artifacts_gitkeep.display()),
+                None,
+            )
+        });
+    }
+    let benchmark_baseline_dir = root.join("benchmarks").join("baselines");
+    fs::create_dir_all(&benchmark_baseline_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!(
+                "failed to create `{}`: {err}",
+                benchmark_baseline_dir.display()
+            ),
+            None,
+        )
+    });
+    let baseline_gitkeep = benchmark_baseline_dir.join(".gitkeep");
+    if !baseline_gitkeep.exists() {
+        fs::write(&baseline_gitkeep, "").unwrap_or_else(|err| {
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", baseline_gitkeep.display()),
+                None,
+            )
+        });
+    }
+    let mcp_dir = root.join(".mcp");
+    fs::create_dir_all(&mcp_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", mcp_dir.display()),
+            None,
+        )
+    });
+    let codex_config = mcp_dir.join("codex.toml");
+    fs::write(&codex_config, render_bootstrap_codex_config()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", codex_config.display()),
+            None,
+        )
+    });
+    let claude_code_config = mcp_dir.join("claude-code.json");
+    fs::write(&claude_code_config, render_bootstrap_claude_code_config()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", claude_code_config.display()),
+            None,
+        )
+    });
+    let claude_desktop_config = mcp_dir.join("claude-desktop.json");
+    fs::write(
+        &claude_desktop_config,
+        render_bootstrap_claude_desktop_config(),
+    )
+    .unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!(
+                "failed to write `{}`: {err}",
+                claude_desktop_config.display()
+            ),
+            None,
+        )
+    });
+    let docs_ai_dir = root.join("docs").join("ai");
+    fs::create_dir_all(&docs_ai_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", docs_ai_dir.display()),
+            None,
+        )
+    });
+    let bootstrap_readme = docs_ai_dir.join("bootstrap.md");
+    fs::write(&bootstrap_readme, render_bootstrap_ai_readme()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", bootstrap_readme.display()),
+            None,
+        )
+    });
     fs::write(&config_path, body).unwrap_or_else(|err| {
         message_exit(
             "init",
@@ -2130,17 +2322,35 @@ fn cmd_init(parsed: &CliArgs) -> ! {
     });
     if parsed.json {
         println!(
-            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\"}}",
+            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\",\"artifacts_dir\":\"{}\",\"benchmarks_baseline_dir\":\"{}\",\"mcp_configs\":[\"{}\",\"{}\",\"{}\"],\"ai_bootstrap_guide\":\"{}\"}}",
             config_path.display(),
             registry,
             registry_path.display(),
             generated_dir.display(),
+            artifacts_dir.display(),
+            benchmark_baseline_dir.display(),
+            codex_config.display(),
+            claude_code_config.display(),
+            claude_desktop_config.display(),
+            bootstrap_readme.display(),
         );
     } else {
         println!("created: {}", config_path.display());
         println!("registry: {registry}");
         println!("scaffolded_registry: {}", registry_path.display());
         println!("generated_tests_dir: {}", generated_dir.display());
+        println!("artifacts_dir: {}", artifacts_dir.display());
+        println!(
+            "benchmarks_baseline_dir: {}",
+            benchmark_baseline_dir.display()
+        );
+        println!("mcp_config_codex: {}", codex_config.display());
+        println!("mcp_config_claude_code: {}", claude_code_config.display());
+        println!(
+            "mcp_config_claude_desktop: {}",
+            claude_desktop_config.display()
+        );
+        println!("ai_bootstrap_guide: {}", bootstrap_readme.display());
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());

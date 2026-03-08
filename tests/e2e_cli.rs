@@ -156,6 +156,24 @@ fn inspect_includes_metadata_details() {
     assert!(json.contains("\"action_details\""));
     assert!(json.contains("\"path_tags\""));
     assert!(json.contains("\"property_details\""));
+    assert!(json.contains("\"temporal\":{\"property_ids\":[]"));
+}
+
+#[test]
+fn cli_capabilities_reports_temporal_backend_details() {
+    let output = Command::new(binary_path())
+        .arg("capabilities")
+        .arg("--backend")
+        .arg("mock-bmc")
+        .arg("--json")
+        .output()
+        .expect("capabilities should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"temporal\":{\"status\":\"bounded\""));
+    assert!(
+        stdout.contains("\"supported_operators\":[\"always\",\"eventually\",\"next\",\"until\"]")
+    );
 }
 
 #[test]
@@ -229,6 +247,37 @@ fn cli_graph_supports_dot_and_svg_formats() {
 }
 
 #[test]
+fn cli_graph_supports_failure_view() {
+    let failing = repo_path("tests/fixtures/models/failing_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&failing)
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .output()
+        .expect("graph failure view should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Failure Slice"));
+    assert!(stdout.contains("P_FAIL"));
+    assert!(stdout.contains("property P_FAIL fails"));
+
+    let json_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&failing)
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .arg("--format=json")
+        .output()
+        .expect("graph failure json should run");
+    assert_eq!(json_output.status.code(), Some(0));
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(json_stdout.contains("\"graph_view\":\"failure\""));
+    assert!(json_stdout.contains("\"graph_slice\""));
+    assert!(json_stdout.contains("\"property_id\":\"P_FAIL\""));
+}
+
+#[test]
 fn lint_reports_clean_valid_models() {
     let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let response = lint_source(&InspectRequest {
@@ -237,8 +286,10 @@ fn lint_reports_clean_valid_models() {
         source,
     })
     .expect("lint should succeed");
-    assert_eq!(response.status, "ok");
-    assert!(response.findings.is_empty());
+    assert_eq!(response.status, "warn");
+    assert_eq!(response.findings.len(), 1);
+    assert_eq!(response.findings[0].category, "maintainability");
+    assert_eq!(response.findings[0].code, "missing_model_documentation");
 }
 
 #[test]
@@ -280,6 +331,53 @@ fn cli_conformance_compares_runner_output_to_spec() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"PASS\""));
     assert!(stdout.contains("\"mismatch_count\":0"));
+    assert!(stdout.contains("\"mismatch_categories\":[]"));
+}
+
+#[test]
+fn cli_conformance_reports_structured_mismatch_categories() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("conformance")
+        .arg(&safe)
+        .arg("--property=P_SAFE")
+        .arg("--actions=Inc")
+        .arg("--runner=/bin/sh")
+        .arg("--runner-arg")
+        .arg("-c")
+        .arg("--runner-arg")
+        .arg("cat >/dev/null; printf '%s' '{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"observations\":[],\"property_holds\":false}'")
+        .arg("--json")
+        .output()
+        .expect("conformance should run");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"mismatch_categories\":[\"output\",\"property\"]"));
+    assert!(stdout.contains("\"kind\":\"output\""));
+    assert!(stdout.contains("\"kind\":\"property\""));
+}
+
+#[test]
+fn cli_conformance_text_output_names_mismatch_categories() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("conformance")
+        .arg(&safe)
+        .arg("--property=P_SAFE")
+        .arg("--actions=Inc")
+        .arg("--runner=/bin/sh")
+        .arg("--runner-arg")
+        .arg("-c")
+        .arg("--runner-arg")
+        .arg("cat >/dev/null; printf '%s' '{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"observations\":[],\"property_holds\":false}'")
+        .output()
+        .expect("conformance should run");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("mismatch_categories: output,property"));
+    assert!(stdout.contains("mismatch output fix_surface=implementation_output step=0"));
+    assert!(stdout.contains("mismatch property fix_surface=implementation_or_model"));
 }
 
 #[test]
