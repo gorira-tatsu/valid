@@ -2236,6 +2236,9 @@ fn contract_check_tool(
                     .unwrap_or_default();
                 drift.affected_critical_properties = recommendations.affected_critical_properties;
                 drift.affected_property_suites = recommendations.affected_property_suites;
+                drift.affected_artifacts = recommendations.affected_artifacts;
+                drift.repair_surfaces = recommendations.repair_surfaces;
+                drift.suggested_reruns = recommendations.suggested_reruns;
                 json!({
                     "schema_version": "1.0.0",
                     "status": drift.status,
@@ -2245,6 +2248,9 @@ fn contract_check_tool(
                     "changes": drift.changes,
                     "affected_critical_properties": drift.affected_critical_properties,
                     "affected_property_suites": drift.affected_property_suites,
+                    "affected_artifacts": drift.affected_artifacts,
+                    "repair_surfaces": drift.repair_surfaces,
+                    "suggested_reruns": drift.suggested_reruns,
                     "lock_file": args.lock_file
                 })
             } else {
@@ -2262,6 +2268,9 @@ fn contract_check_tool(
                     "changes": ["missing_from_lock_file"],
                     "affected_critical_properties": recommendations.affected_critical_properties,
                     "affected_property_suites": recommendations.affected_property_suites,
+                    "affected_artifacts": recommendations.affected_artifacts,
+                    "repair_surfaces": recommendations.repair_surfaces,
+                    "suggested_reruns": recommendations.suggested_reruns,
                     "lock_file": args.lock_file
                 })
             };
@@ -2489,6 +2498,18 @@ fn augment_contract_check_value(config: &ServerConfig, mut value: Value) -> Valu
                         "affected_property_suites".to_string(),
                         json!(recommendations.affected_property_suites),
                     );
+                    object.insert(
+                        "affected_artifacts".to_string(),
+                        json!(recommendations.affected_artifacts),
+                    );
+                    object.insert(
+                        "repair_surfaces".to_string(),
+                        json!(recommendations.repair_surfaces),
+                    );
+                    object.insert(
+                        "suggested_reruns".to_string(),
+                        json!(recommendations.suggested_reruns),
+                    );
                 }
             }
         }
@@ -2502,6 +2523,18 @@ fn augment_contract_check_value(config: &ServerConfig, mut value: Value) -> Valu
             object.insert(
                 "affected_property_suites".to_string(),
                 json!(recommendations.affected_property_suites),
+            );
+            object.insert(
+                "affected_artifacts".to_string(),
+                json!(recommendations.affected_artifacts),
+            );
+            object.insert(
+                "repair_surfaces".to_string(),
+                json!(recommendations.repair_surfaces),
+            );
+            object.insert(
+                "suggested_reruns".to_string(),
+                json!(recommendations.suggested_reruns),
             );
         }
     }

@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::{
     api::InspectResponse,
+    project::{doc_repair_surfaces, doc_suggested_reruns, RerunSuggestion},
     support::{hash::stable_hash_hex, io::write_text_file},
 };
 
@@ -27,6 +28,9 @@ pub struct DocCheckReport {
     pub generated_hash: String,
     pub contract_hash: String,
     pub drift_sections: Vec<String>,
+    pub affected_artifacts: Vec<String>,
+    pub repair_surfaces: Vec<String>,
+    pub suggested_reruns: Vec<RerunSuggestion>,
     pub markdown: String,
     pub mermaid: String,
 }
@@ -85,6 +89,8 @@ pub fn check_doc(
             }
         }
     }
+    let repair_surfaces = doc_repair_surfaces(&drift_sections);
+    let suggested_reruns = doc_suggested_reruns(&output_path, &drift_sections);
     DocCheckReport {
         schema_version: "1.0.0".to_string(),
         status: if drift_sections.is_empty() {
@@ -93,12 +99,15 @@ pub fn check_doc(
             "changed".to_string()
         },
         model_id: generated.model_id.clone(),
-        output_path,
+        output_path: output_path.clone(),
         source_hash: generated.source_hash.clone(),
         existing_hash,
         generated_hash: generated.generated_hash.clone(),
         contract_hash: generated.contract_hash.clone(),
         drift_sections,
+        affected_artifacts: vec![output_path.clone()],
+        repair_surfaces,
+        suggested_reruns,
         markdown: generated.markdown.clone(),
         mermaid: generated.mermaid.clone(),
     }
@@ -151,6 +160,24 @@ pub fn render_doc_check_text(report: &DocCheckReport) -> String {
             report.drift_sections.join(",")
         ));
     }
+    if !report.affected_artifacts.is_empty() {
+        out.push_str(&format!(
+            "affected_artifacts: {}\n",
+            report.affected_artifacts.join(",")
+        ));
+    }
+    if !report.repair_surfaces.is_empty() {
+        out.push_str(&format!(
+            "repair_surfaces: {}\n",
+            report.repair_surfaces.join(",")
+        ));
+    }
+    for suggestion in &report.suggested_reruns {
+        out.push_str(&format!(
+            "suggested_rerun: {} target={} reason={}\n",
+            suggestion.action, suggestion.target, suggestion.reason
+        ));
+    }
     out
 }
 
@@ -165,6 +192,9 @@ pub fn render_doc_check_json(report: &DocCheckReport) -> String {
         "generated_hash": report.generated_hash,
         "contract_hash": report.contract_hash,
         "drift_sections": report.drift_sections,
+        "affected_artifacts": report.affected_artifacts,
+        "repair_surfaces": report.repair_surfaces,
+        "suggested_reruns": report.suggested_reruns,
         "markdown": report.markdown,
         "mermaid": report.mermaid,
     })
