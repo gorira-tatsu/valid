@@ -1122,6 +1122,29 @@ fn cmd_capabilities(args: Vec<String>) {
                     "selfcheck_compatible: {}",
                     response.capabilities.selfcheck_compatible
                 );
+                println!("temporal.status: {}", response.capabilities.temporal.status);
+                println!(
+                    "temporal.supported_operators: {}",
+                    response
+                        .capabilities
+                        .temporal
+                        .supported_operators
+                        .join(", ")
+                );
+                println!(
+                    "temporal.unsupported_operators: {}",
+                    response
+                        .capabilities
+                        .temporal
+                        .unsupported_operators
+                        .join(", ")
+                );
+                if !response.capabilities.temporal.notes.is_empty() {
+                    println!(
+                        "temporal.notes: {}",
+                        response.capabilities.temporal.notes.join(" | ")
+                    );
+                }
             }
             progress.finish(ExitCode::Success);
         }
@@ -1939,7 +1962,7 @@ fn resolve_project_dir(
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {
     println!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{}}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
         response.schema_version,
         response.request_id,
         response.backend,
@@ -1949,8 +1972,21 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         response.capabilities.supports_certificate,
         response.capabilities.supports_trace,
         response.capabilities.supports_witness,
-        response.capabilities.selfcheck_compatible
+        response.capabilities.selfcheck_compatible,
+        response.capabilities.temporal.status,
+        render_string_array(&response.capabilities.temporal.supported_operators),
+        render_string_array(&response.capabilities.temporal.unsupported_operators),
+        render_string_array(&response.capabilities.temporal.notes),
     );
+}
+
+fn render_string_array(values: &[String]) -> String {
+    let body = values
+        .iter()
+        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{}]", body)
 }
 
 fn usage_exit(command: &str, json: bool, usage: &str) -> ! {

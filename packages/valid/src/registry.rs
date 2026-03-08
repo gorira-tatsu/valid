@@ -857,6 +857,14 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             explain: capabilities.explain.clone(),
             testgen_ready: capabilities.testgen_ready,
             testgen: capabilities.testgen.clone(),
+            temporal: crate::api::InspectTemporalCapabilities {
+                property_ids: Vec::new(),
+                operators: Vec::new(),
+                support_level: "not_applicable".to_string(),
+                explicit_status: "not_applicable".to_string(),
+                solver_status: "not_applicable".to_string(),
+                reason: String::new(),
+            },
             reasons: capabilities.reasons.clone(),
         },
         state_fields: state_field_details

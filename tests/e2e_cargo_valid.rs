@@ -247,6 +247,7 @@ fn cargo_valid_inspects_registered_model() {
     assert!(stdout.contains("\"capabilities\":{\"parse_ready\":true"));
     assert!(stdout.contains("\"solver_ready\":false"));
     assert!(stdout.contains("\"opaque_step_closure\""));
+    assert!(stdout.contains("\"temporal\":{\"property_ids\":[]"));
     assert!(stdout.contains("\"state_field_details\""));
     assert!(stdout.contains("\"action_details\""));
     assert!(stdout.contains("\"transition_details\""));

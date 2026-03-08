@@ -16,7 +16,8 @@
         "supports_certificate",
         "supports_trace",
         "supports_witness",
-        "selfcheck_compatible"
+        "selfcheck_compatible",
+        "temporal"
       ],
       "properties": {
         "backend_name": { "type": "string", "minLength": 1 },
@@ -25,7 +26,30 @@
         "supports_certificate": { "type": "boolean" },
         "supports_trace": { "type": "boolean" },
         "supports_witness": { "type": "boolean" },
-        "selfcheck_compatible": { "type": "boolean" }
+        "selfcheck_compatible": { "type": "boolean" },
+        "temporal": {
+          "type": "object",
+          "required": ["status", "supported_operators", "unsupported_operators", "notes"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["complete", "bounded", "unavailable"]
+            },
+            "supported_operators": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "unsupported_operators": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "notes": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     }

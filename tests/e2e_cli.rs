@@ -154,6 +154,24 @@ fn inspect_includes_metadata_details() {
     assert!(json.contains("\"action_details\""));
     assert!(json.contains("\"path_tags\""));
     assert!(json.contains("\"property_details\""));
+    assert!(json.contains("\"temporal\":{\"property_ids\":[]"));
+}
+
+#[test]
+fn cli_capabilities_reports_temporal_backend_details() {
+    let output = Command::new(binary_path())
+        .arg("capabilities")
+        .arg("--backend")
+        .arg("mock-bmc")
+        .arg("--json")
+        .output()
+        .expect("capabilities should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"temporal\":{\"status\":\"bounded\""));
+    assert!(
+        stdout.contains("\"supported_operators\":[\"always\",\"eventually\",\"next\",\"until\"]")
+    );
 }
 
 #[test]
