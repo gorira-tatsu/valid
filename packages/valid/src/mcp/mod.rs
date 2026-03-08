@@ -15,9 +15,9 @@ mod prompts_catalog;
 use crate::{
     api::{
         check_source, compile_source, distinguish_source, explain_source, inspect_source,
-        lint_source, render_distinguish_json, render_explain_json, render_inspect_json,
-        render_lint_json, testgen_source, CheckRequest, DistinguishRequest, InspectRequest,
-        OrchestrateRequest, TestgenRequest, orchestrate_source,
+        lint_source, orchestrate_source, render_distinguish_json, render_explain_json,
+        render_inspect_json, render_lint_json, testgen_source, CheckRequest, DistinguishRequest,
+        InspectRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::list_bundled_models,
     contract::{compare_snapshot, parse_lock_file, snapshot_model},
@@ -800,7 +800,7 @@ fn input_schema_with_testgen() -> Value {
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
     properties.insert("strategy".to_string(), json!({
         "type": "string",
-        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random"]
+        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random", "deadlock"]
     }));
     properties.insert(
         "backend".to_string(),

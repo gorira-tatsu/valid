@@ -577,6 +577,22 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("generated file should be present");
     assert!(temp.path().join(generated_file).exists() || PathBuf::from(generated_file).exists());
 
+    let deadlock_model = temp.path().join("deadlock.valid");
+    fs::write(
+        &deadlock_model,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n",
+    )
+    .expect("deadlock model should be written");
+    let deadlock_testgen = structured_content(client.call_tool(
+        "valid_testgen",
+        json!({
+            "model_file": deadlock_model.to_string_lossy().to_string(),
+            "strategy": "deadlock"
+        }),
+    ));
+    assert_eq!(deadlock_testgen["vectors"][0]["strategy"], "deadlock");
+    assert_eq!(deadlock_testgen["vectors"][0]["source_kind"], "deadlock");
+
     let distinguish = structured_content(client.call_tool(
         "valid_distinguish",
         json!({

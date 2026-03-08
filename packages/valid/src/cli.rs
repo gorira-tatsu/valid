@@ -405,7 +405,7 @@ const VIEW_ARG: ArgSpec = ArgSpec {
 };
 const STRATEGY_ARG: ArgSpec = ArgSpec {
     name: "strategy",
-    syntax: "--strategy=<counterexample|transition|witness|guard|boundary|path|random>",
+    syntax: "--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock>",
     value_type: "string",
     required: false,
     multiple: false,
@@ -419,6 +419,7 @@ const STRATEGY_ARG: ArgSpec = ArgSpec {
         "boundary",
         "path",
         "random",
+        "deadlock",
     ],
 };
 const ACTIONS_ARG: ArgSpec = ArgSpec {
