@@ -800,7 +800,7 @@ fn input_schema_with_testgen() -> Value {
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
     properties.insert("strategy".to_string(), json!({
         "type": "string",
-        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random"]
+        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random", "deadlock"]
     }));
     properties.insert(
         "backend".to_string(),

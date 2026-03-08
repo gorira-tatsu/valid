@@ -84,6 +84,7 @@ pub struct MinimizeResult {
 fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'static str) {
     match (source_kind, strategy) {
         ("counterexample", _) => ("strict", "counterexample_trace"),
+        ("deadlock", "deadlock") => ("strict", "deadlock_trace"),
         ("witness", "transition_coverage") => ("strict", "witness_trace"),
         ("witness", _) => ("strict", "witness_trace"),
         (_, "transition") => ("heuristic", "transition_search"),
@@ -212,6 +213,20 @@ pub fn build_witness_vector(trace: &EvidenceTrace) -> Result<TestVector, String>
     Ok(vector)
 }
 
+pub fn build_deadlock_vector(trace: &EvidenceTrace) -> Result<TestVector, String> {
+    let mut vector = build_base_vector_from_trace(trace)?;
+    vector.source_kind = "deadlock".to_string();
+    vector.strictness = "strict".to_string();
+    vector.derivation = "deadlock_trace".to_string();
+    vector.strategy = "deadlock".to_string();
+    vector.minimized = false;
+    vector.expected_property_holds = Some(false);
+    if !vector.notes.iter().any(|note| note.contains("deadlock")) {
+        vector.notes.push("deadlock_reached".to_string());
+    }
+    Ok(vector)
+}
+
 pub fn build_synthetic_witness_vectors(model: &ModelIr, property_id: &str) -> Vec<TestVector> {
     let Some(property) = model
         .properties
@@ -323,6 +338,7 @@ pub fn build_model_test_vectors_for_strategy(
     strategy: &str,
 ) -> Result<Vec<TestVector>, String> {
     match strategy {
+        "deadlock" => build_model_deadlock_vectors(model, property_id),
         "transition" | "witness" => {
             let vectors = build_synthetic_witness_vectors(model, property_id);
             if vectors.is_empty() {
@@ -337,6 +353,178 @@ pub fn build_model_test_vectors_for_strategy(
         "random" => build_model_random_vectors(model, property_id, 5),
         _ => Ok(Vec::new()),
     }
+}
+
+fn build_model_deadlock_vectors(
+    model: &ModelIr,
+    property_id: &str,
+) -> Result<Vec<TestVector>, String> {
+    let initial = build_initial_state(model).map_err(|diagnostic| diagnostic.message.clone())?;
+    let mut nodes = vec![MachineSearchNode {
+        state: initial.clone(),
+        parent: None,
+        via_action_index: None,
+    }];
+    let mut queue = VecDeque::from([0usize]);
+    let mut visited = HashSet::from([initial]);
+
+    while let Some(index) = queue.pop_front() {
+        let state = nodes[index].state.clone();
+        let mut next_indices = Vec::new();
+        for (action_index, action) in model.actions.iter().enumerate() {
+            if let Some(next_state) =
+                apply_action_transition(model, &state, action).map_err(|d| d.message.clone())?
+            {
+                if visited.insert(next_state.clone()) {
+                    nodes.push(MachineSearchNode {
+                        state: next_state,
+                        parent: Some(index),
+                        via_action_index: Some(action_index),
+                    });
+                    let next_index = nodes.len() - 1;
+                    next_indices.push(next_index);
+                }
+            }
+        }
+        if next_indices.is_empty() {
+            return Ok(vec![build_model_deadlock_vector(
+                model,
+                property_id,
+                &nodes,
+                index,
+            )]);
+        }
+        queue.extend(next_indices);
+    }
+
+    Ok(Vec::new())
+}
+
+fn build_model_deadlock_vector(
+    model: &ModelIr,
+    property_id: &str,
+    nodes: &[impl DeadlockNode],
+    end_index: usize,
+) -> TestVector {
+    let mut indices = Vec::new();
+    let mut cursor = Some(end_index);
+    while let Some(index) = cursor {
+        indices.push(index);
+        cursor = nodes[index].parent_index();
+    }
+    indices.reverse();
+
+    let mut actions = Vec::new();
+    let mut expected_observations = Vec::new();
+    let mut expected_states = Vec::new();
+    let mut setup_action_ids = Vec::new();
+    let mut business_action_ids = Vec::new();
+    let mut final_state = None;
+
+    for (step_index, window) in indices.windows(2).enumerate() {
+        let from_index = window[0];
+        let to_index = window[1];
+        let action = model
+            .actions
+            .get(nodes[to_index].via_action_index().expect("path action"));
+        if let Some(action) = action {
+            actions.push(VectorActionStep {
+                index: step_index,
+                action_id: action.action_id.clone(),
+                action_label: action.label.clone(),
+            });
+            if action.role.as_str() == "setup" {
+                setup_action_ids.push(action.action_id.clone());
+            } else {
+                business_action_ids.push(action.action_id.clone());
+            }
+        }
+        let after_map = nodes[to_index].state_ref().as_named_map(model);
+        expected_states.push(format!("{after_map:?}"));
+        expected_observations.push(after_map.clone());
+        final_state = Some(after_map);
+        let _ = from_index;
+    }
+
+    let initial_state = nodes
+        .first()
+        .map(|node| node.state_ref().as_named_map(model));
+    if actions.is_empty() {
+        let state = nodes[end_index].state_ref().as_named_map(model);
+        expected_states.push(format!("{state:?}"));
+        expected_observations.push(state.clone());
+        final_state = Some(state);
+    }
+    let signature = actions
+        .iter()
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    let run_id = format!(
+        "run-deadlock-{}",
+        stable_hash_hex(&(model.model_id.clone() + property_id + &signature))
+            .replace("sha256:", "")
+    );
+
+    TestVector {
+        schema_version: "1.0.0".to_string(),
+        vector_id: format!("vec-{}", run_id.trim_start_matches("run-")),
+        run_id,
+        source_kind: "deadlock".to_string(),
+        strictness: "strict".to_string(),
+        derivation: "deadlock_trace".to_string(),
+        evidence_id: None,
+        strategy: "deadlock".to_string(),
+        generator_version: env!("CARGO_PKG_VERSION").to_string(),
+        seed: None,
+        actions,
+        initial_state,
+        expected_observations,
+        expected_states,
+        property_id: property_id.to_string(),
+        minimized: false,
+        focus_action_id: None,
+        focus_field: None,
+        expected_guard_enabled: None,
+        expected_property_holds: Some(false),
+        expected_path: Path::default(),
+        expected_path_tags: Vec::new(),
+        setup_action_ids,
+        business_action_ids,
+        notes: match final_state {
+            Some(state) => vec![
+                "deadlock_reached".to_string(),
+                format!("terminal_state: {state:?}"),
+            ],
+            None => vec!["deadlock_reached".to_string()],
+        },
+        replay_target: None,
+    }
+}
+
+trait DeadlockNode {
+    fn parent_index(&self) -> Option<usize>;
+    fn via_action_index(&self) -> Option<usize>;
+    fn state_ref(&self) -> &MachineState;
+}
+
+impl DeadlockNode for MachineSearchNode {
+    fn parent_index(&self) -> Option<usize> {
+        self.parent
+    }
+    fn via_action_index(&self) -> Option<usize> {
+        self.via_action_index
+    }
+    fn state_ref(&self) -> &MachineState {
+        &self.state
+    }
+}
+
+#[derive(Clone)]
+struct MachineSearchNode {
+    state: MachineState,
+    parent: Option<usize>,
+    via_action_index: Option<usize>,
 }
 
 fn synthetic_trace_from_states(

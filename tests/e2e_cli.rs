@@ -122,6 +122,31 @@ fn failing_counter_explains_and_generates_vectors() {
 }
 
 #[test]
+fn cli_testgen_supports_deadlock_strategy() {
+    let temp_dir = unique_temp_dir("valid-deadlock-testgen");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+    let model_path = temp_dir.join("deadlock.valid");
+    fs::write(
+        &model_path,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n",
+    )
+    .expect("model should be written");
+
+    let output = Command::new(binary_path())
+        .arg("testgen")
+        .arg(&model_path)
+        .arg("--strategy=deadlock")
+        .arg("--json")
+        .output()
+        .expect("deadlock testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"strategy\":\"deadlock\""));
+    assert!(stdout.contains("\"source_kind\":\"deadlock\""));
+    assert!(stdout.contains("\"generated_files\":["));
+}
+
+#[test]
 fn multi_property_orchestrate_returns_aggregate_coverage() {
     let source = read_fixture("tests/fixtures/models/multi_property.valid");
     let response = orchestrate_source(&OrchestrateRequest {
