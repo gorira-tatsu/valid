@@ -98,6 +98,8 @@ fn failing_counter_explains_and_generates_vectors() {
     .expect("explain should succeed");
     assert!(!explain.candidate_causes.is_empty());
     assert!(!explain.repair_hints.is_empty());
+    assert!(!explain.repair_targets.is_empty());
+    assert!(!explain.changed_fields.is_empty());
 
     let testgen = testgen_source(&TestgenRequest {
         request_id: "req-test-testgen".to_string(),
@@ -471,6 +473,8 @@ fn bundled_rust_models_run_via_main_cli_path() {
     assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"traceback\""));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"changed_fields\""));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"breakpoint_kind\""));
 
     let coverage = Command::new(binary_path())
         .arg("coverage")

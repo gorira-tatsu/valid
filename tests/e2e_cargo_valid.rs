@@ -504,6 +504,8 @@ fn cargo_valid_checks_registered_model() {
     assert!(stdout.contains("\"ci\":{\"exit_code\":2"));
     assert!(stdout.contains("\"review_summary\""));
     assert!(stdout.contains("\"traceback\""));
+    assert!(stdout.contains("\"changed_fields\""));
+    assert!(stdout.contains("\"breakpoint_kind\""));
 }
 
 #[test]

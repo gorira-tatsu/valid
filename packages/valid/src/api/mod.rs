@@ -5,7 +5,7 @@ use tabled::{
     settings::{style::Style, Alignment, Modify, Padding},
 };
 
-use crate::kernel::guard::evaluate_guard;
+use crate::kernel::{eval::eval_expr, guard::evaluate_guard};
 use crate::{
     bundled_models::{
         check_bundled_model, explain_bundled_model, inspect_bundled_model, is_bundled_model_ref,
@@ -25,7 +25,7 @@ use crate::{
         run_with_adapter, AdapterConfig, CapabilityMatrix,
     },
     support::{
-        diagnostics::Diagnostic,
+        diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
         hash::stable_hash_hex,
         schema::{require_len_match, require_non_empty, require_schema_version},
     },
@@ -175,6 +175,41 @@ pub struct ExplainCandidateCause {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainFieldDiff {
+    pub field: String,
+    pub before: crate::ir::Value,
+    pub after: crate::ir::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainGuardReview {
+    pub decision_id: String,
+    pub label: String,
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainReviewContext {
+    pub scenario_id: Option<String>,
+    pub scenario_expr: Option<String>,
+    pub scenario_match_before: Option<bool>,
+    pub scenario_match_after: Option<bool>,
+    pub property_scope_expr: Option<String>,
+    pub property_scope_match_before: Option<bool>,
+    pub property_scope_match_after: Option<bool>,
+    pub vacuous: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainRepairTargetHint {
+    pub target: String,
+    pub reason: String,
+    pub priority: String,
+    pub action_id: Option<String>,
+    pub fields: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainResponse {
     pub schema_version: String,
@@ -182,6 +217,8 @@ pub struct ExplainResponse {
     pub status: String,
     pub evidence_id: String,
     pub property_id: String,
+    pub breakpoint_kind: String,
+    pub breakpoint_note: Option<String>,
     pub failure_step_index: usize,
     pub failing_action_id: Option<String>,
     pub failing_action_role: Option<String>,
@@ -189,9 +226,14 @@ pub struct ExplainResponse {
     pub failing_action_reads: Vec<String>,
     pub failing_action_writes: Vec<String>,
     pub failing_action_path_tags: Vec<String>,
+    pub changed_fields: Vec<String>,
+    pub field_diffs: Vec<ExplainFieldDiff>,
+    pub guard_reviews: Vec<ExplainGuardReview>,
     pub write_overlap_fields: Vec<String>,
     pub involved_fields: Vec<String>,
+    pub review_context: ExplainReviewContext,
     pub candidate_causes: Vec<ExplainCandidateCause>,
+    pub repair_targets: Vec<ExplainRepairTargetHint>,
     pub repair_hints: Vec<String>,
     pub next_steps: Vec<String>,
     pub confidence: f32,
@@ -919,18 +961,17 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     "empty trace cannot be explained",
                 )],
             })?;
-            let involved_fields = failure_step
-                .state_before
-                .iter()
-                .filter_map(|(field, before)| {
-                    let after = failure_step.state_after.get(field)?;
-                    if before != after {
-                        Some(field.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
+            let selected_property = compiled_model.as_ref().and_then(|model| {
+                model
+                    .properties
+                    .iter()
+                    .find(|property| property.property_id == trace.property_id)
+            });
+            let changed_fields =
+                state_field_diffs(&failure_step.state_before, &failure_step.state_after)
+                    .into_iter()
+                    .map(|diff| diff.field)
+                    .collect::<Vec<_>>();
             let action_metadata = compiled_model.as_ref().and_then(|model| {
                 let state = machine_state_from_snapshot(model, &failure_step.state_before)?;
                 failure_step.action_id.as_ref().map(|action_id| {
@@ -965,30 +1006,51 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     )
                 })
             });
+            let field_diffs =
+                state_field_diffs(&failure_step.state_before, &failure_step.state_after);
+            let guard_reviews = explain_guard_reviews(
+                action_metadata
+                    .as_ref()
+                    .map(|(_, _, _, _, path)| path)
+                    .or(failure_step.path.as_ref()),
+            );
             let coverage_report = compiled_model
                 .as_ref()
                 .map(|model| collect_coverage(model, std::slice::from_ref(&trace)));
-            let property_kind = compiled_model
-                .as_ref()
-                .and_then(|model| {
-                    model
-                        .properties
-                        .iter()
-                        .find(|property| property.property_id == trace.property_id)
-                        .map(|property| property.kind)
-                })
+            let property_kind = selected_property
+                .map(|property| property.kind)
                 .unwrap_or(crate::ir::PropertyKind::Invariant);
+            let review_context = build_review_context(
+                compiled_model.as_ref(),
+                selected_property,
+                request.scenario_id.as_deref(),
+                &failure_step.state_before,
+                &failure_step.state_after,
+                result.property_result.vacuous,
+            );
             let write_overlap = action_metadata
                 .as_ref()
                 .map(|(_, _, _, writes, _)| {
-                    involved_fields
+                    changed_fields
                         .iter()
                         .filter(|field| writes.contains(*field))
                         .cloned()
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let candidate_causes = if involved_fields.is_empty() {
+            let involved_fields = merged_involved_fields(
+                &changed_fields,
+                action_metadata
+                    .as_ref()
+                    .map(|(_, _, reads, _, _)| reads.as_slice())
+                    .unwrap_or(&[]),
+                action_metadata
+                    .as_ref()
+                    .map(|(_, _, _, writes, _)| writes.as_slice())
+                    .unwrap_or(&[]),
+            );
+            let breakpoint_kind = explain_breakpoint_kind(failure_step);
+            let candidate_causes = if changed_fields.is_empty() {
                 vec![
                     ExplainCandidateCause {
                         kind: "terminal_violation".to_string(),
@@ -1114,10 +1176,19 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         }
                     }
                 }
-                causes.extend(involved_fields.iter().map(|field| ExplainCandidateCause {
+                causes.extend(changed_fields.iter().map(|field| ExplainCandidateCause {
                     kind: "field_flip".to_string(),
                     message: format!("{field} changed at step {}", failure_step.index),
                 }));
+                if !guard_reviews.is_empty() {
+                    causes.push(ExplainCandidateCause {
+                        kind: "guard_review".to_string(),
+                        message: format!(
+                            "review {} relevant guard decision(s) at the breakpoint",
+                            guard_reviews.len()
+                        ),
+                    });
+                }
                 causes
             };
             let mut repair_hints = vec![
@@ -1149,6 +1220,19 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     ));
                 }
             }
+            if review_context.vacuous {
+                repair_hints.push(
+                    "check whether scenario selection or property scope made the failure vacuous"
+                        .to_string(),
+                );
+            }
+            let repair_targets = build_repair_targets(
+                property_kind,
+                failure_step.action_id.as_deref(),
+                &changed_fields,
+                &write_overlap,
+                &review_context,
+            );
             let next_steps = vec![
                 "run explain in text mode for a reviewer-friendly narrative".to_string(),
                 "inspect the graph to review guard and update structure".to_string(),
@@ -1183,6 +1267,8 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 status: "ok".to_string(),
                 evidence_id: trace.evidence_id.clone(),
                 property_id: trace.property_id.clone(),
+                breakpoint_kind: breakpoint_kind.to_string(),
+                breakpoint_note: failure_step.note.clone(),
                 failure_step_index: failure_step.index,
                 failing_action_id: failure_step.action_id.clone(),
                 failing_action_role: action_metadata
@@ -1205,9 +1291,14 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                     .as_ref()
                     .map(|(_, _, _, _, path)| path.legacy_path_tags())
                     .unwrap_or_default(),
+                changed_fields,
+                field_diffs,
+                guard_reviews,
                 write_overlap_fields: write_overlap.clone(),
                 involved_fields,
+                review_context,
                 candidate_causes,
+                repair_targets,
                 repair_hints,
                 next_steps,
                 confidence,
@@ -2006,12 +2097,14 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
         escape_json(&response.evidence_id),
         escape_json(&response.property_id),
+        escape_json(&response.breakpoint_kind),
+        render_optional_string(response.breakpoint_note.as_deref()),
         response.failure_step_index,
         response
             .failing_action_id
@@ -2027,8 +2120,32 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
         render_string_array(&response.failing_action_reads),
         render_string_array(&response.failing_action_writes),
         render_string_array(&response.failing_action_path_tags),
+        render_string_array(&response.changed_fields),
+        response
+            .field_diffs
+            .iter()
+            .map(|diff| format!(
+                "{{\"field\":\"{}\",\"before\":{},\"after\":{}}}",
+                escape_json(&diff.field),
+                render_value_json(&diff.before),
+                render_value_json(&diff.after)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        response
+            .guard_reviews
+            .iter()
+            .map(|guard| format!(
+                "{{\"decision_id\":\"{}\",\"label\":\"{}\",\"outcome\":\"{}\"}}",
+                escape_json(&guard.decision_id),
+                escape_json(&guard.label),
+                escape_json(&guard.outcome)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
         render_string_array(&response.write_overlap_fields),
         render_string_array(&response.involved_fields),
+        render_review_context_json(&response.review_context),
         response
             .candidate_causes
             .iter()
@@ -2039,16 +2156,26 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
             ))
             .collect::<Vec<_>>()
             .join(","),
+        response
+            .repair_targets
+            .iter()
+            .map(|target| format!(
+                "{{\"target\":\"{}\",\"reason\":\"{}\",\"priority\":\"{}\",\"action_id\":{},\"fields\":{}}}",
+                escape_json(&target.target),
+                escape_json(&target.reason),
+                escape_json(&target.priority),
+                render_optional_string(target.action_id.as_deref()),
+                render_string_array(&target.fields)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
         render_string_array(&response.repair_hints),
         render_string_array(&response.next_steps),
         response.confidence,
         render_string_array(&response.best_practices),
         escape_json(&format!(
             "{} at step {} for property {}",
-            response
-                .failing_action_id
-                .clone()
-                .unwrap_or_else(|| "terminal violation".to_string()),
+            response.breakpoint_kind,
             response.failure_step_index,
             response.property_id
         )),
@@ -2066,6 +2193,10 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     let mut out = String::new();
     out.push_str(&format!("property_id: {}\n", response.property_id));
     out.push_str(&format!("evidence_id: {}\n", response.evidence_id));
+    out.push_str(&format!("breakpoint_kind: {}\n", response.breakpoint_kind));
+    if let Some(note) = &response.breakpoint_note {
+        out.push_str(&format!("breakpoint_note: {}\n", note));
+    }
     out.push_str(&format!(
         "failure_step_index: {}\n",
         response.failure_step_index
@@ -2098,6 +2229,32 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
             response.failing_action_writes.join(", ")
         ));
     }
+    if !response.changed_fields.is_empty() {
+        out.push_str(&format!(
+            "changed_fields: {}\n",
+            response.changed_fields.join(", ")
+        ));
+    }
+    if !response.field_diffs.is_empty() {
+        out.push_str("field_diffs:\n");
+        for diff in &response.field_diffs {
+            out.push_str(&format!(
+                "- {}: {} -> {}\n",
+                diff.field,
+                render_value_text(&diff.before),
+                render_value_text(&diff.after)
+            ));
+        }
+    }
+    if !response.guard_reviews.is_empty() {
+        out.push_str("guard_reviews:\n");
+        for guard in &response.guard_reviews {
+            out.push_str(&format!(
+                "- {} [{}] {}\n",
+                guard.decision_id, guard.outcome, guard.label
+            ));
+        }
+    }
     if !response.failing_action_path_tags.is_empty() {
         out.push_str(&format!(
             "failing_action_path_tags: {}\n",
@@ -2116,10 +2273,27 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
             response.involved_fields.join(", ")
         ));
     }
+    render_review_context_text(&mut out, &response.review_context);
     if !response.candidate_causes.is_empty() {
         out.push_str("candidate_causes:\n");
         for cause in &response.candidate_causes {
             out.push_str(&format!("- [{}] {}\n", cause.kind, cause.message));
+        }
+    }
+    if !response.repair_targets.is_empty() {
+        out.push_str("repair_targets:\n");
+        for target in &response.repair_targets {
+            out.push_str(&format!(
+                "- [{}:{}] {}",
+                target.target, target.priority, target.reason
+            ));
+            if let Some(action_id) = &target.action_id {
+                out.push_str(&format!(" (action: {})", action_id));
+            }
+            if !target.fields.is_empty() {
+                out.push_str(&format!(" (fields: {})", target.fields.join(", ")));
+            }
+            out.push('\n');
         }
     }
     if !response.repair_hints.is_empty() {
@@ -2136,6 +2310,46 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     }
     out.push_str(&format!("confidence: {:.2}\n", response.confidence));
     out
+}
+
+fn render_review_context_json(context: &ExplainReviewContext) -> String {
+    format!(
+        "{{\"scenario_id\":{},\"scenario_expr\":{},\"scenario_match_before\":{},\"scenario_match_after\":{},\"property_scope_expr\":{},\"property_scope_match_before\":{},\"property_scope_match_after\":{},\"vacuous\":{}}}",
+        render_optional_string(context.scenario_id.as_deref()),
+        render_optional_string(context.scenario_expr.as_deref()),
+        render_optional_bool(context.scenario_match_before),
+        render_optional_bool(context.scenario_match_after),
+        render_optional_string(context.property_scope_expr.as_deref()),
+        render_optional_bool(context.property_scope_match_before),
+        render_optional_bool(context.property_scope_match_after),
+        context.vacuous,
+    )
+}
+
+fn render_review_context_text(out: &mut String, context: &ExplainReviewContext) {
+    out.push_str("review_context:\n");
+    out.push_str(&format!("  vacuous: {}\n", context.vacuous));
+    if let Some(scenario_id) = &context.scenario_id {
+        out.push_str(&format!("  scenario_id: {}\n", scenario_id));
+    }
+    if let Some(expr) = &context.scenario_expr {
+        out.push_str(&format!("  scenario_expr: {}\n", expr));
+    }
+    if let Some(matches) = context.scenario_match_before {
+        out.push_str(&format!("  scenario_match_before: {}\n", matches));
+    }
+    if let Some(matches) = context.scenario_match_after {
+        out.push_str(&format!("  scenario_match_after: {}\n", matches));
+    }
+    if let Some(expr) = &context.property_scope_expr {
+        out.push_str(&format!("  property_scope_expr: {}\n", expr));
+    }
+    if let Some(matches) = context.property_scope_match_before {
+        out.push_str(&format!("  property_scope_match_before: {}\n", matches));
+    }
+    if let Some(matches) = context.property_scope_match_after {
+        out.push_str(&format!("  property_scope_match_after: {}\n", matches));
+    }
 }
 
 fn render_expr_ir(expr: &crate::ir::ExprIr) -> String {
@@ -3061,10 +3275,239 @@ fn render_string_array(values: &[String]) -> String {
     )
 }
 
+fn render_optional_bool(value: Option<bool>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn render_optional_string(value: Option<&str>) -> String {
     value
         .map(|value| format!("\"{}\"", escape_json(value)))
         .unwrap_or_else(|| "null".to_string())
+}
+
+fn render_value_json(value: &crate::ir::Value) -> String {
+    match value {
+        crate::ir::Value::Bool(value) => value.to_string(),
+        crate::ir::Value::UInt(value) => value.to_string(),
+        crate::ir::Value::String(value) => format!("\"{}\"", escape_json(value)),
+        crate::ir::Value::EnumVariant { label, index } => format!(
+            "{{\"label\":\"{}\",\"index\":{}}}",
+            escape_json(label),
+            index
+        ),
+        crate::ir::Value::PairVariant {
+            left_label,
+            left_index,
+            right_label,
+            right_index,
+        } => format!(
+            "{{\"left_label\":\"{}\",\"left_index\":{},\"right_label\":\"{}\",\"right_index\":{}}}",
+            escape_json(left_label),
+            left_index,
+            escape_json(right_label),
+            right_index
+        ),
+    }
+}
+
+fn render_value_text(value: &crate::ir::Value) -> String {
+    match value {
+        crate::ir::Value::Bool(value) => value.to_string(),
+        crate::ir::Value::UInt(value) => value.to_string(),
+        crate::ir::Value::String(value) => value.clone(),
+        crate::ir::Value::EnumVariant { label, .. } => label.clone(),
+        crate::ir::Value::PairVariant {
+            left_label,
+            right_label,
+            ..
+        } => format!("({}, {})", left_label, right_label),
+    }
+}
+
+fn eval_bool_expr(
+    model: &ModelIr,
+    state: &crate::kernel::MachineState,
+    expr: &crate::ir::ExprIr,
+) -> Result<bool, Diagnostic> {
+    match eval_expr(model, state, expr)? {
+        crate::ir::Value::Bool(value) => Ok(value),
+        _ => Err(Diagnostic::new(
+            ErrorCode::EvalError,
+            DiagnosticSegment::EngineSearch,
+            "scenario/scope expression did not evaluate to bool",
+        )),
+    }
+}
+
+fn state_field_diffs(
+    before: &std::collections::BTreeMap<String, crate::ir::Value>,
+    after: &std::collections::BTreeMap<String, crate::ir::Value>,
+) -> Vec<ExplainFieldDiff> {
+    before
+        .iter()
+        .filter_map(|(field, before_value)| {
+            let after_value = after.get(field)?;
+            if before_value == after_value {
+                None
+            } else {
+                Some(ExplainFieldDiff {
+                    field: field.clone(),
+                    before: before_value.clone(),
+                    after: after_value.clone(),
+                })
+            }
+        })
+        .collect()
+}
+
+fn explain_guard_reviews(path: Option<&Path>) -> Vec<ExplainGuardReview> {
+    let Some(path) = path else {
+        return Vec::new();
+    };
+    path.decisions
+        .iter()
+        .filter(|decision| matches!(decision.point.kind, DecisionKind::Guard))
+        .map(|decision| ExplainGuardReview {
+            decision_id: decision.decision_id(),
+            label: decision.point.label.clone(),
+            outcome: match decision.outcome {
+                DecisionOutcome::GuardTrue => "guard_true".to_string(),
+                DecisionOutcome::GuardFalse => "guard_false".to_string(),
+                DecisionOutcome::UpdateApplied => "update_applied".to_string(),
+            },
+        })
+        .collect()
+}
+
+fn merged_involved_fields(
+    changed_fields: &[String],
+    reads: &[String],
+    writes: &[String],
+) -> Vec<String> {
+    let mut fields = changed_fields.to_vec();
+    for field in writes {
+        push_unique(&mut fields, field.clone());
+    }
+    for field in reads {
+        push_unique(&mut fields, field.clone());
+    }
+    fields
+}
+
+fn build_review_context(
+    model: Option<&ModelIr>,
+    property: Option<&crate::ir::PropertyIr>,
+    scenario_id: Option<&str>,
+    before_state: &std::collections::BTreeMap<String, crate::ir::Value>,
+    after_state: &std::collections::BTreeMap<String, crate::ir::Value>,
+    vacuous: bool,
+) -> ExplainReviewContext {
+    let Some(model) = model else {
+        return ExplainReviewContext {
+            scenario_id: scenario_id.map(str::to_string),
+            scenario_expr: None,
+            scenario_match_before: None,
+            scenario_match_after: None,
+            property_scope_expr: None,
+            property_scope_match_before: None,
+            property_scope_match_after: None,
+            vacuous,
+        };
+    };
+    let before_machine = machine_state_from_snapshot(model, before_state);
+    let after_machine = machine_state_from_snapshot(model, after_state);
+    let scenario =
+        scenario_id.and_then(|id| model.scenarios.iter().find(|entry| entry.scenario_id == id));
+    ExplainReviewContext {
+        scenario_id: scenario_id.map(str::to_string),
+        scenario_expr: scenario.map(|scenario| render_expr_ir(&scenario.expr)),
+        scenario_match_before: scenario
+            .zip(before_machine.as_ref())
+            .and_then(|(scenario, state)| eval_bool_expr(model, state, &scenario.expr).ok()),
+        scenario_match_after: scenario
+            .zip(after_machine.as_ref())
+            .and_then(|(scenario, state)| eval_bool_expr(model, state, &scenario.expr).ok()),
+        property_scope_expr: property
+            .and_then(|property| property.scope.as_ref().map(|scope| render_expr_ir(scope))),
+        property_scope_match_before: property
+            .and_then(|property| property.scope.as_ref())
+            .zip(before_machine.as_ref())
+            .and_then(|(scope, state)| eval_bool_expr(model, state, scope).ok()),
+        property_scope_match_after: property
+            .and_then(|property| property.scope.as_ref())
+            .zip(after_machine.as_ref())
+            .and_then(|(scope, state)| eval_bool_expr(model, state, scope).ok()),
+        vacuous,
+    }
+}
+
+fn build_repair_targets(
+    property_kind: PropertyKind,
+    action_id: Option<&str>,
+    changed_fields: &[String],
+    write_overlap_fields: &[String],
+    review_context: &ExplainReviewContext,
+) -> Vec<ExplainRepairTargetHint> {
+    let mut targets = Vec::new();
+    if property_kind == PropertyKind::Reachability
+        || property_kind == PropertyKind::Cover
+        || review_context.vacuous
+        || review_context.scenario_match_before == Some(false)
+        || review_context.property_scope_match_before == Some(false)
+    {
+        targets.push(ExplainRepairTargetHint {
+            target: "requirement_fix".to_string(),
+            reason: "review whether the property, scenario, or scope selection expresses the intended requirement".to_string(),
+            priority: "medium".to_string(),
+            action_id: action_id.map(str::to_string),
+            fields: changed_fields.to_vec(),
+        });
+    }
+    if !changed_fields.is_empty() || !write_overlap_fields.is_empty() {
+        targets.push(ExplainRepairTargetHint {
+            target: "model_fix".to_string(),
+            reason: "review the modeled guard/update set around the causal breakpoint".to_string(),
+            priority: if !write_overlap_fields.is_empty() {
+                "high".to_string()
+            } else {
+                "medium".to_string()
+            },
+            action_id: action_id.map(str::to_string),
+            fields: if write_overlap_fields.is_empty() {
+                changed_fields.to_vec()
+            } else {
+                write_overlap_fields.to_vec()
+            },
+        });
+    }
+    if let Some(action_id) = action_id {
+        targets.push(ExplainRepairTargetHint {
+            target: "implementation_fix".to_string(),
+            reason: format!(
+                "inspect the implementation or postcondition of action {} at the failing boundary",
+                action_id
+            ),
+            priority: if changed_fields.is_empty() {
+                "medium".to_string()
+            } else {
+                "high".to_string()
+            },
+            action_id: Some(action_id.to_string()),
+            fields: changed_fields.to_vec(),
+        });
+    }
+    targets
+}
+
+fn explain_breakpoint_kind(step: &crate::evidence::TraceStep) -> &'static str {
+    match (step.action_id.as_ref(), step.note.as_deref()) {
+        (_, Some(note)) if note.contains("deadlock") => "deadlock_boundary",
+        (Some(_), _) => "action_boundary",
+        (None, Some(_)) => "terminal_boundary",
+        (None, None) => "state_boundary",
+    }
 }
 
 fn escape_json(input: &str) -> String {
@@ -3090,6 +3533,7 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
     require_non_empty(&response.request_id, "request_id")?;
     require_non_empty(&response.evidence_id, "evidence_id")?;
     require_non_empty(&response.property_id, "property_id")?;
+    require_non_empty(&response.breakpoint_kind, "breakpoint_kind")?;
     for decision in &response.decision_path.decisions {
         require_non_empty(
             &decision.point.decision_id,
@@ -3099,6 +3543,16 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
             &decision.point.action_id,
             "decision_path.decisions[].action_id",
         )?;
+    }
+    for guard in &response.guard_reviews {
+        require_non_empty(&guard.decision_id, "guard_reviews[].decision_id")?;
+        require_non_empty(&guard.label, "guard_reviews[].label")?;
+        require_non_empty(&guard.outcome, "guard_reviews[].outcome")?;
+    }
+    for target in &response.repair_targets {
+        require_non_empty(&target.target, "repair_targets[].target")?;
+        require_non_empty(&target.reason, "repair_targets[].reason")?;
+        require_non_empty(&target.priority, "repair_targets[].priority")?;
     }
     if !(0.0..=1.0).contains(&response.confidence) {
         return Err("confidence must be between 0.0 and 1.0".to_string());
@@ -3786,9 +4240,14 @@ mod tests {
         validate_explain_request(&request).unwrap();
         let response = explain_source(&request).unwrap();
         assert_eq!(response.property_id, "P_SAFE");
+        assert_eq!(response.breakpoint_kind, "action_boundary");
         assert_eq!(response.failure_step_index, 0);
+        assert_eq!(response.changed_fields, vec!["x".to_string()]);
         assert_eq!(response.involved_fields, vec!["x".to_string()]);
+        assert_eq!(response.review_context.vacuous, false);
         assert!(!response.decision_path.decisions.is_empty());
+        assert!(!response.field_diffs.is_empty());
+        assert!(!response.guard_reviews.is_empty());
         assert!(response
             .candidate_causes
             .iter()
@@ -3810,6 +4269,15 @@ mod tests {
             .repair_hints
             .iter()
             .any(|hint| hint.contains("both guard outcomes")));
+        assert!(response
+            .repair_targets
+            .iter()
+            .any(|target| target.target == "model_fix"));
+        assert!(response
+            .repair_targets
+            .iter()
+            .any(|target| target.target == "implementation_fix"));
+        assert!(super::render_explain_json(&response).contains("\"review_context\""));
         assert!(super::render_explain_json(&response).contains("\"decision_path\""));
         validate_explain_response(&response).unwrap();
     }
@@ -3833,6 +4301,10 @@ mod tests {
             .repair_hints
             .iter()
             .any(|hint| hint.contains("verify reachability property P_REACH is intended")));
+        assert!(response
+            .repair_targets
+            .iter()
+            .any(|target| target.target == "requirement_fix"));
         assert!(response
             .candidate_causes
             .iter()

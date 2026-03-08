@@ -2490,6 +2490,67 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             0.0_f32
         })
     .min(0.95_f32);
+    let field_diffs = failure_step
+        .state_before
+        .iter()
+        .filter_map(|(field, before)| {
+            let after = failure_step.state_after.get(field)?;
+            if before == after {
+                None
+            } else {
+                Some(crate::api::ExplainFieldDiff {
+                    field: field.clone(),
+                    before: before.clone(),
+                    after: after.clone(),
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+    let guard_reviews = decision_path
+        .decisions
+        .iter()
+        .filter(|decision| matches!(decision.point.kind, crate::ir::DecisionKind::Guard))
+        .map(|decision| crate::api::ExplainGuardReview {
+            decision_id: decision.decision_id(),
+            label: decision.point.label.clone(),
+            outcome: match decision.outcome {
+                crate::ir::DecisionOutcome::GuardTrue => "guard_true".to_string(),
+                crate::ir::DecisionOutcome::GuardFalse => "guard_false".to_string(),
+                crate::ir::DecisionOutcome::UpdateApplied => "update_applied".to_string(),
+            },
+        })
+        .collect::<Vec<_>>();
+    let repair_targets = vec![
+        crate::api::ExplainRepairTargetHint {
+            target: "model_fix".to_string(),
+            reason: "review the modeled guard/update set around the causal breakpoint".to_string(),
+            priority: if !write_overlap_fields.is_empty() {
+                "high".to_string()
+            } else {
+                "medium".to_string()
+            },
+            action_id: Some(action_id.clone()),
+            fields: if write_overlap_fields.is_empty() {
+                involved_fields.clone()
+            } else {
+                write_overlap_fields.clone()
+            },
+        },
+        crate::api::ExplainRepairTargetHint {
+            target: "implementation_fix".to_string(),
+            reason: format!(
+                "inspect the implementation or postcondition of action {} at the failing boundary",
+                action_id
+            ),
+            priority: if involved_fields.is_empty() {
+                "medium".to_string()
+            } else {
+                "high".to_string()
+            },
+            action_id: Some(action_id.clone()),
+            fields: involved_fields.clone(),
+        },
+    ];
 
     Ok(ExplainResponse {
         schema_version: "1.0.0".to_string(),
@@ -2497,6 +2558,16 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         status: "ok".to_string(),
         evidence_id: trace.evidence_id,
         property_id: trace.property_id,
+        breakpoint_kind: if failure_step
+            .note
+            .as_deref()
+            .is_some_and(|note| note.contains("deadlock"))
+        {
+            "deadlock_boundary".to_string()
+        } else {
+            "action_boundary".to_string()
+        },
+        breakpoint_note: failure_step.note.clone(),
         failure_step_index: failure_step.index,
         failing_action_id: Some(action_id.clone()),
         failing_action_role,
@@ -2504,9 +2575,23 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         failing_action_reads: action_reads,
         failing_action_writes: action_writes,
         failing_action_path_tags: action_path_tags,
+        changed_fields: involved_fields.clone(),
+        field_diffs,
+        guard_reviews,
         write_overlap_fields,
         involved_fields,
+        review_context: crate::api::ExplainReviewContext {
+            scenario_id: None,
+            scenario_expr: None,
+            scenario_match_before: None,
+            scenario_match_after: None,
+            property_scope_expr: None,
+            property_scope_match_before: None,
+            property_scope_match_after: None,
+            vacuous: false,
+        },
         candidate_causes,
+        repair_targets,
         repair_hints,
         next_steps,
         confidence,

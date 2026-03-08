@@ -2,17 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.evidence_trace",
   "type": "object",
-  "required": ["schema_version", "evidence_id", "run_id", "property_id", "kind", "trace_hash", "terminal_reason", "initial_state_id", "terminal_state_id", "steps"],
+  "required": [
+    "schema_version",
+    "evidence_id",
+    "run_id",
+    "property_id",
+    "evidence_kind",
+    "assurance_level",
+    "trace_hash",
+    "steps"
+  ],
   "properties": {
     "schema_version": { "type": "string" },
     "evidence_id": { "type": "string" },
     "run_id": { "type": "string" },
     "property_id": { "type": "string" },
-    "kind": { "type": "string", "enum": ["counterexample", "witness"] },
+    "evidence_kind": { "type": "string" },
+    "assurance_level": { "type": "string" },
     "trace_hash": { "type": "string" },
-    "terminal_reason": { "type": "object" },
-    "initial_state_id": { "type": "string" },
-    "terminal_state_id": { "type": "string" },
     "steps": {
       "type": "array",
       "items": { "$ref": "#/$defs/trace_step" }
@@ -21,17 +28,64 @@
   "$defs": {
     "trace_step": {
       "type": "object",
-      "required": ["index", "from_state_id", "action_id", "action_label", "to_state_id", "depth", "state_before", "state_after", "diff"],
+      "required": [
+        "index",
+        "from_state_id",
+        "action_id",
+        "action_label",
+        "to_state_id",
+        "depth",
+        "state_before",
+        "state_after",
+        "state_diff",
+        "path",
+        "note"
+      ],
       "properties": {
         "index": { "type": "integer", "minimum": 0 },
         "from_state_id": { "type": "string" },
-        "action_id": { "type": "string" },
-        "action_label": { "type": "string" },
+        "action_id": { "type": ["string", "null"] },
+        "action_label": { "type": ["string", "null"] },
         "to_state_id": { "type": "string" },
         "depth": { "type": "integer", "minimum": 0 },
         "state_before": { "type": "object" },
         "state_after": { "type": "object" },
-        "diff": { "type": "array", "items": { "type": "object" } }
+        "state_diff": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "before", "after"],
+            "properties": {
+              "field": { "type": "string" },
+              "before": {},
+              "after": {}
+            }
+          }
+        },
+        "path": {
+          "type": ["object", "null"],
+          "properties": {
+            "decisions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/decision" }
+            }
+          }
+        },
+        "note": { "type": ["string", "null"] }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "decision_id": { "type": "string" },
+        "action_id": { "type": "string" },
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "field": { "type": ["string", "null"] },
+        "reads": { "type": "array", "items": { "type": "string" } },
+        "writes": { "type": "array", "items": { "type": "string" } },
+        "path_tags": { "type": "array", "items": { "type": "string" } },
+        "outcome": { "type": "string" }
       }
     }
   }
