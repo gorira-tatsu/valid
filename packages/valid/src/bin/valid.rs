@@ -1929,6 +1929,12 @@ fn cmd_conformance(args: Vec<String>) {
         );
     } else {
         println!("vector_id: {}", report.vector_id);
+        if let Some(evidence_id) = &report.evidence_id {
+            println!("evidence_id: {}", evidence_id);
+        }
+        if let Some(property_id) = &report.property_id {
+            println!("property_id: {}", property_id);
+        }
         println!("runner: {}", report.runner);
         println!("status: {}", report.status);
         println!("mismatch_count: {}", report.mismatch_count);
@@ -1937,6 +1943,43 @@ fn cmd_conformance(args: Vec<String>) {
                 "mismatch_categories: {}",
                 report.mismatch_categories.join(",")
             );
+        }
+        if let Some(traceback) = &report.traceback {
+            println!("traceback.breakpoint_kind: {}", traceback.breakpoint_kind);
+            println!(
+                "traceback.failure_step_index: {}",
+                traceback.failure_step_index
+            );
+            if let Some(action_id) = &traceback.failing_action_id {
+                println!("traceback.failing_action_id: {}", action_id);
+            }
+            if !traceback.changed_fields.is_empty() {
+                println!(
+                    "traceback.changed_fields: {}",
+                    traceback.changed_fields.join(",")
+                );
+            }
+            if !traceback.involved_fields.is_empty() {
+                println!(
+                    "traceback.involved_fields: {}",
+                    traceback.involved_fields.join(",")
+                );
+            }
+        }
+        if !report.candidate_causes.is_empty() {
+            println!("candidate_causes:");
+            for cause in &report.candidate_causes {
+                println!("  - {}: {}", cause.kind, cause.message);
+            }
+        }
+        if !report.repair_targets.is_empty() {
+            println!("repair_targets:");
+            for target in &report.repair_targets {
+                println!(
+                    "  - {} [{}] {}",
+                    target.target, target.priority, target.reason
+                );
+            }
         }
         for mismatch in &report.mismatches {
             println!(
@@ -1961,6 +2004,16 @@ fn cmd_conformance(args: Vec<String>) {
                 "property_holds expected {:?} actual {:?}",
                 report.expected_property_holds, report.actual_property_holds
             );
+        }
+        println!(
+            "review_summary.headline: {}",
+            report.review_summary.headline
+        );
+        if !report.review_summary.next_steps.is_empty() {
+            println!("review_summary.next_steps:");
+            for step in &report.review_summary.next_steps {
+                println!("  - {}", step);
+            }
         }
     }
     let exit_code = if report.status == "PASS" {

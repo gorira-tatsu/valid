@@ -1,6 +1,6 @@
 //! Machine-readable API layer for AI and CLI integration.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
@@ -211,13 +211,13 @@ pub struct CheckRequest {
     pub solver_args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainCandidateCause {
     pub kind: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainFieldDiff {
     pub field: String,
     pub before: crate::ir::Value,
@@ -243,13 +243,24 @@ pub struct ExplainReviewContext {
     pub vacuous: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainRepairTargetHint {
     pub target: String,
     pub reason: String,
     pub priority: String,
     pub action_id: Option<String>,
     pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TracebackSummary {
+    pub breakpoint_kind: String,
+    pub breakpoint_note: Option<String>,
+    pub failure_step_index: usize,
+    pub failing_action_id: Option<String>,
+    pub changed_fields: Vec<String>,
+    pub field_diffs: Vec<ExplainFieldDiff>,
+    pub involved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

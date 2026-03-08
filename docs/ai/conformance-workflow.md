@@ -96,6 +96,9 @@ Use the external `--runner` flow when:
 - which generated vectors or traces were exercised
 - whether the mismatch is state, output, property, or harness-oriented
 - which requirement or scenario the mismatch belongs to
+- the normalized `traceback`, `candidate_causes`, `repair_targets`, and
+  `review_summary` fields so review tooling can consume conformance output like
+  other evidence backends
 
 ## Common conformance mistakes
 

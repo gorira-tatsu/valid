@@ -6,6 +6,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    api::{ExplainCandidateCause, ExplainFieldDiff, ExplainRepairTargetHint, TracebackSummary},
     ir::{ModelIr, Path, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
@@ -79,9 +80,22 @@ pub struct ConformanceMismatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConformanceReviewSummary {
+    pub headline: String,
+    pub trace_steps: usize,
+    pub failing_action_id: Option<String>,
+    pub action_sequence: Vec<String>,
+    pub next_steps: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConformanceReport {
     pub schema_version: String,
     pub vector_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property_id: Option<String>,
     pub status: String,
     pub mismatch_count: usize,
     pub mismatch_categories: Vec<String>,
@@ -90,6 +104,15 @@ pub struct ConformanceReport {
     pub expected_property_holds: Option<bool>,
     pub actual_property_holds: Option<bool>,
     pub runner: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub traceback: Option<TracebackSummary>,
+    #[serde(default)]
+    pub candidate_causes: Vec<ExplainCandidateCause>,
+    #[serde(default)]
+    pub repair_targets: Vec<ExplainRepairTargetHint>,
+    #[serde(default)]
+    pub next_steps: Vec<String>,
+    pub review_summary: ConformanceReviewSummary,
 }
 
 pub trait RustConformanceHarness {
@@ -369,9 +392,23 @@ pub fn compare_conformance(
         categories
     };
     let mismatch_count = mismatches.len();
+    let traceback = mismatches
+        .first()
+        .map(|mismatch| build_traceback(vector, mismatch));
+    let candidate_causes = mismatches
+        .first()
+        .map(|mismatch| build_candidate_causes(mismatch, traceback.as_ref()))
+        .unwrap_or_default();
+    let repair_targets = mismatches
+        .first()
+        .map(|mismatch| build_repair_targets(mismatch, traceback.as_ref()))
+        .unwrap_or_default();
+    let next_steps = build_next_steps(vector, mismatches.first(), &traceback);
     ConformanceReport {
         schema_version: "1.0.0".to_string(),
         vector_id: vector.vector_id.clone(),
+        evidence_id: vector.evidence_id.clone(),
+        property_id: property_id(vector),
         status: if mismatch_count == 0 { "PASS" } else { "FAIL" }.to_string(),
         mismatch_count,
         mismatch_categories,
@@ -380,30 +417,255 @@ pub fn compare_conformance(
         expected_property_holds: vector.expected_property_holds,
         actual_property_holds: response.property_holds,
         runner: runner.to_string(),
+        traceback: traceback.clone(),
+        candidate_causes,
+        repair_targets,
+        next_steps: next_steps.clone(),
+        review_summary: build_review_summary(
+            vector,
+            runner,
+            mismatch_count,
+            &traceback,
+            next_steps,
+        ),
     }
 }
 
 fn harness_runtime_report(vector: &TestVector, runner: &str, summary: String) -> ConformanceReport {
+    let mismatch = ConformanceMismatch {
+        kind: ConformanceMismatchKind::HarnessRuntime,
+        likely_fix_surface: "conformance_harness".to_string(),
+        summary,
+        index: None,
+        expected: None,
+        actual: None,
+        expected_property_holds: vector.expected_property_holds,
+        actual_property_holds: None,
+    };
+    let traceback = Some(build_traceback(vector, &mismatch));
+    let candidate_causes = build_candidate_causes(&mismatch, traceback.as_ref());
+    let repair_targets = build_repair_targets(&mismatch, traceback.as_ref());
+    let next_steps = build_next_steps(vector, Some(&mismatch), &traceback);
     ConformanceReport {
         schema_version: "1.0.0".to_string(),
         vector_id: vector.vector_id.clone(),
+        evidence_id: vector.evidence_id.clone(),
+        property_id: property_id(vector),
         status: "FAIL".to_string(),
         mismatch_count: 1,
         mismatch_categories: vec![ConformanceMismatchKind::HarnessRuntime.as_str().to_string()],
-        mismatches: vec![ConformanceMismatch {
-            kind: ConformanceMismatchKind::HarnessRuntime,
-            likely_fix_surface: "conformance_harness".to_string(),
-            summary,
-            index: None,
-            expected: None,
-            actual: None,
-            expected_property_holds: vector.expected_property_holds,
-            actual_property_holds: None,
-        }],
+        mismatches: vec![mismatch],
         observation_mismatches: Vec::new(),
         expected_property_holds: vector.expected_property_holds,
         actual_property_holds: None,
         runner: runner.to_string(),
+        traceback: traceback.clone(),
+        candidate_causes,
+        repair_targets,
+        next_steps: next_steps.clone(),
+        review_summary: build_review_summary(vector, runner, 1, &traceback, next_steps),
+    }
+}
+
+fn property_id(vector: &TestVector) -> Option<String> {
+    (!vector.property_id.is_empty()).then(|| vector.property_id.clone())
+}
+
+fn build_traceback(vector: &TestVector, mismatch: &ConformanceMismatch) -> TracebackSummary {
+    let failure_step_index = mismatch
+        .index
+        .unwrap_or_else(|| vector.actions.len().saturating_sub(1));
+    let failing_action_id = mismatch
+        .index
+        .and_then(|index| vector.actions.get(index))
+        .map(|step| step.action_id.clone());
+    let (changed_fields, field_diffs, involved_fields) = diff_fields(mismatch);
+    TracebackSummary {
+        breakpoint_kind: match mismatch.kind {
+            ConformanceMismatchKind::State | ConformanceMismatchKind::Output => {
+                "action_boundary".to_string()
+            }
+            ConformanceMismatchKind::Property => "terminal_boundary".to_string(),
+            ConformanceMismatchKind::HarnessRuntime => "runner_boundary".to_string(),
+        },
+        breakpoint_note: Some(mismatch.summary.clone()),
+        failure_step_index,
+        failing_action_id,
+        changed_fields,
+        field_diffs,
+        involved_fields,
+    }
+}
+
+fn diff_fields(
+    mismatch: &ConformanceMismatch,
+) -> (Vec<String>, Vec<ExplainFieldDiff>, Vec<String>) {
+    let mut involved_fields = Vec::new();
+    let mut changed_fields = Vec::new();
+    let mut field_diffs = Vec::new();
+    if let Some(expected) = &mismatch.expected {
+        for field in expected.keys() {
+            push_unique(&mut involved_fields, field.clone());
+        }
+    }
+    if let Some(actual) = &mismatch.actual {
+        for field in actual.keys() {
+            push_unique(&mut involved_fields, field.clone());
+        }
+    }
+    if let (Some(expected), Some(actual)) = (&mismatch.expected, &mismatch.actual) {
+        for field in &involved_fields {
+            if expected.get(field) != actual.get(field) {
+                changed_fields.push(field.clone());
+                if let (Some(before), Some(after)) = (expected.get(field), actual.get(field)) {
+                    field_diffs.push(ExplainFieldDiff {
+                        field: field.clone(),
+                        before: before.clone(),
+                        after: after.clone(),
+                    });
+                }
+            }
+        }
+    }
+    (changed_fields, field_diffs, involved_fields)
+}
+
+fn build_candidate_causes(
+    mismatch: &ConformanceMismatch,
+    traceback: Option<&TracebackSummary>,
+) -> Vec<ExplainCandidateCause> {
+    match mismatch.kind {
+        ConformanceMismatchKind::State => {
+            let Some(traceback) = traceback else {
+                return vec![ExplainCandidateCause {
+                    kind: "state_mismatch".to_string(),
+                    message: mismatch.summary.clone(),
+                }];
+            };
+            if traceback.changed_fields.is_empty() {
+                vec![ExplainCandidateCause {
+                    kind: "state_mismatch".to_string(),
+                    message: mismatch.summary.clone(),
+                }]
+            } else {
+                traceback
+                    .changed_fields
+                    .iter()
+                    .map(|field| ExplainCandidateCause {
+                        kind: "state_mismatch".to_string(),
+                        message: format!(
+                            "state diverged on field `{field}` during conformance replay"
+                        ),
+                    })
+                    .collect()
+            }
+        }
+        ConformanceMismatchKind::Property => vec![ExplainCandidateCause {
+            kind: "property_result_mismatch".to_string(),
+            message: "the implementation and model disagreed on the property result".to_string(),
+        }],
+        ConformanceMismatchKind::Output => vec![ExplainCandidateCause {
+            kind: "observation_mismatch".to_string(),
+            message: mismatch.summary.clone(),
+        }],
+        ConformanceMismatchKind::HarnessRuntime => vec![ExplainCandidateCause {
+            kind: "harness_runtime".to_string(),
+            message: mismatch.summary.clone(),
+        }],
+    }
+}
+
+fn build_repair_targets(
+    mismatch: &ConformanceMismatch,
+    traceback: Option<&TracebackSummary>,
+) -> Vec<ExplainRepairTargetHint> {
+    vec![ExplainRepairTargetHint {
+        target: mismatch.likely_fix_surface.clone(),
+        reason: mismatch.summary.clone(),
+        priority: match mismatch.kind {
+            ConformanceMismatchKind::HarnessRuntime | ConformanceMismatchKind::State => {
+                "high".to_string()
+            }
+            ConformanceMismatchKind::Property | ConformanceMismatchKind::Output => {
+                "medium".to_string()
+            }
+        },
+        action_id: traceback.and_then(|item| item.failing_action_id.clone()),
+        fields: traceback
+            .map(|item| item.involved_fields.clone())
+            .unwrap_or_default(),
+    }]
+}
+
+fn build_next_steps(
+    vector: &TestVector,
+    mismatch: Option<&ConformanceMismatch>,
+    traceback: &Option<TracebackSummary>,
+) -> Vec<String> {
+    let mut steps = Vec::new();
+    match mismatch {
+        Some(ConformanceMismatch {
+            kind: ConformanceMismatchKind::HarnessRuntime,
+            ..
+        }) => steps.push(
+            "fix the conformance harness boundary before classifying requirement, model, or implementation drift"
+                .to_string(),
+        ),
+        Some(_) => {
+            if let Some(property_id) = property_id(vector) {
+                steps.push(format!(
+                    "run `cargo valid explain <model> --property={property_id}` to compare the model-side traceback"
+                ));
+            }
+            if let Some(traceback) = traceback {
+                steps.push(format!(
+                    "rerun vector `{}` and inspect step {} in the implementation trace",
+                    vector.vector_id, traceback.failure_step_index
+                ));
+            }
+        }
+        None => steps.push(
+            "record this vector in CI so future conformance drift is caught on the same contract"
+                .to_string(),
+        ),
+    }
+    steps
+}
+
+fn build_review_summary(
+    vector: &TestVector,
+    runner: &str,
+    mismatch_count: usize,
+    traceback: &Option<TracebackSummary>,
+    next_steps: Vec<String>,
+) -> ConformanceReviewSummary {
+    ConformanceReviewSummary {
+        headline: if mismatch_count == 0 {
+            format!("PASS conformance for {} via {}", vector.vector_id, runner)
+        } else if let Some(property_id) = property_id(vector) {
+            format!(
+                "FAIL conformance for property {} via {}",
+                property_id, runner
+            )
+        } else {
+            format!("FAIL conformance for {} via {}", vector.vector_id, runner)
+        },
+        trace_steps: vector.actions.len(),
+        failing_action_id: traceback
+            .as_ref()
+            .and_then(|item| item.failing_action_id.clone()),
+        action_sequence: vector
+            .actions
+            .iter()
+            .map(|step| step.action_id.clone())
+            .collect(),
+        next_steps,
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
     }
 }
 
