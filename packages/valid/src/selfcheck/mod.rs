@@ -314,6 +314,8 @@ fn selfcheck_model() -> ModelIr {
                 value: ExprIr::Literal(Value::UInt(2)),
             }],
         }],
+        predicates: vec![],
+        scenarios: vec![],
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
@@ -322,6 +324,8 @@ fn selfcheck_model() -> ModelIr {
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
                 right: Box::new(ExprIr::Literal(Value::UInt(1))),
             },
+            scope: None,
+            action_filter: None,
         }],
     }
 }
@@ -380,6 +384,8 @@ fn predecessor_selfcheck_model() -> ModelIr {
                 }],
             },
         ],
+        predicates: vec![],
+        scenarios: vec![],
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
@@ -388,6 +394,8 @@ fn predecessor_selfcheck_model() -> ModelIr {
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
                 right: Box::new(ExprIr::Literal(Value::UInt(2))),
             },
+            scope: None,
+            action_filter: None,
         }],
     }
 }
@@ -446,6 +454,8 @@ fn coverage_selfcheck_model() -> ModelIr {
                 }],
             },
         ],
+        predicates: vec![],
+        scenarios: vec![],
         properties: vec![PropertyIr {
             property_id: "P_SAFE".to_string(),
             kind: PropertyKind::Invariant,
@@ -454,6 +464,8 @@ fn coverage_selfcheck_model() -> ModelIr {
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
                 right: Box::new(ExprIr::Literal(Value::UInt(2))),
             },
+            scope: None,
+            action_filter: None,
         }],
     }
 }

@@ -6,6 +6,8 @@ pub struct ParsedModel {
     pub state_fields: Vec<ParsedField>,
     pub init_assignments: Vec<ParsedAssignment>,
     pub actions: Vec<ParsedAction>,
+    pub predicates: Vec<ParsedNamedExpr>,
+    pub scenarios: Vec<ParsedNamedExpr>,
     pub properties: Vec<ParsedProperty>,
 }
 
@@ -37,6 +39,15 @@ pub struct ParsedProperty {
     pub name: String,
     pub kind: String,
     pub expr: String,
+    pub scope_expr: Option<String>,
+    pub action_filter: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedNamedExpr {
+    pub name: String,
+    pub expr: String,
     pub line: usize,
 }
 
@@ -45,6 +56,8 @@ enum Section {
     None,
     State,
     Init,
+    Predicates,
+    Scenarios,
     ActionHeader,
     ActionPost,
     PropertyHeader,
@@ -55,6 +68,8 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
     let mut state_fields = Vec::new();
     let mut init_assignments = Vec::new();
     let mut actions = Vec::new();
+    let mut predicates = Vec::new();
+    let mut scenarios = Vec::new();
     let mut properties = Vec::new();
     let mut errors = Vec::new();
 
@@ -88,6 +103,18 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             continue;
         }
 
+        if trimmed == "predicates:" {
+            flush_action(&mut actions, &mut current_action);
+            section = Section::Predicates;
+            continue;
+        }
+
+        if trimmed == "scenarios:" {
+            flush_action(&mut actions, &mut current_action);
+            section = Section::Scenarios;
+            continue;
+        }
+
         if let Some(rest) = trimmed.strip_prefix("action ") {
             flush_action(&mut actions, &mut current_action);
             let name = rest.trim_end_matches(':').trim().to_string();
@@ -111,6 +138,8 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
                         name,
                         kind: String::new(),
                         expr: String::new(),
+                        scope_expr: None,
+                        action_filter: None,
                         line: line_no,
                     });
                     section = Section::PropertyHeader;
@@ -126,6 +155,8 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
                         name,
                         kind,
                         expr,
+                        scope_expr: None,
+                        action_filter: None,
                         line: line_no,
                     });
                     section = Section::None;
@@ -156,6 +187,28 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
                     errors.push(parse_error("invalid init assignment", line_no));
                 }
             }
+            Section::Predicates => {
+                if let Some((name, expr)) = split_once(trimmed, ':') {
+                    predicates.push(ParsedNamedExpr {
+                        name: name.trim().to_string(),
+                        expr: expr.trim().to_string(),
+                        line: line_no,
+                    });
+                } else {
+                    errors.push(parse_error("invalid predicate declaration", line_no));
+                }
+            }
+            Section::Scenarios => {
+                if let Some((name, expr)) = split_once(trimmed, ':') {
+                    scenarios.push(ParsedNamedExpr {
+                        name: name.trim().to_string(),
+                        expr: expr.trim().to_string(),
+                        line: line_no,
+                    });
+                } else {
+                    errors.push(parse_error("invalid scenario declaration", line_no));
+                }
+            }
             Section::ActionHeader | Section::ActionPost => {
                 if let Some(action) = current_action.as_mut() {
                     if let Some(rest) = trimmed.strip_prefix("pre:") {
@@ -179,14 +232,17 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             }
             Section::PropertyHeader => {
                 if let Some(property) = properties.last_mut() {
-                    if let Some((kind, expr)) = property_kind_and_expr(trimmed) {
+                    if let Some(expr) = trimmed.strip_prefix("when:") {
+                        property.scope_expr = Some(expr.trim().to_string());
+                    } else if let Some(action_id) = trimmed.strip_prefix("on:") {
+                        property.action_filter = Some(action_id.trim().to_string());
+                    } else if let Some((kind, expr)) = property_kind_and_expr(trimmed) {
                         property.kind = kind;
                         property.expr = expr;
                     } else {
                         errors.push(parse_error("invalid property definition", line_no));
                     }
                 }
-                section = Section::None;
             }
             Section::None => {
                 errors.push(parse_error("unexpected top-level token", line_no));
@@ -206,6 +262,8 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             state_fields,
             init_assignments,
             actions,
+            predicates,
+            scenarios,
             properties,
         })
     } else {
@@ -291,6 +349,8 @@ property P_SAFE:
         assert_eq!(parsed.model_name, "CounterLock");
         assert_eq!(parsed.state_fields.len(), 2);
         assert_eq!(parsed.actions.len(), 1);
+        assert_eq!(parsed.predicates.len(), 0);
+        assert_eq!(parsed.scenarios.len(), 0);
         assert_eq!(parsed.properties.len(), 1);
     }
 
@@ -310,5 +370,44 @@ property P_LIVE: deadlock_freedom
         assert_eq!(parsed.properties[0].name, "P_LIVE");
         assert_eq!(parsed.properties[0].kind, "deadlock_freedom");
         assert!(parsed.properties[0].expr.is_empty());
+    }
+
+    #[test]
+    fn parses_predicates_scenarios_and_transition_property() {
+        let source = r#"
+model PostFlow
+state:
+  visible: bool
+  deleted: bool
+init:
+  visible = true
+  deleted = false
+predicates:
+  deleted_view: visible == false && deleted == true
+scenarios:
+  DeletedPost: deleted == true
+action Delete:
+  pre: visible == true
+  post:
+    visible = false
+    deleted = true
+property P_DELETE_TRANSITION:
+  transition: next.deleted == true && prev.visible == true
+  on: Delete
+  when: prev.visible == true
+"#;
+
+        let parsed = parse_model(source).expect("should parse");
+        assert_eq!(parsed.predicates[0].name, "deleted_view");
+        assert_eq!(parsed.scenarios[0].name, "DeletedPost");
+        assert_eq!(parsed.properties[0].kind, "transition");
+        assert_eq!(
+            parsed.properties[0].action_filter.as_deref(),
+            Some("Delete")
+        );
+        assert_eq!(
+            parsed.properties[0].scope_expr.as_deref(),
+            Some("prev.visible == true")
+        );
     }
 }

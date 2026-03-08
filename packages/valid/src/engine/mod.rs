@@ -106,6 +106,7 @@ pub struct RunPlan {
     pub manifest: RunManifest,
     pub strategy: SearchStrategy,
     pub property_selection: PropertySelection,
+    pub scenario_selection: Option<String>,
     pub search_bounds: SearchBounds,
     pub resource_limits: ResourceLimits,
     pub artifact_policy: ArtifactPolicy,
@@ -127,6 +128,7 @@ impl Default for RunPlan {
             ),
             strategy: SearchStrategy::Bfs,
             property_selection: PropertySelection::ExactlyOne("P_SAFE".to_string()),
+            scenario_selection: None,
             search_bounds: SearchBounds { max_depth: None },
             resource_limits: ResourceLimits {
                 max_states: None,

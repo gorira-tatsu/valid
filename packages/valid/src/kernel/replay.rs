@@ -64,6 +64,8 @@ mod tests {
                     },
                 }],
             }],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![],
         };
 

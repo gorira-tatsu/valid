@@ -115,6 +115,8 @@ struct CommonModelArgs {
     #[arg(long)]
     property: Option<String>,
     #[arg(long)]
+    scenario: Option<String>,
+    #[arg(long)]
     seed: Option<u64>,
     #[arg(long)]
     backend: Option<String>,
@@ -176,6 +178,8 @@ struct TraceArgs {
     format: Option<String>,
     #[arg(long)]
     property: Option<String>,
+    #[arg(long)]
+    scenario: Option<String>,
     #[arg(long)]
     seed: Option<u64>,
     #[arg(long)]
@@ -341,6 +345,7 @@ fn common_to_parsed(args: CommonModelArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        scenario_id: args.scenario,
         ..ParsedArgs::default()
     }
 }
@@ -398,6 +403,7 @@ fn trace_to_parsed(args: TraceArgs) -> ParsedArgs {
         solver_args: args.solver_args,
         format: args.format,
         property_id: args.property,
+        scenario_id: args.scenario,
         ..ParsedArgs::default()
     }
 }
@@ -695,6 +701,9 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
     if let Some(property_id) = &parsed.property_id {
         args.push(format!("--property={property_id}"));
     }
+    if let Some(scenario_id) = &parsed.scenario_id {
+        args.push(format!("--scenario={scenario_id}"));
+    }
     if let Some(seed) = parsed.seed {
         args.push(format!("--seed={seed}"));
     }
@@ -753,7 +762,7 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("check", parsed.progress_json);
     progress.start(None);
@@ -763,6 +772,7 @@ fn cmd_check(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -791,7 +801,7 @@ fn cmd_check(args: Vec<String>) {
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("explain", parsed.progress_json);
     progress.start(None);
@@ -801,6 +811,7 @@ fn cmd_explain(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -1315,7 +1326,7 @@ fn cmd_testgen(args: Vec<String>) {
 fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
+        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
         |arg, options| {
             let _ = (arg, options);
             false
@@ -1334,6 +1345,7 @@ fn cmd_trace(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -1584,7 +1596,7 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("coverage", parsed.progress_json);
     progress.start(None);
@@ -1608,6 +1620,7 @@ fn cmd_coverage(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
@@ -1642,6 +1655,7 @@ struct ParsedArgs {
     format: Option<String>,
     view: Option<String>,
     property_id: Option<String>,
+    scenario_id: Option<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
     runner: Option<String>,
@@ -1692,6 +1706,8 @@ where
             parsed.seed = Some(parse_seed_arg(value, usage));
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--scenario=") {
+            parsed.scenario_id = Some(value.to_string());
         } else if arg == "--write" {
             parsed.write_path = Some(String::new());
         } else if let Some(value) = arg.strip_prefix("--write=") {
@@ -1706,6 +1722,11 @@ where
                 }),
                 usage,
             ));
+        } else if arg == "--scenario" {
+            parsed.scenario_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(
                 iter.next()

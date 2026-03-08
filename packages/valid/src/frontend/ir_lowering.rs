@@ -1,15 +1,21 @@
 use crate::{
     frontend::typecheck::TypedModel,
     ir::{
-        ActionIr, ActionRole, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
-        PropertyKind, SourceSpan, StateField, UpdateIr, Value,
+        ActionIr, ActionRole, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PredicateIr,
+        PropertyIr, PropertyKind, ScenarioIr, SourceSpan, StateField, UpdateIr, Value,
     },
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span},
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
     let parsed = &typed.resolved.parsed;
     let mut errors = Vec::new();
+    let predicate_defs = parsed
+        .predicates
+        .iter()
+        .map(|predicate| (predicate.name.clone(), predicate.expr.clone()))
+        .collect::<BTreeMap<_, _>>();
 
     let state_fields = parsed
         .state_fields
@@ -46,7 +52,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
     let mut actions = Vec::new();
     for action in &parsed.actions {
         let guard = match action.pre.as_deref() {
-            Some(expr) => match lower_expr(expr) {
+            Some(expr) => match lower_expr(expr, &predicate_defs, ExprMode::Current) {
                 Some(expr) => expr,
                 None => {
                     errors.push(lowering_error(
@@ -66,7 +72,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
         for post in &action.posts {
             writes.push(post.field.clone());
             reads.push(post.field.clone());
-            match lower_expr(&post.expr) {
+            match lower_expr(&post.expr, &predicate_defs, ExprMode::Current) {
                 Some(expr) => updates.push(UpdateIr {
                     field: post.field.clone(),
                     value: expr,
@@ -104,26 +110,134 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
         });
     }
 
+    let predicates = parsed
+        .predicates
+        .iter()
+        .filter_map(|predicate| {
+            match lower_expr(&predicate.expr, &predicate_defs, ExprMode::Current) {
+                Some(expr) => Some(PredicateIr {
+                    predicate_id: predicate.name.clone(),
+                    expr,
+                }),
+                None => {
+                    errors.push(lowering_error(
+                        format!("unsupported predicate expression `{}`", predicate.expr),
+                        predicate.line,
+                    ));
+                    None
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let scenarios = parsed
+        .scenarios
+        .iter()
+        .filter_map(|scenario| {
+            match lower_expr(&scenario.expr, &predicate_defs, ExprMode::Current) {
+                Some(expr) => Some(ScenarioIr {
+                    scenario_id: scenario.name.clone(),
+                    expr,
+                }),
+                None => {
+                    errors.push(lowering_error(
+                        format!("unsupported scenario expression `{}`", scenario.expr),
+                        scenario.line,
+                    ));
+                    None
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
     let mut properties = Vec::new();
     for property in &parsed.properties {
         match lower_property_kind(&property.kind) {
             Some(PropertyKind::Invariant)
             | Some(PropertyKind::Reachability)
-            | Some(PropertyKind::Temporal) => match lower_expr(&property.expr) {
-                Some(expr) => properties.push(PropertyIr {
-                    property_id: property.name.clone(),
-                    kind: PropertyKind::parse(&property.kind).unwrap(),
-                    expr,
-                }),
-                None => errors.push(lowering_error(
-                    format!("unsupported property expression `{}`", property.expr),
-                    property.line,
-                )),
-            },
+            | Some(PropertyKind::Cover)
+            | Some(PropertyKind::Temporal) => {
+                match lower_expr(&property.expr, &predicate_defs, ExprMode::Current) {
+                    Some(expr) => {
+                        if let Some(scope_expr) = &property.scope_expr {
+                            if let Some(scope) =
+                                lower_expr(scope_expr, &predicate_defs, ExprMode::Current)
+                            {
+                                properties.push(PropertyIr {
+                                    property_id: property.name.clone(),
+                                    kind: PropertyKind::parse(&property.kind).unwrap(),
+                                    expr,
+                                    scope: Some(scope),
+                                    action_filter: None,
+                                });
+                            } else {
+                                errors.push(lowering_error(
+                                    format!(
+                                        "unsupported property scope expression `{}`",
+                                        property.scope_expr.as_deref().unwrap_or_default()
+                                    ),
+                                    property.line,
+                                ));
+                            }
+                        } else {
+                            properties.push(PropertyIr {
+                                property_id: property.name.clone(),
+                                kind: PropertyKind::parse(&property.kind).unwrap(),
+                                expr,
+                                scope: None,
+                                action_filter: None,
+                            });
+                        }
+                    }
+                    None => errors.push(lowering_error(
+                        format!("unsupported property expression `{}`", property.expr),
+                        property.line,
+                    )),
+                }
+            }
+            Some(PropertyKind::Transition) => {
+                let expr = lower_expr(&property.expr, &predicate_defs, ExprMode::Transition);
+                let scope = property
+                    .scope_expr
+                    .as_deref()
+                    .map(|scope| lower_expr(scope, &predicate_defs, ExprMode::Transition));
+                match (expr, scope) {
+                    (Some(expr), Some(Some(scope))) => properties.push(PropertyIr {
+                        property_id: property.name.clone(),
+                        kind: PropertyKind::Transition,
+                        expr,
+                        scope: Some(scope),
+                        action_filter: property.action_filter.clone(),
+                    }),
+                    (Some(expr), None) => properties.push(PropertyIr {
+                        property_id: property.name.clone(),
+                        kind: PropertyKind::Transition,
+                        expr,
+                        scope: None,
+                        action_filter: property.action_filter.clone(),
+                    }),
+                    (None, _) => errors.push(lowering_error(
+                        format!("unsupported property expression `{}`", property.expr),
+                        property.line,
+                    )),
+                    (_, Some(None)) => errors.push(lowering_error(
+                        format!(
+                            "unsupported property scope expression `{}`",
+                            property.scope_expr.as_deref().unwrap_or_default()
+                        ),
+                        property.line,
+                    )),
+                }
+            }
             Some(PropertyKind::DeadlockFreedom) => properties.push(PropertyIr {
                 property_id: property.name.clone(),
                 kind: PropertyKind::DeadlockFreedom,
                 expr: ExprIr::Literal(Value::Bool(true)),
+                scope: property
+                    .scope_expr
+                    .as_deref()
+                    .and_then(|scope| lower_expr(scope, &predicate_defs, ExprMode::Current)),
+                action_filter: None,
             }),
             None => errors.push(lowering_error(
                 format!("unsupported property kind `{}`", property.kind),
@@ -138,6 +252,8 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
             state_fields,
             init,
             actions,
+            predicates,
+            scenarios,
             properties,
         })
     } else {
@@ -194,24 +310,56 @@ fn lower_property_kind(input: &str) -> Option<PropertyKind> {
     PropertyKind::parse(input)
 }
 
-fn lower_expr(input: &str) -> Option<ExprIr> {
+#[derive(Clone, Copy)]
+enum ExprMode {
+    Current,
+    Transition,
+}
+
+fn lower_expr(
+    input: &str,
+    predicates: &BTreeMap<String, String>,
+    mode: ExprMode,
+) -> Option<ExprIr> {
+    lower_expr_inner(input, predicates, mode, &mut BTreeSet::new())
+}
+
+fn lower_expr_inner(
+    input: &str,
+    predicates: &BTreeMap<String, String>,
+    mode: ExprMode,
+    seen_predicates: &mut BTreeSet<String>,
+) -> Option<ExprIr> {
     let trimmed = strip_wrapping_parens(input.trim());
     if let Some(value) = lower_value(trimmed) {
         return Some(ExprIr::Literal(value));
+    }
+    if let Some(expr) = lower_predicate_ref(trimmed, predicates, mode, seen_predicates) {
+        return Some(expr);
     }
     if let Some([left, right]) = function_args(trimmed, "implies") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Or,
             left: Box::new(ExprIr::Unary {
                 op: crate::ir::UnaryOp::Not,
-                expr: Box::new(lower_expr(left.trim())?),
+                expr: Box::new(lower_expr_inner(
+                    left.trim(),
+                    predicates,
+                    mode,
+                    seen_predicates,
+                )?),
             }),
-            right: Box::new(lower_expr(right.trim())?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some([left, right]) = function_args(trimmed, "iff") {
-        let left_expr = lower_expr(left.trim())?;
-        let right_expr = lower_expr(right.trim())?;
+        let left_expr = lower_expr_inner(left.trim(), predicates, mode, seen_predicates)?;
+        let right_expr = lower_expr_inner(right.trim(), predicates, mode, seen_predicates)?;
         let both = ExprIr::Binary {
             op: BinaryOp::And,
             left: Box::new(left_expr.clone()),
@@ -235,8 +383,8 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
         });
     }
     if let Some([left, right]) = function_args(trimmed, "xor") {
-        let left_expr = lower_expr(left.trim())?;
-        let right_expr = lower_expr(right.trim())?;
+        let left_expr = lower_expr_inner(left.trim(), predicates, mode, seen_predicates)?;
+        let right_expr = lower_expr_inner(right.trim(), predicates, mode, seen_predicates)?;
         let either = ExprIr::Binary {
             op: BinaryOp::Or,
             left: Box::new(left_expr.clone()),
@@ -259,116 +407,286 @@ fn lower_expr(input: &str) -> Option<ExprIr> {
     if let Some([inner]) = function_args(trimmed, "always") {
         return Some(ExprIr::Unary {
             op: crate::ir::UnaryOp::TemporalAlways,
-            expr: Box::new(lower_expr(inner.trim())?),
+            expr: Box::new(lower_expr_inner(
+                inner.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some([inner]) = function_args(trimmed, "eventually") {
         return Some(ExprIr::Unary {
             op: crate::ir::UnaryOp::TemporalEventually,
-            expr: Box::new(lower_expr(inner.trim())?),
+            expr: Box::new(lower_expr_inner(
+                inner.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some([inner]) = function_args(trimmed, "next") {
         return Some(ExprIr::Unary {
             op: crate::ir::UnaryOp::TemporalNext,
-            expr: Box::new(lower_expr(inner.trim())?),
+            expr: Box::new(lower_expr_inner(
+                inner.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some([left, right]) = function_args(trimmed, "until") {
         return Some(ExprIr::Binary {
             op: BinaryOp::TemporalUntil,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some(rest) = trimmed.strip_prefix('!') {
         return Some(ExprIr::Unary {
             op: crate::ir::UnaryOp::Not,
-            expr: Box::new(lower_expr(rest.trim())?),
+            expr: Box::new(lower_expr_inner(
+                rest.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "||") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Or,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "&&") {
         return Some(ExprIr::Binary {
             op: BinaryOp::And,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "!=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::NotEqual,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, ">=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::GreaterThanOrEqual,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "<=") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThanOrEqual,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, ">") {
         return Some(ExprIr::Binary {
             op: BinaryOp::GreaterThan,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "<") {
         return Some(ExprIr::Binary {
             op: BinaryOp::LessThan,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "==") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Equal,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "-") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Sub,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "%") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Mod,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
     if let Some((left, right)) = split_top_level(trimmed, "+") {
         return Some(ExprIr::Binary {
             op: BinaryOp::Add,
-            left: Box::new(lower_expr(left.trim())?),
-            right: Box::new(lower_expr(right.trim())?),
+            left: Box::new(lower_expr_inner(
+                left.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
+            right: Box::new(lower_expr_inner(
+                right.trim(),
+                predicates,
+                mode,
+                seen_predicates,
+            )?),
         });
     }
-    if trimmed
+    if let Some(field_ref) = lower_field_ref(trimmed, mode) {
+        return Some(field_ref);
+    }
+    None
+}
+
+fn lower_predicate_ref(
+    input: &str,
+    predicates: &BTreeMap<String, String>,
+    mode: ExprMode,
+    seen_predicates: &mut BTreeSet<String>,
+) -> Option<ExprIr> {
+    let expr = predicates.get(input)?;
+    if !seen_predicates.insert(input.to_string()) {
+        return None;
+    }
+    let lowered = lower_expr_inner(expr, predicates, mode, seen_predicates);
+    seen_predicates.remove(input);
+    lowered
+}
+
+fn lower_field_ref(input: &str, mode: ExprMode) -> Option<ExprIr> {
+    if input
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
     {
-        return Some(ExprIr::FieldRef(trimmed.to_string()));
+        return Some(ExprIr::FieldRef(input.to_string()));
+    }
+    if matches!(mode, ExprMode::Transition) {
+        if let Some(field) = input.strip_prefix("prev.") {
+            return Some(ExprIr::FieldRef(format!("prev_{}", field.trim())));
+        }
+        if let Some(field) = input.strip_prefix("next.") {
+            return Some(ExprIr::FieldRef(format!("next_{}", field.trim())));
+        }
     }
     None
 }

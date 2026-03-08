@@ -162,6 +162,8 @@ The current `PropertyKind` surface contains:
 - `Invariant`
 - `Reachability`
 - `DeadlockFreedom`
+- `Cover`
+- `Transition`
 
 ```rust
 properties {
@@ -176,6 +178,49 @@ properties {
     deadlock_freedom P_NO_DEADLOCK;
 }
 ```
+
+```rust
+properties {
+    cover C_DELETED_VIEW |state| state.deleted == true;
+    transition P_DELETE_POST on Delete |prev, next|
+        prev.visible == true && next.deleted == true;
+}
+```
+
+`Transition` properties support:
+
+- `prev.<field>`
+- `next.<field>`
+- `on: <ActionId>`
+- optional `when: <expr>` scope
+
+`Cover` checks whether a state predicate is reachable in the explored state
+space. It is reported as an explicit-first property today.
+
+### Predicates
+
+Use `predicates:` to name repeated boolean expressions.
+
+```text
+predicates:
+  valid_post_input: title_len >= 1 && title_len <= 100
+```
+
+Predicates are pure expression aliases. They are non-recursive and expand into
+the current expression IR.
+
+### Scenarios
+
+Use `scenarios:` to define named initial-state restrictions for focused
+verification.
+
+```text
+scenarios:
+  DeletedPost: deleted == true
+```
+
+`check`, `explain`, `trace`, and `coverage` can select a scenario and explore
+only the reachable states that satisfy it.
 
 Properties are semantic constraints over reachable states, not Rust type-level
 claims.

@@ -67,6 +67,7 @@ pub struct SolverRunPlan {
     pub run_id: String,
     pub backend: BackendKind,
     pub target_property_ids: Vec<String>,
+    pub scenario_selection: Option<String>,
     pub horizon: Option<u32>,
     pub encoded_model_hash: String,
     pub strategy: SearchStrategy,
@@ -281,6 +282,7 @@ impl SolverAdapter for ExplicitAdapter {
             run_id: run_plan.manifest.run_id.clone(),
             backend: BackendKind::Explicit,
             target_property_ids,
+            scenario_selection: run_plan.scenario_selection.clone(),
             horizon: run_plan.search_bounds.max_depth.map(|value| value as u32),
             encoded_model_hash: format!("encoded:{}", run_plan.manifest.source_hash),
             strategy: run_plan.strategy,
@@ -296,6 +298,7 @@ impl SolverAdapter for ExplicitAdapter {
             run_plan.property_selection =
                 crate::engine::PropertySelection::ExactlyOne(property_id.clone());
         }
+        run_plan.scenario_selection = plan.scenario_selection.clone();
         run_plan.strategy = plan.strategy;
         run_plan.search_bounds.max_depth = plan.horizon.map(|value| value as usize);
         run_plan.resource_limits = plan.resource_limits.clone();
@@ -369,6 +372,7 @@ impl SolverAdapter for MockBmcAdapter {
             run_id: format!("{}-bmc", run_plan.manifest.run_id),
             backend: BackendKind::MockBmc,
             target_property_ids,
+            scenario_selection: run_plan.scenario_selection.clone(),
             horizon: run_plan
                 .search_bounds
                 .max_depth
@@ -461,6 +465,7 @@ impl SolverAdapter for Cvc5Adapter {
             run_id: format!("{}-cvc5", run_plan.manifest.run_id),
             backend: BackendKind::SmtCvc5,
             target_property_ids,
+            scenario_selection: run_plan.scenario_selection.clone(),
             horizon: run_plan
                 .search_bounds
                 .max_depth
@@ -569,6 +574,7 @@ impl SolverAdapter for VarisatAdapter {
             run_id: format!("{}-varisat", run_plan.manifest.run_id),
             backend: BackendKind::SatVarisat,
             target_property_ids,
+            scenario_selection: run_plan.scenario_selection.clone(),
             horizon: run_plan
                 .search_bounds
                 .max_depth
@@ -671,6 +677,7 @@ impl SolverAdapter for CommandSolverAdapter {
             run_id: format!("{}-cmd", run_plan.manifest.run_id),
             backend: BackendKind::MockBmc,
             target_property_ids,
+            scenario_selection: run_plan.scenario_selection.clone(),
             horizon: run_plan.search_bounds.max_depth.map(|value| value as u32),
             encoded_model_hash: format!("cmd:{}", run_plan.manifest.source_hash),
             strategy: run_plan.strategy,
@@ -832,6 +839,8 @@ fn normalize_protocol_result(
                 property_kind: property_kind.clone(),
                 status: RunStatus::Pass,
                 assurance_level,
+                scenario_id: run_plan.scenario_selection.clone(),
+                vacuous: false,
                 reason_code: Some(
                     protocol
                         .reason_code
@@ -878,6 +887,8 @@ fn normalize_protocol_result(
                     property_kind: property_kind.clone(),
                     status: RunStatus::Fail,
                     assurance_level,
+                    scenario_id: run_plan.scenario_selection.clone(),
+                    vacuous: false,
                     reason_code: Some(
                         protocol
                             .reason_code
@@ -906,6 +917,8 @@ fn normalize_protocol_result(
                 property_kind,
                 status: RunStatus::Unknown,
                 assurance_level,
+                scenario_id: run_plan.scenario_selection.clone(),
+                vacuous: false,
                 reason_code: Some(
                     protocol
                         .reason_code

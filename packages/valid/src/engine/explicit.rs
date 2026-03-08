@@ -36,6 +36,8 @@ pub struct PropertyResult {
     pub property_kind: PropertyKind,
     pub status: RunStatus,
     pub assurance_level: AssuranceLevel,
+    pub scenario_id: Option<String>,
+    pub vacuous: bool,
     pub reason_code: Option<String>,
     pub unknown_reason: Option<UnknownReason>,
     pub terminal_state_id: Option<String>,
@@ -82,6 +84,7 @@ pub fn check_explicit(model: &ModelIr, plan: &RunPlan) -> CheckOutcome {
 fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Diagnostic> {
     let start = Instant::now();
     let property = selected_property(model, plan)?;
+    let scenario = selected_scenario(model, plan)?;
     let initial = match build_initial_state(model) {
         Ok(state) => state,
         Err(_) => {
@@ -110,6 +113,8 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
     let mut edges = vec![Vec::new()];
     let mut explored_transitions = 0usize;
     let mut bounded_frontier_cut = false;
+    let mut matched_states = 0usize;
+    let mut matched_transitions = 0usize;
 
     while let Some(node_index) = pop_next(&mut frontier, plan.strategy) {
         if resource_limits_hit(&plan.resource_limits, visited.len(), start)
@@ -125,8 +130,17 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         }
 
         let node = nodes[node_index].clone();
-        if property_triggered(model, &node.state, property)? {
-            return Ok(fail_result(model, plan, property, &nodes, node_index));
+        let state_matches = scoped_state_matches(model, &node.state, property, scenario)?;
+        if state_matches {
+            matched_states += 1;
+            if property_triggered(model, &node.state, property)? {
+                return Ok(match property.kind {
+                    PropertyKind::Cover => {
+                        cover_hit_result(model, plan, property, &nodes, node_index)
+                    }
+                    _ => fail_result(model, plan, property, &nodes, node_index, false),
+                });
+            }
         }
 
         let mut enabled = 0usize;
@@ -135,6 +149,38 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             match apply_action_transition(model, &node.state, action)? {
                 Some(next_state) => {
                     enabled += 1;
+                    if matches!(property.kind, PropertyKind::Transition)
+                        && transition_in_scope(
+                            model,
+                            property,
+                            scenario,
+                            &node.state,
+                            &next_state,
+                            &action.action_id,
+                        )?
+                    {
+                        matched_transitions += 1;
+                        if !transition_property_value(model, property, &node.state, &next_state)? {
+                            let mut failing_nodes = nodes.clone();
+                            let child_index = failing_nodes.len();
+                            failing_nodes.push(NodeRecord {
+                                state: next_state.clone(),
+                                depth: node.depth + 1,
+                                parent: Some(node_index),
+                                via_action_index: Some(action_index),
+                                via_action: Some(action.action_id.clone()),
+                                note: None,
+                            });
+                            return Ok(fail_result(
+                                model,
+                                plan,
+                                property,
+                                &failing_nodes,
+                                child_index,
+                                false,
+                            ));
+                        }
+                    }
                     if hit_depth_bound(&plan.search_bounds, node.depth) {
                         bounded_frontier_cut = true;
                         continue;
@@ -172,8 +218,10 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             }
         }
 
-        if matches!(property.kind, PropertyKind::DeadlockFreedom) && enabled == 0 {
-            return Ok(deadlock_result(model, plan, property, &nodes, node_index));
+        if matches!(property.kind, PropertyKind::DeadlockFreedom) && enabled == 0 && state_matches {
+            return Ok(deadlock_result(
+                model, plan, property, &nodes, node_index, false,
+            ));
         }
     }
 
@@ -195,6 +243,17 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
         );
     }
 
+    if matches!(property.kind, PropertyKind::Cover) {
+        return Ok(cover_miss_result(
+            plan,
+            property,
+            explored_transitions,
+            visited.len(),
+            assurance,
+            matched_states == 0 && (plan.scenario_selection.is_some() || property.scope.is_some()),
+        ));
+    }
+
     Ok(ExplicitRunResult {
         manifest: plan.manifest.clone(),
         status: RunStatus::Pass,
@@ -204,11 +263,29 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             property_kind: property.kind,
             status: RunStatus::Pass,
             assurance_level: assurance,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous: match property.kind {
+                PropertyKind::Transition => matched_transitions == 0,
+                _ => {
+                    matched_states == 0
+                        && (plan.scenario_selection.is_some() || property.scope.is_some())
+                }
+            },
             reason_code: Some(pass_reason_code(property.kind, assurance).to_string()),
             unknown_reason: None,
             terminal_state_id: None,
             evidence_id: None,
-            summary: pass_summary(property, assurance),
+            summary: pass_summary(
+                property,
+                assurance,
+                match property.kind {
+                    PropertyKind::Transition => matched_transitions == 0,
+                    _ => {
+                        matched_states == 0
+                            && (plan.scenario_selection.is_some() || property.scope.is_some())
+                    }
+                },
+            ),
         },
         explored_states: visited.len(),
         explored_transitions,
@@ -239,6 +316,98 @@ fn selected_property<'a>(model: &'a ModelIr, plan: &RunPlan) -> Result<&'a Prope
         })
 }
 
+fn selected_scenario<'a>(
+    model: &'a ModelIr,
+    plan: &RunPlan,
+) -> Result<Option<&'a crate::ir::ScenarioIr>, Diagnostic> {
+    match &plan.scenario_selection {
+        Some(id) => model
+            .scenarios
+            .iter()
+            .find(|item| item.scenario_id == *id)
+            .map(Some)
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    ErrorCode::SearchError,
+                    DiagnosticSegment::EngineSearch,
+                    format!("unknown scenario `{id}`"),
+                )
+                .with_help("select one scenario id emitted by inspect")
+            }),
+        None => Ok(None),
+    }
+}
+
+fn scoped_state_matches(
+    model: &ModelIr,
+    state: &MachineState,
+    property: &PropertyIr,
+    scenario: Option<&crate::ir::ScenarioIr>,
+) -> Result<bool, Diagnostic> {
+    let scenario_ok = match scenario {
+        Some(scenario) => eval_bool_expr(model, state, &scenario.expr)?,
+        None => true,
+    };
+    if !scenario_ok {
+        return Ok(false);
+    }
+    match &property.scope {
+        Some(scope) => eval_bool_expr(model, state, scope),
+        None => Ok(true),
+    }
+}
+
+fn transition_in_scope(
+    model: &ModelIr,
+    property: &PropertyIr,
+    scenario: Option<&crate::ir::ScenarioIr>,
+    prev: &MachineState,
+    next: &MachineState,
+    action_id: &str,
+) -> Result<bool, Diagnostic> {
+    if property.action_filter.as_deref() != Some(action_id) {
+        return Ok(false);
+    }
+    let scenario_ok = match scenario {
+        Some(scenario) => eval_bool_expr(model, prev, &scenario.expr)?,
+        None => true,
+    };
+    if !scenario_ok {
+        return Ok(false);
+    }
+    match &property.scope {
+        Some(scope) => transition_property_value_with_expr(model, scope, prev, next),
+        None => Ok(true),
+    }
+}
+
+fn transition_property_value(
+    model: &ModelIr,
+    property: &PropertyIr,
+    prev: &MachineState,
+    next: &MachineState,
+) -> Result<bool, Diagnostic> {
+    transition_property_value_with_expr(model, &property.expr, prev, next)
+}
+
+fn transition_property_value_with_expr(
+    model: &ModelIr,
+    expr: &crate::ir::ExprIr,
+    prev: &MachineState,
+    next: &MachineState,
+) -> Result<bool, Diagnostic> {
+    let transition_model = transition_eval_model(model);
+    let transition_state = transition_eval_state(prev, next);
+    match eval_expr(&transition_model, &transition_state, expr)? {
+        Value::Bool(value) => Ok(value),
+        _ => Err(Diagnostic::new(
+            ErrorCode::SearchError,
+            DiagnosticSegment::EngineSearch,
+            "transition property did not evaluate to bool",
+        )),
+    }
+}
+
 fn property_triggered(
     model: &ModelIr,
     state: &MachineState,
@@ -247,7 +416,10 @@ fn property_triggered(
     match property.kind {
         PropertyKind::Invariant => Ok(!property_value(model, state, property)?),
         PropertyKind::Reachability => Ok(property_value(model, state, property)?),
-        PropertyKind::DeadlockFreedom | PropertyKind::Temporal => Ok(false),
+        PropertyKind::Cover => Ok(property_value(model, state, property)?),
+        PropertyKind::DeadlockFreedom | PropertyKind::Temporal | PropertyKind::Transition => {
+            Ok(false)
+        }
     }
 }
 
@@ -270,6 +442,48 @@ fn property_value(
     }
 }
 
+fn eval_bool_expr(
+    model: &ModelIr,
+    state: &MachineState,
+    expr: &crate::ir::ExprIr,
+) -> Result<bool, Diagnostic> {
+    match eval_expr(model, state, expr)? {
+        Value::Bool(value) => Ok(value),
+        _ => Err(Diagnostic::new(
+            ErrorCode::EvalError,
+            DiagnosticSegment::EngineSearch,
+            "scope/scenario expression did not evaluate to bool",
+        )),
+    }
+}
+
+fn transition_eval_model(model: &ModelIr) -> ModelIr {
+    let mut state_fields = Vec::with_capacity(model.state_fields.len() * 2);
+    for prefix in ["prev", "next"] {
+        for field in &model.state_fields {
+            let mut cloned = field.clone();
+            cloned.id = format!("{prefix}_{}", field.id);
+            cloned.name = format!("{prefix}.{}", field.name);
+            state_fields.push(cloned);
+        }
+    }
+    ModelIr {
+        model_id: format!("{}::transition_eval", model.model_id),
+        state_fields,
+        init: Vec::new(),
+        actions: Vec::new(),
+        predicates: Vec::new(),
+        scenarios: Vec::new(),
+        properties: Vec::new(),
+    }
+}
+
+fn transition_eval_state(prev: &MachineState, next: &MachineState) -> MachineState {
+    let mut values = prev.values.clone();
+    values.extend(next.values.clone());
+    MachineState::new(values)
+}
+
 fn temporal_result(
     model: &ModelIr,
     plan: &RunPlan,
@@ -290,11 +504,13 @@ fn temporal_result(
                 property_kind: property.kind,
                 status: RunStatus::Pass,
                 assurance_level: assurance,
+                scenario_id: plan.scenario_selection.clone(),
+                vacuous: false,
                 reason_code: Some(pass_reason_code(property.kind, assurance).to_string()),
                 unknown_reason: None,
                 terminal_state_id: None,
                 evidence_id: None,
-                summary: pass_summary(property, assurance),
+                summary: pass_summary(property, assurance, false),
             },
             explored_states: nodes.len(),
             explored_transitions,
@@ -303,7 +519,14 @@ fn temporal_result(
     }
 
     let failing_index = temporal_failure_index(model, nodes, edges, &property.expr, 0)?;
-    Ok(fail_result(model, plan, property, nodes, failing_index))
+    Ok(fail_result(
+        model,
+        plan,
+        property,
+        nodes,
+        failing_index,
+        false,
+    ))
 }
 
 fn temporal_truth_set(
@@ -497,6 +720,7 @@ fn fail_result(
     property: &PropertyIr,
     nodes: &[NodeRecord],
     failing_index: usize,
+    vacuous: bool,
 ) -> ExplicitRunResult {
     let assurance = if plan.search_bounds.max_depth.is_some() {
         AssuranceLevel::Bounded
@@ -513,6 +737,8 @@ fn fail_result(
             property_kind: property.kind,
             status: RunStatus::Fail,
             assurance_level: assurance,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous,
             reason_code: Some(fail_reason_code(property.kind).to_string()),
             unknown_reason: None,
             terminal_state_id: Some(format!("s-{failing_index:06}")),
@@ -541,6 +767,7 @@ fn deadlock_result(
     property: &PropertyIr,
     nodes: &[NodeRecord],
     deadlock_index: usize,
+    vacuous: bool,
 ) -> ExplicitRunResult {
     let assurance = if plan.search_bounds.max_depth.is_some() {
         AssuranceLevel::Bounded
@@ -557,6 +784,8 @@ fn deadlock_result(
             property_kind: property.kind,
             status: RunStatus::Fail,
             assurance_level: assurance,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous,
             reason_code: Some("DEADLOCK_REACHED".to_string()),
             unknown_reason: None,
             terminal_state_id: Some(format!("s-{deadlock_index:06}")),
@@ -603,6 +832,8 @@ fn unknown_result(
                 .unwrap_or(PropertyKind::Invariant),
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous: false,
             reason_code: None,
             unknown_reason: Some(reason),
             terminal_state_id: Some(format!("s-{last_index:06}")),
@@ -628,6 +859,87 @@ fn unknown_result(
             Some(format!("search stopped: {}", unknown_reason_label(reason))),
             AssuranceLevel::Incomplete,
         )),
+    }
+}
+
+fn cover_hit_result(
+    model: &ModelIr,
+    plan: &RunPlan,
+    property: &PropertyIr,
+    nodes: &[NodeRecord],
+    hit_index: usize,
+) -> ExplicitRunResult {
+    let assurance = if plan.search_bounds.max_depth.is_some() {
+        AssuranceLevel::Bounded
+    } else {
+        AssuranceLevel::Complete
+    };
+    let evidence_id = format!("ev-{}", plan.manifest.run_id);
+    ExplicitRunResult {
+        manifest: plan.manifest.clone(),
+        status: RunStatus::Pass,
+        assurance_level: assurance,
+        property_result: PropertyResult {
+            property_id: property.property_id.clone(),
+            property_kind: property.kind,
+            status: RunStatus::Pass,
+            assurance_level: assurance,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous: false,
+            reason_code: Some("COVER_REACHED".to_string()),
+            unknown_reason: None,
+            terminal_state_id: Some(format!("s-{hit_index:06}")),
+            evidence_id: Some(evidence_id.clone()),
+            summary: format!("cover target `{}` was reached", property.property_id),
+        },
+        explored_states: nodes.len(),
+        explored_transitions: nodes.len().saturating_sub(1),
+        trace: Some(build_trace(
+            model,
+            &evidence_id,
+            &plan.manifest.run_id,
+            &property.property_id,
+            EvidenceKind::Witness,
+            nodes,
+            hit_index,
+            Some("cover target reached".to_string()),
+            assurance,
+        )),
+    }
+}
+
+fn cover_miss_result(
+    plan: &RunPlan,
+    property: &PropertyIr,
+    explored_transitions: usize,
+    explored_states: usize,
+    assurance: AssuranceLevel,
+    vacuous: bool,
+) -> ExplicitRunResult {
+    ExplicitRunResult {
+        manifest: plan.manifest.clone(),
+        status: RunStatus::Fail,
+        assurance_level: assurance,
+        property_result: PropertyResult {
+            property_id: property.property_id.clone(),
+            property_kind: property.kind,
+            status: RunStatus::Fail,
+            assurance_level: assurance,
+            scenario_id: plan.scenario_selection.clone(),
+            vacuous,
+            reason_code: Some("COVER_UNREACHED".to_string()),
+            unknown_reason: None,
+            terminal_state_id: None,
+            evidence_id: None,
+            summary: if vacuous {
+                "cover target was never evaluated because no scoped state was reachable".to_string()
+            } else {
+                "cover target was not reached in the explored state space".to_string()
+            },
+        },
+        explored_states,
+        explored_transitions,
+        trace: None,
     }
 }
 
@@ -724,6 +1036,8 @@ fn property_evidence_kind(kind: PropertyKind) -> EvidenceKind {
     match kind {
         PropertyKind::Invariant => EvidenceKind::Counterexample,
         PropertyKind::Reachability => EvidenceKind::Witness,
+        PropertyKind::Cover => EvidenceKind::Witness,
+        PropertyKind::Transition => EvidenceKind::Counterexample,
         PropertyKind::DeadlockFreedom => EvidenceKind::Counterexample,
         PropertyKind::Temporal => EvidenceKind::Counterexample,
     }
@@ -733,6 +1047,8 @@ fn fail_reason_code(kind: PropertyKind) -> &'static str {
     match kind {
         PropertyKind::Invariant => "PROPERTY_FAILED",
         PropertyKind::Reachability => "TARGET_REACHED",
+        PropertyKind::Cover => "COVER_UNREACHED",
+        PropertyKind::Transition => "TRANSITION_PROPERTY_FAILED",
         PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED",
         PropertyKind::Temporal => "TEMPORAL_PROPERTY_FAILED",
     }
@@ -744,6 +1060,9 @@ fn pass_reason_code(kind: PropertyKind, assurance: AssuranceLevel) -> &'static s
         (PropertyKind::Invariant, _) => "COMPLETE_SPACE_EXHAUSTED",
         (PropertyKind::Reachability, AssuranceLevel::Bounded) => "TARGET_NOT_REACHED_WITHIN_BOUND",
         (PropertyKind::Reachability, _) => "TARGET_UNREACHABLE",
+        (PropertyKind::Cover, _) => "COVER_REACHED",
+        (PropertyKind::Transition, AssuranceLevel::Bounded) => "BOUNDED_SPACE_EXHAUSTED",
+        (PropertyKind::Transition, _) => "COMPLETE_SPACE_EXHAUSTED",
         (PropertyKind::DeadlockFreedom, AssuranceLevel::Bounded) => "BOUNDED_SPACE_EXHAUSTED",
         (PropertyKind::DeadlockFreedom, _) => "COMPLETE_SPACE_EXHAUSTED",
         (PropertyKind::Temporal, AssuranceLevel::Bounded) => "TEMPORAL_BOUND_EXHAUSTED",
@@ -761,6 +1080,11 @@ fn fail_summary(property: &PropertyIr) -> String {
             "reachability target for `{}` was reached during explicit exploration",
             property.property_id
         ),
+        PropertyKind::Cover => format!("cover target `{}` was not reached", property.property_id),
+        PropertyKind::Transition => format!(
+            "transition property `{}` failed during explicit exploration",
+            property.property_id
+        ),
         PropertyKind::DeadlockFreedom => format!(
             "deadlock found for `{}` during explicit exploration",
             property.property_id
@@ -772,7 +1096,11 @@ fn fail_summary(property: &PropertyIr) -> String {
     }
 }
 
-fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
+fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel, vacuous: bool) -> String {
+    if vacuous {
+        return "property held vacuously because no scoped state/transition was reached"
+            .to_string();
+    }
     match (property.kind, assurance) {
         (PropertyKind::Invariant, AssuranceLevel::Bounded) => {
             "no violating state found within the configured depth bound".to_string()
@@ -785,6 +1113,13 @@ fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
         }
         (PropertyKind::Reachability, _) => {
             "reachability target was not found in the reachable state space".to_string()
+        }
+        (PropertyKind::Cover, _) => "cover target was reached".to_string(),
+        (PropertyKind::Transition, AssuranceLevel::Bounded) => {
+            "no violating scoped transition found within the configured depth bound".to_string()
+        }
+        (PropertyKind::Transition, _) => {
+            "no violating scoped transition found in the reachable state space".to_string()
         }
         (PropertyKind::DeadlockFreedom, AssuranceLevel::Bounded) => {
             "no deadlock state found within the configured depth bound".to_string()
@@ -805,6 +1140,8 @@ fn fail_note(kind: PropertyKind) -> &'static str {
     match kind {
         PropertyKind::Invariant => "property violated",
         PropertyKind::Reachability => "reachability target reached",
+        PropertyKind::Cover => "cover target unreached",
+        PropertyKind::Transition => "transition property violated",
         PropertyKind::DeadlockFreedom => "deadlock reached",
         PropertyKind::Temporal => "temporal property violated",
     }
@@ -874,6 +1211,8 @@ mod tests {
                     }],
                 },
             ],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
@@ -882,6 +1221,8 @@ mod tests {
                     left: Box::new(ExprIr::FieldRef("x".to_string())),
                     right: Box::new(ExprIr::Literal(Value::UInt(1))),
                 },
+                scope: None,
+                action_filter: None,
             }],
         }
     }
@@ -903,6 +1244,8 @@ mod tests {
                 left: Box::new(ExprIr::FieldRef("x".to_string())),
                 right: Box::new(ExprIr::Literal(Value::UInt(target))),
             },
+            scope: None,
+            action_filter: None,
         }];
         model
     }
@@ -1062,6 +1405,8 @@ mod tests {
             property_id: "P_LIVE".to_string(),
             kind: PropertyKind::DeadlockFreedom,
             expr: ExprIr::Literal(Value::Bool(true)),
+            scope: None,
+            action_filter: None,
         }];
         let outcome = check_explicit(
             &model,
@@ -1091,6 +1436,8 @@ mod tests {
             property_id: "P_LIVE".to_string(),
             kind: PropertyKind::DeadlockFreedom,
             expr: ExprIr::Literal(Value::Bool(true)),
+            scope: None,
+            action_filter: None,
         }];
         let outcome = check_explicit(
             &model,
@@ -1121,10 +1468,14 @@ mod tests {
                 span: SourceSpan { line: 1, column: 1 },
             }],
             actions: vec![],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
                 expr: ExprIr::Literal(Value::Bool(true)),
+                scope: None,
+                action_filter: None,
             }],
         };
         let outcome = check_explicit(&model, &default_plan());
@@ -1195,6 +1546,8 @@ mod tests {
                     }],
                 },
             ],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![PropertyIr {
                 property_id: "P_EVENTUAL".to_string(),
                 kind: PropertyKind::Temporal,
@@ -1206,6 +1559,8 @@ mod tests {
                         right: Box::new(ExprIr::Literal(Value::UInt(1))),
                     }),
                 },
+                scope: None,
+                action_filter: None,
             }],
         };
         let outcome = check_explicit(

@@ -116,6 +116,8 @@ Use these first:
   - `invariant`
   - `reachability`
   - `deadlock_freedom`
+  - `cover`
+  - action-scoped `transition`
 
 Useful expressions:
 
@@ -133,6 +135,7 @@ Useful expressions:
 - `String`, `str_contains`, and `regex_match` are explicit-first today
 - `reachability` and `deadlock_freedom` are supported over the finite state
   space
+- `cover`, `transition`, and scenario-scoped checks are explicit-first today
 - a model can be `explicit_ready` but not `solver_ready`
 - `readiness` / `lint` is the authority for migration hints and degraded
   capability reasons
@@ -169,6 +172,10 @@ For MCP-driven authoring:
 - Add `reads` and `writes` metadata to every action variant when possible.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
   generated vectors do not overstate business-flow coverage.
+- Prefer `scenarios:` over large fixture-only transition ladders when you need
+  a focused deleted/error/recovered state slice.
+- Extract repeated guard/property conditions into `predicates:` so drift stays
+  local and inspect output stays readable.
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.

@@ -579,6 +579,15 @@ fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
     } else {
         out.push_str(",\"evidence_id\":null");
     }
+    if let Some(scenario_id) = &result.property_result.scenario_id {
+        out.push_str(&format!(
+            ",\"scenario_id\":\"{}\"",
+            escape_json(scenario_id)
+        ));
+    } else {
+        out.push_str(",\"scenario_id\":null");
+    }
+    out.push_str(&format!(",\"vacuous\":{}", result.property_result.vacuous));
     out.push_str(&format!(
         ",\"summary\":\"{}\"",
         escape_json(&result.property_result.summary)
@@ -939,6 +948,8 @@ mod tests {
                 property_kind: crate::ir::PropertyKind::Invariant,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
+                scenario_id: None,
+                vacuous: false,
                 reason_code: Some("PROPERTY_FAILED".to_string()),
                 unknown_reason: None,
                 terminal_state_id: Some("s-000001".to_string()),
@@ -1000,6 +1011,8 @@ mod tests {
                 property_kind: crate::ir::PropertyKind::Invariant,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
+                scenario_id: None,
+                vacuous: false,
                 reason_code: Some("PROPERTY_FAILED".to_string()),
                 unknown_reason: None,
                 terminal_state_id: Some("s-000001".to_string()),

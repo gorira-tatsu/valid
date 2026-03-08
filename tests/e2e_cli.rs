@@ -47,6 +47,7 @@ fn safe_counter_passes_via_api() {
         source_name: "safe_counter.valid".to_string(),
         source,
         property_id: None,
+        scenario_id: None,
         seed: None,
         backend: None,
         solver_executable: None,
@@ -69,6 +70,7 @@ fn failing_counter_explains_and_generates_vectors() {
         source_name: "failing_counter.valid".to_string(),
         source: source.clone(),
         property_id: None,
+        scenario_id: None,
         seed: None,
         backend: None,
         solver_executable: None,
@@ -87,6 +89,7 @@ fn failing_counter_explains_and_generates_vectors() {
         source_name: "failing_counter.valid".to_string(),
         source: source.clone(),
         property_id: None,
+        scenario_id: None,
         seed: Some(61),
         backend: None,
         solver_executable: None,
@@ -151,6 +154,34 @@ fn inspect_includes_metadata_details() {
     assert!(json.contains("\"action_details\""));
     assert!(json.contains("\"path_tags\""));
     assert!(json.contains("\"property_details\""));
+}
+
+#[test]
+fn cli_check_accepts_scenario_selection() {
+    let temp_dir = unique_temp_dir("valid-scenario");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let model_path = temp_dir.join("scenario.valid");
+    fs::write(
+        &model_path,
+        "model PostFlow\nstate:\n  visible: bool\n  deleted: bool\ninit:\n  visible = true\n  deleted = false\nscenarios:\n  DeletedPost: deleted == true\naction Delete:\n  pre: visible == true\n  post:\n    visible = false\n    deleted = true\nproperty P_VISIBLE_ONLY_AFTER_DELETE:\n  invariant: visible == false\n",
+    )
+    .expect("fixture should be written");
+
+    let output = Command::new(binary_path())
+        .arg("check")
+        .arg(&model_path)
+        .arg("--property=P_VISIBLE_ONLY_AFTER_DELETE")
+        .arg("--scenario=DeletedPost")
+        .arg("--json")
+        .output()
+        .expect("scenario check should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"scenario_id\":\"DeletedPost\""));
+    assert!(stdout.contains("\"vacuous\":false"));
+
+    let _ = fs::remove_file(&model_path);
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
@@ -264,6 +295,7 @@ fn parse_and_type_errors_are_visible_via_api() {
         source_name: "type_error.valid".to_string(),
         source: read_fixture("tests/fixtures/models/type_error.valid"),
         property_id: None,
+        scenario_id: None,
         seed: None,
         backend: None,
         solver_executable: None,

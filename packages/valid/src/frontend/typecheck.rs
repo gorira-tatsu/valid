@@ -67,10 +67,16 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
 
     for property in &resolved.parsed.properties {
         match property.kind.as_str() {
-            "invariant" | "reachability" | "temporal" => {
+            "invariant" | "reachability" | "temporal" | "cover" | "transition" => {
                 if property.expr.is_empty() {
                     errors.push(type_error(
                         format!("{} property requires a boolean expression", property.kind),
+                        property.line,
+                    ));
+                }
+                if property.kind == "transition" && property.action_filter.is_none() {
+                    errors.push(type_error(
+                        "transition property requires an `on:` action filter".to_string(),
                         property.line,
                     ));
                 }
@@ -87,6 +93,20 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
                 format!("unsupported property kind `{}`", property.kind),
                 property.line,
             )),
+        }
+
+        if matches!(
+            property.kind.as_str(),
+            "deadlock_freedom" | "temporal" | "cover"
+        ) && property.action_filter.is_some()
+        {
+            errors.push(type_error(
+                format!(
+                    "{} property does not accept an `on:` action filter",
+                    property.kind
+                ),
+                property.line,
+            ));
         }
     }
 

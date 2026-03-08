@@ -8,6 +8,7 @@
     "source_name": { "type": "string", "minLength": 1 },
     "source": { "type": "string", "minLength": 1 },
     "property_id": { "type": ["string", "null"] },
+    "scenario_id": { "type": ["string", "null"] },
     "backend": {
       "type": ["string", "null"],
       "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command", null]

@@ -92,13 +92,15 @@ pub fn build_vector_from_actions(
             .iter()
             .find(|candidate| candidate.property_id == target_property_id)?;
         match property.kind {
-            PropertyKind::Invariant | PropertyKind::Reachability => {
+            PropertyKind::Invariant | PropertyKind::Reachability | PropertyKind::Cover => {
                 match eval_expr(model, &state, &property.expr).ok() {
                     Some(Value::Bool(value)) => Some(value),
                     _ => None,
                 }
             }
-            PropertyKind::DeadlockFreedom | PropertyKind::Temporal => None,
+            PropertyKind::DeadlockFreedom | PropertyKind::Temporal | PropertyKind::Transition => {
+                None
+            }
         }
     });
 

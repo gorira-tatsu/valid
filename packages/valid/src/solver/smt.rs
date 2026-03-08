@@ -1468,6 +1468,8 @@ mod tests {
                     ],
                 },
             ],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![PropertyIr {
                 property_id: "P_SAFE".to_string(),
                 kind: PropertyKind::Invariant,
@@ -1484,6 +1486,8 @@ mod tests {
                         right: Box::new(pair_alpha_enterprise),
                     }),
                 },
+                scope: None,
+                action_filter: None,
             }],
         }
     }

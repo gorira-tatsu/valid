@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::frontend::parser::{ParsedAssignment, ParsedModel};
+use crate::frontend::parser::{ParsedAssignment, ParsedModel, ParsedNamedExpr};
 use crate::support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +12,8 @@ pub fn resolve_model(parsed: ParsedModel) -> Result<ResolvedModel, Vec<Diagnosti
     let mut errors = Vec::new();
     let mut fields = HashSet::new();
     let mut actions = HashSet::new();
+    let mut predicates = HashSet::new();
+    let mut scenarios = HashSet::new();
     let mut properties = HashSet::new();
 
     for field in &parsed.state_fields {
@@ -39,6 +41,14 @@ pub fn resolve_model(parsed: ParsedModel) -> Result<ResolvedModel, Vec<Diagnosti
         }
     }
 
+    for predicate in &parsed.predicates {
+        ensure_unique_named_expr("predicate", predicate, &mut predicates, &mut errors);
+    }
+
+    for scenario in &parsed.scenarios {
+        ensure_unique_named_expr("scenario", scenario, &mut scenarios, &mut errors);
+    }
+
     for property in &parsed.properties {
         if !properties.insert(property.name.clone()) {
             errors.push(resolve_error(
@@ -64,6 +74,20 @@ fn check_assignment_target(
         errors.push(resolve_error(
             format!("unresolved state field `{}`", assignment.field),
             assignment.line,
+        ));
+    }
+}
+
+fn ensure_unique_named_expr(
+    kind: &str,
+    expr: &ParsedNamedExpr,
+    seen: &mut HashSet<String>,
+    errors: &mut Vec<Diagnostic>,
+) {
+    if !seen.insert(expr.name.clone()) {
+        errors.push(resolve_error(
+            format!("duplicate {kind} `{}`", expr.name),
+            expr.line,
         ));
     }
 }

@@ -47,9 +47,13 @@ pub struct InspectResponse {
     pub capabilities: InspectCapabilities,
     pub state_fields: Vec<String>,
     pub actions: Vec<String>,
+    pub predicates: Vec<String>,
+    pub scenarios: Vec<String>,
     pub properties: Vec<String>,
     pub state_field_details: Vec<InspectStateField>,
     pub action_details: Vec<InspectAction>,
+    pub predicate_details: Vec<InspectNamedExpr>,
+    pub scenario_details: Vec<InspectNamedExpr>,
     pub transition_details: Vec<InspectTransition>,
     pub property_details: Vec<InspectProperty>,
 }
@@ -131,10 +135,18 @@ pub struct InspectTransitionUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectNamedExpr {
+    pub id: String,
+    pub expr: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectProperty {
     pub property_id: String,
     pub kind: String,
     pub expr: Option<String>,
+    pub scope_expr: Option<String>,
+    pub action_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +162,7 @@ pub struct CheckRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub scenario_id: Option<String>,
     pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
@@ -344,14 +357,39 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         );
     }
     let model = frontend::compile_model(&request.source)?;
-    let supports_solver = model
-        .properties
-        .iter()
-        .all(|property| !matches!(property.kind, PropertyKind::DeadlockFreedom));
+    let supports_solver = model.properties.iter().all(|property| {
+        !matches!(
+            property.kind,
+            PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
+        )
+    });
     let capability_reasons = if supports_solver {
         Vec::new()
     } else {
-        vec!["deadlock_freedom_requires_explicit_backend".to_string()]
+        vec!["explicit_only_property_kind_requires_explicit_backend".to_string()]
+    };
+    let solver_detail = if supports_solver {
+        CapabilityDetail::ready()
+    } else {
+        CapabilityDetail {
+            reason: "one or more selected property kinds are explicit-only today".to_string(),
+            migration_hint: Some(
+                "use backend=explicit for cover, transition, deadlock_freedom, or scenario-scoped checks".to_string(),
+            ),
+            unsupported_features: model
+                .properties
+                .iter()
+                .filter(|property| {
+                    matches!(
+                        property.kind,
+                        PropertyKind::DeadlockFreedom
+                            | PropertyKind::Cover
+                            | PropertyKind::Transition
+                    )
+                })
+                .map(|property| format!("property {} ({})", property.property_id, property.kind))
+                .collect(),
+        }
     };
     Ok(InspectResponse {
         schema_version: "1.0.0".to_string(),
@@ -362,11 +400,22 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         machine_ir_error: None,
         capabilities: InspectCapabilities {
             solver_ready: supports_solver,
+            solver: solver_detail,
             reasons: capability_reasons,
             ..InspectCapabilities::fully_ready()
         },
         state_fields: model.state_fields.iter().map(|f| f.name.clone()).collect(),
         actions: model.actions.iter().map(|a| a.action_id.clone()).collect(),
+        predicates: model
+            .predicates
+            .iter()
+            .map(|predicate| predicate.predicate_id.clone())
+            .collect(),
+        scenarios: model
+            .scenarios
+            .iter()
+            .map(|scenario| scenario.scenario_id.clone())
+            .collect(),
         properties: model
             .properties
             .iter()
@@ -434,6 +483,22 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 writes: action.writes.clone(),
             })
             .collect(),
+        predicate_details: model
+            .predicates
+            .iter()
+            .map(|predicate| InspectNamedExpr {
+                id: predicate.predicate_id.clone(),
+                expr: render_expr_ir(&predicate.expr),
+            })
+            .collect(),
+        scenario_details: model
+            .scenarios
+            .iter()
+            .map(|scenario| InspectNamedExpr {
+                id: scenario.scenario_id.clone(),
+                expr: render_expr_ir(&scenario.expr),
+            })
+            .collect(),
         transition_details: model
             .actions
             .iter()
@@ -462,6 +527,8 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 property_id: property.property_id.clone(),
                 kind: property_kind_label(&property.kind).to_string(),
                 expr: property_expr_for_inspect(property),
+                scope_expr: property.scope.as_ref().map(render_expr_ir),
+                action_filter: property.action_filter.clone(),
             })
             .collect(),
     })
@@ -477,9 +544,11 @@ pub(crate) fn property_kind_label(kind: &PropertyKind) -> &'static str {
 
 fn property_expr_for_inspect(property: &crate::ir::PropertyIr) -> Option<String> {
     match property.kind {
-        PropertyKind::Invariant | PropertyKind::Reachability | PropertyKind::Temporal => {
-            Some(render_expr_ir(&property.expr))
-        }
+        PropertyKind::Invariant
+        | PropertyKind::Reachability
+        | PropertyKind::Temporal
+        | PropertyKind::Cover
+        | PropertyKind::Transition => Some(render_expr_ir(&property.expr)),
         PropertyKind::DeadlockFreedom => None,
     }
 }
@@ -740,6 +809,33 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 request.seed,
             );
             plan.property_selection = PropertySelection::ExactlyOne(property_id);
+            plan.scenario_selection = request.scenario_id.clone();
+            let selected_property = model
+                .properties
+                .iter()
+                .find(|property| {
+                    property.property_id
+                        == *match &plan.property_selection {
+                            PropertySelection::ExactlyOne(id) => id,
+                        }
+                })
+                .expect("selected property exists");
+            let requires_explicit = matches!(
+                selected_property.kind,
+                PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
+            ) || request.scenario_id.is_some();
+            if requires_explicit && !matches!(adapter, AdapterConfig::Explicit) {
+                return CheckOutcome::Errored(CheckErrorEnvelope {
+                    manifest: plan.manifest.clone(),
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        "selected property/scenario currently requires backend=explicit",
+                    )],
+                });
+            }
             match run_with_adapter(&model, &plan, &adapter) {
                 Ok(normalized) => normalized.outcome,
                 Err(message) => CheckOutcome::Errored(CheckErrorEnvelope {
@@ -913,6 +1009,12 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 crate::ir::PropertyKind::Reachability => {
                                     format!("{action} reached the target state without a visible field delta")
                                 }
+                                crate::ir::PropertyKind::Cover => {
+                                    format!("{action} reached the cover target without a visible field delta")
+                                }
+                                crate::ir::PropertyKind::Transition => {
+                                    format!("{action} produced a transition postcondition violation without a visible field delta")
+                                }
                                 crate::ir::PropertyKind::DeadlockFreedom => {
                                     format!("{action} led to a deadlocked state without a visible field delta")
                                 }
@@ -926,6 +1028,12 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                                 }
                                 crate::ir::PropertyKind::Reachability => {
                                     "initial or terminal condition satisfied the reachability target".to_string()
+                                }
+                                crate::ir::PropertyKind::Cover => {
+                                    "initial or terminal condition satisfied the cover target".to_string()
+                                }
+                                crate::ir::PropertyKind::Transition => {
+                                    "the selected transition violated its postcondition".to_string()
                                 }
                                 crate::ir::PropertyKind::DeadlockFreedom => {
                                     "deadlock detected: no enabled actions from this state".to_string()
@@ -1139,6 +1247,7 @@ pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, Ch
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id,
+        scenario_id: None,
         seed: request.seed,
         backend: request.backend.clone(),
         solver_executable: request.solver_executable.clone(),
@@ -1203,6 +1312,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             source_name: request.source_name.clone(),
             source: request.source.clone(),
             property_id: request.property_id.clone(),
+            scenario_id: None,
             seed: request.seed,
             backend: request.backend.clone(),
             solver_executable: request.solver_executable.clone(),
@@ -1244,6 +1354,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: request.property_id.clone(),
+        scenario_id: None,
         seed: request.seed,
         backend: request.backend.clone(),
         solver_executable: request.solver_executable.clone(),
@@ -1412,6 +1523,9 @@ pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     if let Some(property_id) = request.property_id.as_deref() {
         require_non_empty(property_id, "property_id")?;
     }
+    if let Some(scenario_id) = request.scenario_id.as_deref() {
+        require_non_empty(scenario_id, "scenario_id")?;
+    }
     if let Some(backend) = &request.backend {
         require_non_empty(backend, "backend")?;
     }
@@ -1482,6 +1596,18 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
         "action_details",
     )?;
     require_len_match(
+        response.predicates.len(),
+        response.predicate_details.len(),
+        "predicates",
+        "predicate_details",
+    )?;
+    require_len_match(
+        response.scenarios.len(),
+        response.scenario_details.len(),
+        "scenarios",
+        "scenario_details",
+    )?;
+    require_len_match(
         response.properties.len(),
         response.property_details.len(),
         "properties",
@@ -1536,6 +1662,22 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
         out.push_str(&format!("\"{}\"", escape_json(action)));
     }
     out.push(']');
+    out.push_str(",\"predicates\":[");
+    for (index, predicate) in response.predicates.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(predicate)));
+    }
+    out.push(']');
+    out.push_str(",\"scenarios\":[");
+    for (index, scenario) in response.scenarios.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("\"{}\"", escape_json(scenario)));
+    }
+    out.push(']');
     out.push_str(",\"properties\":[");
     for (index, property) in response.properties.iter().enumerate() {
         if index > 0 {
@@ -1574,6 +1716,30 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             escape_json(&action.role),
             render_string_array(&action.reads),
             render_string_array(&action.writes)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"predicate_details\":[");
+    for (index, predicate) in response.predicate_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"id\":\"{}\",\"expr\":\"{}\"}}",
+            escape_json(&predicate.id),
+            escape_json(&predicate.expr)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"scenario_details\":[");
+    for (index, scenario) in response.scenario_details.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"id\":\"{}\",\"expr\":\"{}\"}}",
+            escape_json(&scenario.id),
+            escape_json(&scenario.expr)
         ));
     }
     out.push(']');
@@ -1618,13 +1784,23 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"property_id\":\"{}\",\"kind\":\"{}\",\"expr\":{}}}",
+            "{{\"property_id\":\"{}\",\"kind\":\"{}\",\"expr\":{},\"scope_expr\":{},\"action_filter\":{}}}",
             escape_json(&property.property_id),
             escape_json(&property.kind),
             property
                 .expr
                 .as_ref()
                 .map(|expr| format!("\"{}\"", escape_json(expr)))
+                .unwrap_or_else(|| "null".to_string()),
+            property
+                .scope_expr
+                .as_ref()
+                .map(|expr| format!("\"{}\"", escape_json(expr)))
+                .unwrap_or_else(|| "null".to_string()),
+            property
+                .action_filter
+                .as_ref()
+                .map(|action| format!("\"{}\"", escape_json(action)))
                 .unwrap_or_else(|| "null".to_string())
         ));
     }
@@ -1673,6 +1849,16 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
         "- actions ({}): {}\n",
         response.actions.len(),
         render_csv_or_none(&response.actions)
+    ));
+    out.push_str(&format!(
+        "- predicates ({}): {}\n",
+        response.predicates.len(),
+        render_csv_or_none(&response.predicates)
+    ));
+    out.push_str(&format!(
+        "- scenarios ({}): {}\n",
+        response.scenarios.len(),
+        render_csv_or_none(&response.scenarios)
     ));
     out.push_str(&format!(
         "- properties ({}): {}\n",
@@ -1727,6 +1913,26 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             2,
         ));
         out.push('\n');
+    }
+    if !response.predicate_details.is_empty() {
+        out.push_str("predicates:\n");
+        for predicate in &response.predicate_details {
+            out.push_str(&format!("- {}\n", predicate.id));
+            out.push_str(&format!(
+                "  expr:\n{}\n",
+                indent_block(&pretty_expr(&predicate.expr), 4)
+            ));
+        }
+    }
+    if !response.scenario_details.is_empty() {
+        out.push_str("scenarios:\n");
+        for scenario in &response.scenario_details {
+            out.push_str(&format!("- {}\n", scenario.id));
+            out.push_str(&format!(
+                "  expr:\n{}\n",
+                indent_block(&pretty_expr(&scenario.expr), 4)
+            ));
+        }
     }
     if !response.transition_details.is_empty() {
         out.push_str("transitions:\n");
@@ -1783,6 +1989,15 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
                     "  expr:\n{}\n",
                     indent_block(&pretty_expr(expr), 4)
                 ));
+            }
+            if let Some(scope_expr) = &property.scope_expr {
+                out.push_str(&format!(
+                    "  scope:\n{}\n",
+                    indent_block(&pretty_expr(scope_expr), 4)
+                ));
+            }
+            if let Some(action_filter) = &property.action_filter {
+                out.push_str(&format!("  on_action: {}\n", action_filter));
             }
         }
     }
@@ -3129,12 +3344,94 @@ mod tests {
     }
 
     #[test]
+    fn inspect_renders_predicates_scenarios_and_transition_details() {
+        let source = "model PostFlow\nstate:\n  visible: bool\n  deleted: bool\ninit:\n  visible = true\n  deleted = false\npredicates:\n  deleted_view: visible == false && deleted == true\nscenarios:\n  DeletedPost: deleted == true\naction Delete:\n  pre: visible == true\n  post:\n    visible = false\n    deleted = true\nproperty P_DELETE_POST:\n  transition: next.deleted == true && prev.visible == true\n  on: Delete\n  when: prev.visible == true\n";
+        let response = inspect_source(&InspectRequest {
+            request_id: "req-inspect-scenario".to_string(),
+            source_name: "post.valid".to_string(),
+            source: source.to_string(),
+        })
+        .unwrap();
+        assert_eq!(response.predicates, vec!["deleted_view"]);
+        assert_eq!(response.scenarios, vec!["DeletedPost"]);
+        assert_eq!(response.predicate_details[0].id, "deleted_view");
+        assert_eq!(response.scenario_details[0].id, "DeletedPost");
+        assert_eq!(response.property_details[0].kind, "transition");
+        assert_eq!(
+            response.property_details[0].action_filter.as_deref(),
+            Some("Delete")
+        );
+        assert_eq!(
+            response.property_details[0].scope_expr.as_deref(),
+            Some("(prev_visible == true)")
+        );
+        let json = render_inspect_json(&response);
+        assert!(json.contains("\"predicates\":[\"deleted_view\"]"));
+        assert!(json.contains("\"scenarios\":[\"DeletedPost\"]"));
+        assert!(json.contains("\"scope_expr\":\"(prev_visible == true)\""));
+        assert!(json.contains("\"action_filter\":\"Delete\""));
+        let text = render_inspect_text(&response);
+        assert!(text.contains("predicates (1): deleted_view"));
+        assert!(text.contains("scenarios (1): DeletedPost"));
+        assert!(text.contains("on_action: Delete"));
+        validate_inspect_response(&response).unwrap();
+    }
+
+    #[test]
+    fn scenario_scoped_checks_and_cover_report_scope_metadata() {
+        let source = "model PostFlow\nstate:\n  visible: bool\n  deleted: bool\ninit:\n  visible = true\n  deleted = false\npredicates:\n  deleted_view: visible == false && deleted == true\nscenarios:\n  DeletedPost: deleted == true\naction Delete:\n  pre: visible == true\n  post:\n    visible = false\n    deleted = true\nproperty P_VISIBLE_ONLY_AFTER_DELETE:\n  invariant: visible == false\nproperty C_DELETED_VIEW:\n  cover: deleted_view\n";
+        let scoped = check_source(&CheckRequest {
+            request_id: "req-scenario-pass".to_string(),
+            source_name: "post.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_VISIBLE_ONLY_AFTER_DELETE".to_string()),
+            scenario_id: Some("DeletedPost".to_string()),
+            seed: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        let CheckOutcome::Completed(scoped_result) = scoped else {
+            panic!("expected scoped result");
+        };
+        assert_eq!(
+            scoped_result.property_result.scenario_id.as_deref(),
+            Some("DeletedPost")
+        );
+        assert!(!scoped_result.property_result.vacuous);
+        assert_eq!(scoped_result.status, crate::engine::RunStatus::Pass);
+
+        let cover = check_source(&CheckRequest {
+            request_id: "req-cover-pass".to_string(),
+            source_name: "post.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("C_DELETED_VIEW".to_string()),
+            scenario_id: Some("DeletedPost".to_string()),
+            seed: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        });
+        let CheckOutcome::Completed(cover_result) = cover else {
+            panic!("expected cover result");
+        };
+        assert_eq!(cover_result.status, crate::engine::RunStatus::Pass);
+        let outcome_json = crate::evidence::render_outcome_json(
+            "post.valid",
+            &CheckOutcome::Completed(cover_result),
+        );
+        assert!(outcome_json.contains("\"scenario_id\":\"DeletedPost\""));
+        assert!(outcome_json.contains("\"vacuous\":false"));
+    }
+
+    #[test]
     fn check_can_fail_deadlock_freedom_property() {
         let outcome = check_source(&CheckRequest {
             request_id: "req-deadlock-fail".to_string(),
             source_name: "deadlock.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n".to_string(),
             property_id: Some("P_LIVE".to_string()),
+            scenario_id: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3162,6 +3459,7 @@ mod tests {
             source_name: "deadlock.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Stay:\n  pre: true\n  post:\n    x = x\nproperty P_LIVE: deadlock_freedom\n".to_string(),
             property_id: Some("P_LIVE".to_string()),
+            scenario_id: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3227,9 +3525,13 @@ mod tests {
             },
             state_fields: vec!["i".to_string()],
             actions: vec!["STEP".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec!["P_MOD".to_string()],
             state_field_details: vec![],
             action_details: vec![],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "STEP".to_string(),
                 role: "business".to_string(),
@@ -3308,6 +3610,8 @@ mod tests {
                 "compliant".to_string(),
             ],
             actions: vec!["SET_STRONG_PASSWORD".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![
                 "P_PASSWORD_POLICY_MATCHES_FLAG".to_string(),
                 "P_PASSWORD_LENGTH_BOUND".to_string(),
@@ -3338,6 +3642,8 @@ mod tests {
                     "compliant".to_string(),
                 ],
             }],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
                 role: "business".to_string(),
@@ -3374,6 +3680,8 @@ mod tests {
                     "iff(state.compliant, state.password_set && len(&state.password) >= 10 && regex_match(&state.password, r\"[A-Z]\"))"
                         .to_string(),
                 ),
+                scope_expr: None,
+                action_filter: None,
             }],
         };
 
@@ -3388,6 +3696,8 @@ mod tests {
         summary:
         - state_fields (3): password, password_set, compliant
         - actions (1): SET_STRONG_PASSWORD
+        - predicates (0): none
+        - scenarios (0): none
         - properties (2): P_PASSWORD_POLICY_MATCHES_FLAG, P_PASSWORD_LENGTH_BOUND
         state_fields:
           ╭──────────────┬────────┬────────┬───────┬──────────╮
@@ -3450,6 +3760,7 @@ mod tests {
             source_name: "broken.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  y = 0\n".to_string(),
             property_id: None,
+            scenario_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -3466,6 +3777,7 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            scenario_id: None,
             seed: Some(41),
             backend: None,
             solver_executable: None,
@@ -3510,6 +3822,7 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_REACH".to_string()),
+            scenario_id: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -3667,6 +3980,7 @@ mod tests {
             source_name: "a.valid".to_string(),
             source: "".to_string(),
             property_id: None,
+            scenario_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -3700,6 +4014,7 @@ mod tests {
             source_name: "cmd.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            scenario_id: None,
             seed: Some(47),
             backend: Some("command".to_string()),
             solver_executable: Some("sh".to_string()),
@@ -3723,6 +4038,7 @@ mod tests {
             source_name: "hash.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            scenario_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -3744,6 +4060,7 @@ mod tests {
             source_name: "seed.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            scenario_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -3768,6 +4085,7 @@ mod tests {
             source_name: "seed.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            scenario_id: None,
             seed: Some(99),
             backend: None,
             solver_executable: None,

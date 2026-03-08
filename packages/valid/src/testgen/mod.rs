@@ -1500,6 +1500,8 @@ mod tests {
                     }],
                 },
             ],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![PropertyIr {
                 property_id: "SAFE".to_string(),
                 kind: PropertyKind::Invariant,
@@ -1508,6 +1510,8 @@ mod tests {
                     left: Box::new(ExprIr::FieldRef("x".to_string())),
                     right: Box::new(ExprIr::Literal(Value::UInt(1))),
                 },
+                scope: None,
+                action_filter: None,
             }],
         }
     }

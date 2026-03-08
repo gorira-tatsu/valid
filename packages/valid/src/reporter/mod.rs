@@ -896,6 +896,8 @@ mod tests {
             capabilities: InspectCapabilities::fully_ready(),
             state_fields: vec!["x".to_string()],
             actions: vec!["INC".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec!["P_RANGE".to_string()],
             state_field_details: vec![InspectStateField {
                 name: "x".to_string(),
@@ -910,6 +912,8 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 role: "business".to_string(),
@@ -927,6 +931,8 @@ mod tests {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
                 expr: None,
+                scope_expr: None,
+                action_filter: None,
             }],
         };
         let mermaid = render_model_mermaid(&inspect);
@@ -951,6 +957,8 @@ mod tests {
             capabilities: InspectCapabilities::fully_ready(),
             state_fields: vec!["x".to_string()],
             actions: vec!["INC".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec!["P_RANGE".to_string()],
             state_field_details: vec![InspectStateField {
                 name: "x".to_string(),
@@ -965,6 +973,8 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 role: "business".to_string(),
@@ -982,6 +992,8 @@ mod tests {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
                 expr: None,
+                scope_expr: None,
+                action_filter: None,
             }],
         };
         let dot = render_model_dot(&inspect);
@@ -1006,6 +1018,8 @@ mod tests {
             capabilities: InspectCapabilities::fully_ready(),
             state_fields: vec!["x".to_string()],
             actions: vec!["INC".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec!["P_RANGE".to_string()],
             state_field_details: vec![InspectStateField {
                 name: "x".to_string(),
@@ -1020,6 +1034,8 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 role: "business".to_string(),
@@ -1037,6 +1053,8 @@ mod tests {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
                 expr: None,
+                scope_expr: None,
+                action_filter: None,
             }],
         };
         let mermaid = render_model_mermaid_with_view(&inspect, GraphView::Logic);
@@ -1081,6 +1099,8 @@ mod tests {
             },
             state_fields: vec!["x".to_string()],
             actions: vec!["INC".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec!["P_RANGE".to_string()],
             state_field_details: vec![InspectStateField {
                 name: "x".to_string(),
@@ -1095,6 +1115,8 @@ mod tests {
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
+            predicate_details: vec![],
+            scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 role: "business".to_string(),
@@ -1109,6 +1131,8 @@ mod tests {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
                 expr: None,
+                scope_expr: None,
+                action_filter: None,
             }],
         };
         let mermaid = render_model_mermaid(&inspect);

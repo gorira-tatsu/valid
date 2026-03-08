@@ -3149,7 +3149,8 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
         .map(|property| {
             let expr = match property.property_kind {
                 crate::ir::PropertyKind::Invariant
-                | crate::ir::PropertyKind::Reachability => property
+                | crate::ir::PropertyKind::Reachability
+                | crate::ir::PropertyKind::Cover => property
                     .expr
                     .and_then(|expr| lower_machine_expr_with_enums(expr, &enum_literals))
                     .ok_or_else(|| {
@@ -3165,11 +3166,19 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
                         property.property_id
                     ))
                 }
+                crate::ir::PropertyKind::Transition => {
+                    return Err(format!(
+                        "machine property `{}` uses transition postconditions that are not yet representable in the Rust-first modeling frontend",
+                        property.property_id
+                    ))
+                }
             };
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
                 kind: property.property_kind,
                 expr,
+                scope: None,
+                action_filter: None,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -3179,6 +3188,8 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
         state_fields,
         init,
         actions,
+        predicates: Vec::new(),
+        scenarios: Vec::new(),
         properties,
     })
 }
@@ -3992,6 +4003,12 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                 crate::ir::PropertyKind::Reachability => {
                     "reachability target was not found in the reachable state space".to_string()
                 }
+                crate::ir::PropertyKind::Cover => {
+                    "cover target was not reached in the reachable state space".to_string()
+                }
+                crate::ir::PropertyKind::Transition => {
+                    "no violating transition was found in the reachable state space".to_string()
+                }
                 crate::ir::PropertyKind::DeadlockFreedom => {
                     "no deadlock state found in the reachable state space".to_string()
                 }
@@ -4009,6 +4026,8 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                 Some(match &property_kind {
                     crate::ir::PropertyKind::Invariant => "PROPERTY_VIOLATED".to_string(),
                     crate::ir::PropertyKind::Reachability => "TARGET_REACHED".to_string(),
+                    crate::ir::PropertyKind::Cover => "COVER_UNREACHED".to_string(),
+                    crate::ir::PropertyKind::Transition => "TRANSITION_PROPERTY_FAILED".to_string(),
                     crate::ir::PropertyKind::DeadlockFreedom => "DEADLOCK_REACHED".to_string(),
                     crate::ir::PropertyKind::Temporal => {
                         "TEMPORAL_PROPERTY_UNSUPPORTED".to_string()
@@ -4020,6 +4039,12 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
                     }
                     crate::ir::PropertyKind::Reachability => {
                         "reachability target reached in reachable state space".to_string()
+                    }
+                    crate::ir::PropertyKind::Cover => {
+                        "cover target was not reached in reachable state space".to_string()
+                    }
+                    crate::ir::PropertyKind::Transition => {
+                        "transition property failed in reachable state space".to_string()
                     }
                     crate::ir::PropertyKind::DeadlockFreedom => {
                         "deadlock detected in reachable state space".to_string()
@@ -4044,6 +4069,8 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
             property_kind,
             status,
             assurance_level: AssuranceLevel::Complete,
+            scenario_id: None,
+            vacuous: false,
             reason_code,
             unknown_reason: None,
             terminal_state_id: trace

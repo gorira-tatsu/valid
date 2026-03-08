@@ -6,12 +6,16 @@ pub struct PropertyIr {
     pub property_id: String,
     pub kind: PropertyKind,
     pub expr: ExprIr,
+    pub scope: Option<ExprIr>,
+    pub action_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyKind {
     Invariant,
     Reachability,
+    Cover,
+    Transition,
     DeadlockFreedom,
     Temporal,
 }
@@ -21,6 +25,8 @@ impl PropertyKind {
         match input {
             "invariant" => Some(Self::Invariant),
             "reachability" => Some(Self::Reachability),
+            "cover" => Some(Self::Cover),
+            "transition" => Some(Self::Transition),
             "deadlock_freedom" => Some(Self::DeadlockFreedom),
             "temporal" => Some(Self::Temporal),
             _ => None,
@@ -31,6 +37,8 @@ impl PropertyKind {
         match self {
             Self::Invariant => "invariant",
             Self::Reachability => "reachability",
+            Self::Cover => "cover",
+            Self::Transition => "transition",
             Self::DeadlockFreedom => "deadlock_freedom",
             Self::Temporal => "temporal",
         }

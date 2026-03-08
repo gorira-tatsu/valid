@@ -6,7 +6,21 @@ pub struct ModelIr {
     pub state_fields: Vec<StateField>,
     pub init: Vec<InitAssignment>,
     pub actions: Vec<ActionIr>,
+    pub predicates: Vec<PredicateIr>,
+    pub scenarios: Vec<ScenarioIr>,
     pub properties: Vec<PropertyIr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PredicateIr {
+    pub predicate_id: String,
+    pub expr: crate::ir::ExprIr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScenarioIr {
+    pub scenario_id: String,
+    pub expr: crate::ir::ExprIr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

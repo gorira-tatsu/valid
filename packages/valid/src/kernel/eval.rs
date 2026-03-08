@@ -328,6 +328,8 @@ mod tests {
             ],
             init: vec![],
             actions: vec![],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![],
         }
     }
@@ -346,6 +348,8 @@ mod tests {
             }],
             init: vec![],
             actions: vec![],
+            predicates: vec![],
+            scenarios: vec![],
             properties: vec![],
         }
     }

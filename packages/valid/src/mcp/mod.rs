@@ -748,6 +748,7 @@ fn input_schema_with_backend() -> Value {
 fn input_schema_with_backend_and_property() -> Value {
     let mut properties = common_target_properties();
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
+    properties.insert("scenario_id".to_string(), json!({ "type": "string" }));
     properties.insert(
         "backend".to_string(),
         json!({
@@ -1130,6 +1131,7 @@ struct BackendArgs {
     #[serde(flatten)]
     target: TargetArgs,
     property_id: Option<String>,
+    scenario_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -1820,6 +1822,7 @@ fn check_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult, S
                 source_name: source_name.clone(),
                 source,
                 property_id: args.property_id.clone(),
+                scenario_id: args.scenario_id.clone(),
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
@@ -1857,6 +1860,7 @@ fn explain_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult,
                 source_name,
                 source,
                 property_id: args.property_id.clone(),
+                scenario_id: args.scenario_id.clone(),
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
@@ -1906,6 +1910,7 @@ fn coverage_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult
                 source_name,
                 source,
                 property_id: args.property_id.clone(),
+                scenario_id: args.scenario_id.clone(),
                 backend: args.backend.clone(),
                 solver_executable: args.solver_executable.clone(),
                 solver_args: args.solver_args.clone(),
@@ -2396,6 +2401,7 @@ fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResu
                         source_name: source_name.clone(),
                         source: source.clone(),
                         property_id: run.property_id.clone(),
+                        scenario_id: None,
                         seed: None,
                         backend: args.backend.clone(),
                         solver_executable: args.solver_executable.clone(),

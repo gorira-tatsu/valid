@@ -830,6 +830,8 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             property_id: property.property_id.to_string(),
             kind: crate::api::property_kind_label(&property.property_kind).to_string(),
             expr: property.expr.map(str::to_string),
+            scope_expr: None,
+            action_filter: None,
         })
         .collect::<Vec<_>>();
     let capabilities = machine_capability_report::<M>();
@@ -865,12 +867,16 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             .iter()
             .map(|action| action.action_id.clone())
             .collect(),
+        predicates: vec![],
+        scenarios: vec![],
         properties: property_ids::<M>()
             .into_iter()
             .map(str::to_string)
             .collect(),
         state_field_details,
         action_details,
+        predicate_details: vec![],
+        scenario_details: vec![],
         transition_details,
         property_details,
     }

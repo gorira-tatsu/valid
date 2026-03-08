@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.inspect.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "model_id", "state_fields", "actions", "properties"],
+  "required": ["schema_version", "request_id", "status", "model_id", "state_fields", "actions", "predicates", "scenarios", "properties"],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string", "minLength": 1 },
@@ -10,7 +10,48 @@
     "model_id": { "type": "string", "minLength": 1 },
     "state_fields": { "type": "array", "items": { "type": "string" } },
     "actions": { "type": "array", "items": { "type": "string" } },
-    "properties": { "type": "array", "items": { "type": "string" } }
+    "predicates": { "type": "array", "items": { "type": "string" } },
+    "scenarios": { "type": "array", "items": { "type": "string" } },
+    "properties": { "type": "array", "items": { "type": "string" } },
+    "predicate_details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "expr"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "expr": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "scenario_details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "expr"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "expr": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "property_details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["property_id", "kind"],
+        "properties": {
+          "property_id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "expr": { "type": ["string", "null"] },
+          "scope_expr": { "type": ["string", "null"] },
+          "action_filter": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }

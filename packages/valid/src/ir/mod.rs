@@ -11,7 +11,10 @@ pub mod value;
 pub use action::{ActionIr, ActionRole, UpdateIr};
 pub use decision::{Decision, DecisionKind, DecisionOutcome, DecisionPoint};
 pub use expr::{BinaryOp, ExprIr, UnaryOp};
-pub use model::{FieldId, FieldType, InitAssignment, ModelIr, PropertyId, SourceSpan, StateField};
+pub use model::{
+    FieldId, FieldType, InitAssignment, ModelIr, PredicateIr, PropertyId, ScenarioIr, SourceSpan,
+    StateField,
+};
 pub use path::{build_path_from_parts, decision_path_tags, infer_decision_path_tags, Path};
 pub use property::{PropertyIr, PropertyKind};
 pub use value::Value;
