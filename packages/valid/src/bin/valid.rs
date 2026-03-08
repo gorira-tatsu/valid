@@ -6,6 +6,7 @@ use std::{
 };
 
 use clap::{ArgAction, Args, Parser, Subcommand};
+use serde_json::Value;
 use valid::{
     api::{
         capabilities_response, check_source, explain_source, inspect_source, lint_source,
@@ -45,8 +46,10 @@ use valid::{
     mcp::{serve_stdio, ServerConfig},
     project::{load_project_config, rerun_recommendations},
     reporter::{
-        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
+        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
+        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_failure, render_trace_mermaid,
+        render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{render_replay_json, replay_path_for_model},
@@ -135,6 +138,8 @@ struct GraphArgs {
     format: Option<String>,
     #[arg(long)]
     view: Option<String>,
+    #[arg(long)]
+    property: Option<String>,
     #[command(flatten)]
     json_progress: JsonProgressArgs,
 }
@@ -366,6 +371,7 @@ fn graph_to_parsed(args: GraphArgs) -> ParsedArgs {
         path: args.path,
         format: args.format,
         view: args.view,
+        property_id: args.property,
         ..ParsedArgs::default()
     }
 }
@@ -916,7 +922,7 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic] [--json] [--progress=json]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>] [--json] [--progress=json]",
         |_arg, _parsed| false,
     );
     let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
@@ -940,16 +946,93 @@ fn cmd_graph(args: Vec<String>) {
         .unwrap_or("mermaid");
     let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
-        Ok(response) => match render_format {
-            "json" => println!("{}", render_inspect_json(&response)),
-            "text" => print!("{}", render_inspect_text(&response)),
-            "dot" => println!("{}", render_model_dot_with_view(&response, view)),
-            "svg" => println!("{}", render_model_svg_with_view(&response, view)),
-            _ => println!("{}", render_model_mermaid_with_view(&response, view)),
-        },
+        Ok(response) => {
+            match render_graph_output(&response, &request, &parsed, render_format, view, "graph") {
+                Ok(body) => print!("{body}"),
+                Err(message) => message_exit("graph", json_output, &message, None),
+            }
+        }
         Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics, None),
     }
     progress.finish(ExitCode::Success);
+}
+
+fn render_graph_output(
+    response: &valid::api::InspectResponse,
+    request: &InspectRequest,
+    parsed: &ParsedArgs,
+    render_format: &str,
+    view: GraphView,
+    command: &str,
+) -> Result<String, String> {
+    if view != GraphView::Failure {
+        return Ok(match render_format {
+            "json" => format!("{}\n", render_inspect_json(response)),
+            "text" => render_inspect_text(response),
+            "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
+            "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
+            _ => format!("{}\n", render_model_mermaid_with_view(response, view)),
+        });
+    }
+
+    let property_id = parsed
+        .property_id
+        .as_ref()
+        .ok_or_else(|| "failure graph view requires --property=<id>".to_string())?;
+    let outcome = check_source(&CheckRequest {
+        request_id: format!("req-{command}-failure"),
+        source_name: request.source_name.clone(),
+        source: request.source.clone(),
+        property_id: Some(property_id.clone()),
+        scenario_id: parsed.scenario_id.clone(),
+        seed: parsed.seed,
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+    });
+    let result = match outcome {
+        CheckOutcome::Completed(result) => result,
+        CheckOutcome::Errored(error) => {
+            return Err(error
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "failure graph check failed".to_string()))
+        }
+    };
+    let trace = result
+        .trace
+        .as_ref()
+        .ok_or_else(|| format!("property `{property_id}` did not produce evidence trace"))?;
+    let slice = build_failure_graph_slice(response, trace, property_id)?;
+
+    Ok(match render_format {
+        "json" => {
+            let mut body: Value = serde_json::from_str(&render_inspect_json(response))
+                .map_err(|err| format!("failed to prepare graph json: {err}"))?;
+            body["graph_view"] = Value::String("failure".to_string());
+            body["graph_slice"] = serde_json::json!({
+                "property_id": slice.property_id,
+                "failing_action_id": slice.failing_action_id,
+                "failing_step_index": slice.failing_step_index,
+                "focused_fields": slice.focused_fields,
+                "focused_reads": slice.focused_reads,
+                "focused_writes": slice.focused_writes,
+                "focused_path_tags": slice.focused_path_tags,
+                "focused_transition_indexes": slice.focused_transition_indexes,
+                "summary": slice.summary,
+            });
+            format!(
+                "{}\n",
+                serde_json::to_string(&body)
+                    .map_err(|err| format!("failed to render graph json: {err}"))?
+            )
+        }
+        "text" => render_model_text_failure(response, &slice),
+        "dot" => format!("{}\n", render_model_dot_failure(response, &slice)),
+        "svg" => format!("{}\n", render_model_svg_failure(response, &slice)),
+        _ => format!("{}\n", render_model_mermaid_failure(response, &slice)),
+    })
 }
 
 fn cmd_doc(args: Vec<String>) {
@@ -1122,6 +1205,29 @@ fn cmd_capabilities(args: Vec<String>) {
                     "selfcheck_compatible: {}",
                     response.capabilities.selfcheck_compatible
                 );
+                println!("temporal.status: {}", response.capabilities.temporal.status);
+                println!(
+                    "temporal.supported_operators: {}",
+                    response
+                        .capabilities
+                        .temporal
+                        .supported_operators
+                        .join(", ")
+                );
+                println!(
+                    "temporal.unsupported_operators: {}",
+                    response
+                        .capabilities
+                        .temporal
+                        .unsupported_operators
+                        .join(", ")
+                );
+                if !response.capabilities.temporal.notes.is_empty() {
+                    println!(
+                        "temporal.notes: {}",
+                        response.capabilities.temporal.notes.join(" | ")
+                    );
+                }
             }
             progress.finish(ExitCode::Success);
         }
@@ -1508,6 +1614,24 @@ fn cmd_conformance(args: Vec<String>) {
         println!("runner: {}", report.runner);
         println!("status: {}", report.status);
         println!("mismatch_count: {}", report.mismatch_count);
+        if !report.mismatch_categories.is_empty() {
+            println!(
+                "mismatch_categories: {}",
+                report.mismatch_categories.join(",")
+            );
+        }
+        for mismatch in &report.mismatches {
+            println!(
+                "mismatch {} fix_surface={}{}",
+                mismatch.kind.as_str(),
+                mismatch.likely_fix_surface,
+                mismatch
+                    .index
+                    .map(|index| format!(" step={index}"))
+                    .unwrap_or_default()
+            );
+            println!("  {}", mismatch.summary);
+        }
         for mismatch in &report.observation_mismatches {
             println!(
                 "step {} expected {:?} actual {:?}",
@@ -1939,7 +2063,7 @@ fn resolve_project_dir(
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {
     println!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{}}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
         response.schema_version,
         response.request_id,
         response.backend,
@@ -1949,8 +2073,21 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         response.capabilities.supports_certificate,
         response.capabilities.supports_trace,
         response.capabilities.supports_witness,
-        response.capabilities.selfcheck_compatible
+        response.capabilities.selfcheck_compatible,
+        response.capabilities.temporal.status,
+        render_string_array(&response.capabilities.temporal.supported_operators),
+        render_string_array(&response.capabilities.temporal.unsupported_operators),
+        render_string_array(&response.capabilities.temporal.notes),
     );
+}
+
+fn render_string_array(values: &[String]) -> String {
+    let body = values
+        .iter()
+        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{}]", body)
 }
 
 fn usage_exit(command: &str, json: bool, usage: &str) -> ! {

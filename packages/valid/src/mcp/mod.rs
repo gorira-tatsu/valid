@@ -28,8 +28,9 @@ use crate::{
     kernel::{eval::eval_expr, replay::replay_actions, transition::apply_action},
     project::{rerun_recommendations, ProjectConfig},
     reporter::{
-        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
+        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_failure, GraphView,
     },
     testgen::render_replay_json,
 };
@@ -909,9 +910,10 @@ fn input_schema_with_graph() -> Value {
         "view".to_string(),
         json!({
             "type": "string",
-            "enum": ["overview", "logic"]
+            "enum": ["overview", "logic", "failure"]
         }),
     );
+    properties.insert("property_id".to_string(), json!({ "type": "string" }));
     json!({
         "type": "object",
         "properties": properties,
@@ -1199,6 +1201,7 @@ struct GraphArgs {
     target: TargetArgs,
     format: Option<String>,
     view: Option<String>,
+    property_id: Option<String>,
 }
 
 enum ResolvedTarget {
@@ -2619,41 +2622,7 @@ fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, Str
                 source,
             };
             match inspect_source(&request) {
-                Ok(response) => match format {
-                    "json" => Ok(ToolResult::success(parse_embedded_json(
-                        "inspect response",
-                        &render_inspect_json(&response),
-                    )?)),
-                    "text" => Ok(ToolResult::success_with_text(
-                        json!({
-                            "format": "text",
-                            "view": view_name(view),
-                            "graph": crate::api::render_inspect_text(&response)
-                        }),
-                        crate::api::render_inspect_text(&response),
-                    )),
-                    "dot" => {
-                        let graph = render_model_dot_with_view(&response, view);
-                        Ok(ToolResult::success_with_text(
-                            json!({ "format": "dot", "view": view_name(view), "graph": graph }),
-                            render_model_dot_with_view(&response, view),
-                        ))
-                    }
-                    "svg" => {
-                        let graph = render_model_svg_with_view(&response, view);
-                        Ok(ToolResult::success_with_text(
-                            json!({ "format": "svg", "view": view_name(view), "graph": graph }),
-                            render_model_svg_with_view(&response, view),
-                        ))
-                    }
-                    _ => {
-                        let graph = render_model_mermaid_with_view(&response, view);
-                        Ok(ToolResult::success_with_text(
-                            json!({ "format": "mermaid", "view": view_name(view), "graph": graph }),
-                            render_model_mermaid_with_view(&response, view),
-                        ))
-                    }
-                },
+                Ok(response) => graph_tool_result_for_dsl(&response, &request, args, format, view),
                 Err(diagnostics) => Ok(ToolResult::error(parse_embedded_json(
                     "diagnostics",
                     &render_diagnostics_json(&diagnostics),
@@ -2665,16 +2634,17 @@ fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, Str
             model_name,
         } => {
             if format == "json" {
+                let mut command_args = vec![
+                    "graph".to_string(),
+                    model_name.clone(),
+                    "--format=json".to_string(),
+                    format!("--view={}", view_name(view)),
+                ];
+                if let Some(property_id) = &args.property_id {
+                    command_args.push(format!("--property={property_id}"));
+                }
                 return Ok(registry_tool_result(
-                    run_registry_json(
-                        &registry_binary,
-                        &[
-                            "graph",
-                            &model_name,
-                            "--format=json",
-                            &format!("--view={}", view_name(view)),
-                        ],
-                    ),
+                    run_registry_json(&registry_binary, &command_args),
                     &[0],
                 ));
             }
@@ -2684,6 +2654,9 @@ fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, Str
                 .arg(&model_name)
                 .arg(format!("--format={format}"))
                 .arg(format!("--view={}", view_name(view)));
+            if let Some(property_id) = &args.property_id {
+                command.arg(format!("--property={property_id}"));
+            }
             let output = match command.output() {
                 Ok(output) => output,
                 Err(err) => {
@@ -2712,6 +2685,126 @@ fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, Str
             }
         }
     }
+}
+
+fn graph_tool_result_for_dsl(
+    response: &crate::api::InspectResponse,
+    request: &InspectRequest,
+    args: &GraphArgs,
+    format: &str,
+    view: GraphView,
+) -> Result<ToolResult, String> {
+    if view != GraphView::Failure {
+        return Ok(match format {
+            "json" => ToolResult::success(parse_embedded_json(
+                "inspect response",
+                &render_inspect_json(response),
+            )?),
+            "text" => ToolResult::success_with_text(
+                json!({
+                    "format": "text",
+                    "view": view_name(view),
+                    "graph": crate::api::render_inspect_text(response)
+                }),
+                crate::api::render_inspect_text(response),
+            ),
+            "dot" => {
+                let graph = render_model_dot_with_view(response, view);
+                ToolResult::success_with_text(
+                    json!({ "format": "dot", "view": view_name(view), "graph": graph }),
+                    render_model_dot_with_view(response, view),
+                )
+            }
+            "svg" => {
+                let graph = render_model_svg_with_view(response, view);
+                ToolResult::success_with_text(
+                    json!({ "format": "svg", "view": view_name(view), "graph": graph }),
+                    render_model_svg_with_view(response, view),
+                )
+            }
+            _ => {
+                let graph = render_model_mermaid_with_view(response, view);
+                ToolResult::success_with_text(
+                    json!({ "format": "mermaid", "view": view_name(view), "graph": graph }),
+                    render_model_mermaid_with_view(response, view),
+                )
+            }
+        });
+    }
+
+    let property_id = args
+        .property_id
+        .as_ref()
+        .ok_or_else(|| "failure graph view requires property_id".to_string())?;
+    let outcome = check_source(&CheckRequest {
+        request_id: "mcp-graph-failure".to_string(),
+        source_name: request.source_name.clone(),
+        source: request.source.clone(),
+        property_id: Some(property_id.clone()),
+        scenario_id: None,
+        seed: None,
+        backend: None,
+        solver_executable: None,
+        solver_args: Vec::new(),
+    });
+    let result = match outcome {
+        CheckOutcome::Completed(result) => result,
+        CheckOutcome::Errored(error) => {
+            return Ok(ToolResult::error(parse_embedded_json(
+                "diagnostics",
+                &render_diagnostics_json(&error.diagnostics),
+            )?))
+        }
+    };
+    let trace = result
+        .trace
+        .as_ref()
+        .ok_or_else(|| format!("property `{property_id}` did not produce evidence trace"))?;
+    let slice = build_failure_graph_slice(response, trace, property_id)?;
+
+    Ok(match format {
+        "json" => {
+            let mut body = parse_embedded_json("inspect response", &render_inspect_json(response))?;
+            body["graph_view"] = Value::String("failure".to_string());
+            body["graph_slice"] = json!({
+                "property_id": slice.property_id,
+                "failing_action_id": slice.failing_action_id,
+                "failing_step_index": slice.failing_step_index,
+                "focused_fields": slice.focused_fields,
+                "focused_reads": slice.focused_reads,
+                "focused_writes": slice.focused_writes,
+                "focused_path_tags": slice.focused_path_tags,
+                "focused_transition_indexes": slice.focused_transition_indexes,
+                "summary": slice.summary,
+            });
+            ToolResult::success(body)
+        }
+        "text" => ToolResult::success_with_text(
+            json!({"format":"text","view":"failure","graph": render_model_text_failure(response, &slice)}),
+            render_model_text_failure(response, &slice),
+        ),
+        "dot" => {
+            let graph = render_model_dot_failure(response, &slice);
+            ToolResult::success_with_text(
+                json!({"format":"dot","view":"failure","graph": graph}),
+                render_model_dot_failure(response, &slice),
+            )
+        }
+        "svg" => {
+            let graph = render_model_svg_failure(response, &slice);
+            ToolResult::success_with_text(
+                json!({"format":"svg","view":"failure","graph": graph}),
+                render_model_svg_failure(response, &slice),
+            )
+        }
+        _ => {
+            let graph = render_model_mermaid_failure(response, &slice);
+            ToolResult::success_with_text(
+                json!({"format":"mermaid","view":"failure","graph": graph}),
+                render_model_mermaid_failure(response, &slice),
+            )
+        }
+    })
 }
 
 fn lint_tool(config: &ServerConfig, args: &BasicArgs) -> Result<ToolResult, String> {
@@ -2875,5 +2968,6 @@ fn view_name(view: GraphView) -> &'static str {
     match view {
         GraphView::Overview => "overview",
         GraphView::Logic => "logic",
+        GraphView::Failure => "failure",
     }
 }

@@ -1,0 +1,47 @@
+name: template-valid-conformance
+
+on:
+  workflow_call:
+    inputs:
+      model_file:
+        description: Path to the `.valid` model file.
+        required: true
+        type: string
+      property_id:
+        description: Property id passed to `valid conformance`.
+        required: true
+        type: string
+      actions:
+        description: Comma-separated action list.
+        required: true
+        type: string
+      runner:
+        description: Path to the runner executable.
+        required: true
+        type: string
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: valid-conformance
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run conformance template
+        run: ./scripts/ci/template_conformance.sh "${{ inputs.model_file }}" "${{ inputs.property_id }}" "${{ inputs.actions }}" "${{ inputs.runner }}"
+      - name: Upload conformance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: template-artifacts/conformance/

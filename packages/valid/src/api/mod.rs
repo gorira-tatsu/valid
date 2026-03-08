@@ -1,7 +1,6 @@
 //! Machine-readable API layer for AI and CLI integration.
 
-use std::collections::BTreeMap;
-
+use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
     settings::{style::Style, Alignment, Modify, Padding},
@@ -76,6 +75,7 @@ pub struct InspectCapabilities {
     pub explain: CapabilityDetail,
     pub testgen_ready: bool,
     pub testgen: CapabilityDetail,
+    pub temporal: InspectTemporalCapabilities,
     pub reasons: Vec<String>,
 }
 
@@ -96,7 +96,31 @@ impl InspectCapabilities {
             explain: CapabilityDetail::ready(),
             testgen_ready: true,
             testgen: CapabilityDetail::ready(),
+            temporal: InspectTemporalCapabilities::not_applicable(),
             reasons: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectTemporalCapabilities {
+    pub property_ids: Vec<String>,
+    pub operators: Vec<String>,
+    pub support_level: String,
+    pub explicit_status: String,
+    pub solver_status: String,
+    pub reason: String,
+}
+
+impl InspectTemporalCapabilities {
+    fn not_applicable() -> Self {
+        Self {
+            property_ids: Vec::new(),
+            operators: Vec::new(),
+            support_level: "not_applicable".to_string(),
+            explicit_status: "not_applicable".to_string(),
+            solver_status: "not_applicable".to_string(),
+            reason: String::new(),
         }
     }
 }
@@ -312,6 +336,62 @@ pub struct CapabilitiesResponse {
     pub capabilities: CapabilityMatrix,
 }
 
+fn collect_temporal_operators(expr: &crate::ir::ExprIr, out: &mut BTreeSet<String>) {
+    match expr {
+        crate::ir::ExprIr::Literal(_) | crate::ir::ExprIr::FieldRef(_) => {}
+        crate::ir::ExprIr::Unary { op, expr } => {
+            match op {
+                crate::ir::UnaryOp::TemporalAlways => {
+                    out.insert("always".to_string());
+                }
+                crate::ir::UnaryOp::TemporalEventually => {
+                    out.insert("eventually".to_string());
+                }
+                crate::ir::UnaryOp::TemporalNext => {
+                    out.insert("next".to_string());
+                }
+                _ => {}
+            }
+            collect_temporal_operators(expr, out);
+        }
+        crate::ir::ExprIr::Binary { op, left, right } => {
+            if matches!(op, crate::ir::BinaryOp::TemporalUntil) {
+                out.insert("until".to_string());
+            }
+            collect_temporal_operators(left, out);
+            collect_temporal_operators(right, out);
+        }
+    }
+}
+
+fn inspect_temporal_capabilities(model: &ModelIr) -> InspectTemporalCapabilities {
+    let temporal_properties = model
+        .properties
+        .iter()
+        .filter(|property| matches!(property.kind, PropertyKind::Temporal))
+        .collect::<Vec<_>>();
+    if temporal_properties.is_empty() {
+        return InspectTemporalCapabilities::not_applicable();
+    }
+
+    let mut operators = BTreeSet::new();
+    for property in &temporal_properties {
+        collect_temporal_operators(&property.expr, &mut operators);
+    }
+
+    InspectTemporalCapabilities {
+        property_ids: temporal_properties
+            .iter()
+            .map(|property| property.property_id.clone())
+            .collect(),
+        operators: operators.into_iter().collect(),
+        support_level: "explicit_only".to_string(),
+        explicit_status: "complete".to_string(),
+        solver_status: "unavailable".to_string(),
+        reason: "temporal properties currently require backend=explicit; bounded or unavailable temporal support is reported per backend through the capabilities surface".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilitiesRequest {
     pub request_id: String,
@@ -363,7 +443,10 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
     let supports_solver = model.properties.iter().all(|property| {
         !matches!(
             property.kind,
-            PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
+            PropertyKind::DeadlockFreedom
+                | PropertyKind::Cover
+                | PropertyKind::Transition
+                | PropertyKind::Temporal
         )
     });
     let capability_reasons = if supports_solver {
@@ -377,7 +460,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         CapabilityDetail {
             reason: "one or more selected property kinds are explicit-only today".to_string(),
             migration_hint: Some(
-                "use backend=explicit for cover, transition, deadlock_freedom, or scenario-scoped checks".to_string(),
+                "use backend=explicit for cover, transition, deadlock_freedom, temporal, or scenario-scoped checks".to_string(),
             ),
             unsupported_features: model
                 .properties
@@ -388,6 +471,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                         PropertyKind::DeadlockFreedom
                             | PropertyKind::Cover
                             | PropertyKind::Transition
+                            | PropertyKind::Temporal
                     )
                 })
                 .map(|property| format!("property {} ({})", property.property_id, property.kind))
@@ -404,6 +488,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
         capabilities: InspectCapabilities {
             solver_ready: supports_solver,
             solver: solver_detail,
+            temporal: inspect_temporal_capabilities(&model),
             reasons: capability_reasons,
             ..InspectCapabilities::fully_ready()
         },
@@ -1585,6 +1670,18 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
         "testgen",
         response.capabilities.testgen_ready,
         &response.capabilities.testgen,
+    )?;
+    require_non_empty(
+        &response.capabilities.temporal.support_level,
+        "capabilities.temporal.support_level",
+    )?;
+    require_non_empty(
+        &response.capabilities.temporal.explicit_status,
+        "capabilities.temporal.explicit_status",
+    )?;
+    require_non_empty(
+        &response.capabilities.temporal.solver_status,
+        "capabilities.temporal.solver_status",
     )?;
     require_len_match(
         response.state_fields.len(),
@@ -3127,7 +3224,7 @@ fn render_transition_migration_snippet(
 
 fn render_capabilities_json(capabilities: &InspectCapabilities) -> String {
     format!(
-        "{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{},\"parse\":{},\"explicit\":{},\"ir\":{},\"solver\":{},\"coverage\":{},\"explain\":{},\"testgen\":{}}}",
+        "{{\"parse_ready\":{},\"explicit_ready\":{},\"ir_ready\":{},\"solver_ready\":{},\"coverage_ready\":{},\"explain_ready\":{},\"testgen_ready\":{},\"reasons\":{},\"parse\":{},\"explicit\":{},\"ir\":{},\"solver\":{},\"coverage\":{},\"explain\":{},\"testgen\":{},\"temporal\":{}}}",
         capabilities.parse_ready,
         capabilities.explicit_ready,
         capabilities.ir_ready,
@@ -3143,6 +3240,23 @@ fn render_capabilities_json(capabilities: &InspectCapabilities) -> String {
         render_capability_detail_json(&capabilities.coverage),
         render_capability_detail_json(&capabilities.explain),
         render_capability_detail_json(&capabilities.testgen),
+        render_temporal_inspect_capabilities_json(&capabilities.temporal),
+    )
+}
+
+fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilities) -> String {
+    format!(
+        "{{\"property_ids\":{},\"operators\":{},\"support_level\":\"{}\",\"explicit_status\":\"{}\",\"solver_status\":\"{}\",\"reason\":{}}}",
+        render_string_array(&temporal.property_ids),
+        render_string_array(&temporal.operators),
+        escape_json(&temporal.support_level),
+        escape_json(&temporal.explicit_status),
+        escape_json(&temporal.solver_status),
+        if temporal.reason.is_empty() {
+            "null".to_string()
+        } else {
+            format!("\"{}\"", escape_json(&temporal.reason))
+        }
     )
 }
 
@@ -3203,15 +3317,42 @@ fn render_capability_details_text(capabilities: &InspectCapabilities) -> String 
         lines.push(line);
     }
     if lines.is_empty() {
-        String::new()
+        render_temporal_capability_details_text(&capabilities.temporal)
     } else {
         let body = lines
             .into_iter()
             .map(|line| format!("- {}", line.trim_start_matches("- ")))
             .collect::<Vec<_>>()
             .join("\n");
-        format!("capability_details:\n{}\n", indent_block(&body, 2))
+        let mut out = format!("capability_details:\n{}\n", indent_block(&body, 2));
+        out.push_str(&render_temporal_capability_details_text(
+            &capabilities.temporal,
+        ));
+        out
     }
+}
+
+fn render_temporal_capability_details_text(temporal: &InspectTemporalCapabilities) -> String {
+    if temporal.support_level == "not_applicable" {
+        return String::new();
+    }
+    let mut line = format!(
+        "- temporal support_level={} explicit_status={} solver_status={}",
+        temporal.support_level, temporal.explicit_status, temporal.solver_status
+    );
+    if !temporal.property_ids.is_empty() {
+        line.push_str(&format!(
+            " property_ids=[{}]",
+            temporal.property_ids.join(", ")
+        ));
+    }
+    if !temporal.operators.is_empty() {
+        line.push_str(&format!(" operators=[{}]", temporal.operators.join(", ")));
+    }
+    if !temporal.reason.is_empty() {
+        line.push_str(&format!(" reason={}", temporal.reason));
+    }
+    format!("temporal_capabilities:\n{}\n", indent_block(&line, 2))
 }
 
 fn render_csv_or_none(values: &[String]) -> String {
@@ -3457,6 +3598,10 @@ pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result
     require_non_empty(
         &response.capabilities.backend_name,
         "capabilities.backend_name",
+    )?;
+    require_non_empty(
+        &response.capabilities.temporal.status,
+        "capabilities.temporal.status",
     )?;
     Ok(())
 }
@@ -3916,6 +4061,8 @@ mod tests {
             "\"ir\":{\"reason\":\"opaque step models cannot be lowered into machine IR\""
         ));
         assert!(json.contains("\"unsupported_features\":[\"step(state, action)\"]"));
+        assert!(json.contains("\"temporal\":{\"property_ids\":[]"));
+        assert!(json.contains("\"support_level\":\"not_applicable\""));
     }
 
     #[test]
@@ -4294,6 +4441,7 @@ mod tests {
         validate_capabilities_response(&response).unwrap();
         assert_eq!(response.backend, "command");
         assert!(response.capabilities.supports_bmc);
+        assert_eq!(response.capabilities.temporal.status, "unavailable");
     }
 
     #[test]
@@ -4310,6 +4458,31 @@ mod tests {
         assert_eq!(response.backend, "smt-cvc5");
         assert!(response.capabilities.supports_bmc);
         assert!(response.capabilities.supports_witness);
+        assert_eq!(response.capabilities.temporal.status, "unavailable");
+    }
+
+    #[test]
+    fn inspect_reports_temporal_capability_details() {
+        let request = InspectRequest {
+            request_id: "req-temporal".to_string(),
+            source_name: "temporal.valid".to_string(),
+            source: "model TemporalDoor\nstate:\n  open: bool\ninit:\n  open = false\nproperty P_EVENTUAL_OPEN:\n  temporal: eventually(open)\n".to_string(),
+        };
+        let response = inspect_source(&request).unwrap();
+        assert_eq!(
+            response.capabilities.temporal.support_level,
+            "explicit_only"
+        );
+        assert_eq!(response.capabilities.temporal.explicit_status, "complete");
+        assert_eq!(response.capabilities.temporal.solver_status, "unavailable");
+        assert_eq!(
+            response.capabilities.temporal.property_ids,
+            vec!["P_EVENTUAL_OPEN".to_string()]
+        );
+        assert_eq!(
+            response.capabilities.temporal.operators,
+            vec!["eventually".to_string()]
+        );
     }
 
     #[test]
