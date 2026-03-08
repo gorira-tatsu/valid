@@ -227,6 +227,37 @@ fn cli_graph_supports_dot_and_svg_formats() {
 }
 
 #[test]
+fn cli_graph_supports_failure_view() {
+    let failing = repo_path("tests/fixtures/models/failing_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&failing)
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .output()
+        .expect("graph failure view should run");
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Failure Slice"));
+    assert!(stdout.contains("P_FAIL"));
+    assert!(stdout.contains("property P_FAIL fails"));
+
+    let json_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&failing)
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .arg("--format=json")
+        .output()
+        .expect("graph failure json should run");
+    assert_eq!(json_output.status.code(), Some(0));
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(json_stdout.contains("\"graph_view\":\"failure\""));
+    assert!(json_stdout.contains("\"graph_slice\""));
+    assert!(json_stdout.contains("\"property_id\":\"P_FAIL\""));
+}
+
+#[test]
 fn lint_reports_clean_valid_models() {
     let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let response = lint_source(&InspectRequest {

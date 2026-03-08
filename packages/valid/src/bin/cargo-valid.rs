@@ -41,8 +41,9 @@ use valid::{
     },
     project::{render_project_config_template, render_registry_source_template, ProjectConfig},
     reporter::{
-        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
+        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_failure, GraphView,
     },
     support::{
         artifact::{benchmark_baseline_path, benchmark_report_path},
@@ -160,7 +161,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -501,7 +502,15 @@ fn command_supports_solver(command: &str) -> bool {
 fn command_supports_property(command: &str) -> bool {
     matches!(
         command,
-        "check" | "verify" | "benchmark" | "testgen" | "trace" | "coverage" | "replay" | "all"
+        "check"
+            | "verify"
+            | "benchmark"
+            | "graph"
+            | "testgen"
+            | "trace"
+            | "coverage"
+            | "replay"
+            | "all"
     )
 }
 
@@ -969,9 +978,9 @@ fn cmd_inspect(parsed: ParsedArgs) {
 fn cmd_graph(parsed: ParsedArgs) {
     let progress = ProgressReporter::new("graph", parsed.progress_json);
     progress.start(None);
-    let model = parsed.model.unwrap_or_else(|| {
+    let model = parsed.model.clone().unwrap_or_else(|| {
         usage_exit(
-            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic]",
+            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>]",
         )
     });
     let request = InspectRequest {
@@ -988,16 +997,91 @@ fn cmd_graph(parsed: ParsedArgs) {
     let json_output = parsed.json || default_format == "json";
     let view = GraphView::parse(parsed.view.as_deref());
     match inspect_source(&request) {
-        Ok(response) => match default_format {
-            "json" => println!("{}", render_inspect_json(&response)),
-            "text" => print!("{}", render_inspect_text(&response)),
-            "dot" => println!("{}", render_model_dot_with_view(&response, view)),
-            "svg" => println!("{}", render_model_svg_with_view(&response, view)),
-            _ => println!("{}", render_model_mermaid_with_view(&response, view)),
-        },
+        Ok(response) => {
+            match render_cargo_graph_output(&response, &request, &parsed, default_format, view) {
+                Ok(body) => print!("{body}"),
+                Err(message) => message_exit("cargo-valid", json_output, &message, None),
+            }
+        }
         Err(diagnostics) => diagnostics_exit("graph", json_output, &diagnostics),
     }
     progress.finish(ExitCode::Success);
+}
+
+fn render_cargo_graph_output(
+    response: &valid::api::InspectResponse,
+    request: &InspectRequest,
+    parsed: &ParsedArgs,
+    render_format: &str,
+    view: GraphView,
+) -> Result<String, String> {
+    if view != GraphView::Failure {
+        return Ok(match render_format {
+            "json" => format!("{}\n", render_inspect_json(response)),
+            "text" => render_inspect_text(response),
+            "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
+            "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
+            _ => format!("{}\n", render_model_mermaid_with_view(response, view)),
+        });
+    }
+
+    let property_id = parsed
+        .property_id
+        .as_ref()
+        .ok_or_else(|| "failure graph view requires --property=<id>".to_string())?;
+    let outcome = check_source(&CheckRequest {
+        request_id: "cargo-valid-graph-failure".to_string(),
+        source_name: request.source_name.clone(),
+        source: request.source.clone(),
+        property_id: Some(property_id.clone()),
+        scenario_id: None,
+        seed: parsed.seed,
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+    });
+    let result = match outcome {
+        valid::engine::CheckOutcome::Completed(result) => result,
+        valid::engine::CheckOutcome::Errored(error) => {
+            return Err(error
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "failure graph check failed".to_string()))
+        }
+    };
+    let trace = result
+        .trace
+        .as_ref()
+        .ok_or_else(|| format!("property `{property_id}` did not produce evidence trace"))?;
+    let slice = build_failure_graph_slice(response, trace, property_id)?;
+
+    Ok(match render_format {
+        "json" => {
+            let mut body: Value = serde_json::from_str(&render_inspect_json(response))
+                .map_err(|err| format!("failed to prepare graph json: {err}"))?;
+            body["graph_view"] = Value::String("failure".to_string());
+            body["graph_slice"] = json!({
+                "property_id": slice.property_id,
+                "failing_action_id": slice.failing_action_id,
+                "failing_step_index": slice.failing_step_index,
+                "focused_fields": slice.focused_fields,
+                "focused_reads": slice.focused_reads,
+                "focused_writes": slice.focused_writes,
+                "focused_path_tags": slice.focused_path_tags,
+                "focused_transition_indexes": slice.focused_transition_indexes,
+                "summary": slice.summary,
+            });
+            format!(
+                "{}\n",
+                serde_json::to_string(&body).map_err(|err| err.to_string())?
+            )
+        }
+        "text" => render_model_text_failure(response, &slice),
+        "dot" => format!("{}\n", render_model_dot_failure(response, &slice)),
+        "svg" => format!("{}\n", render_model_svg_failure(response, &slice)),
+        _ => format!("{}\n", render_model_mermaid_failure(response, &slice)),
+    })
 }
 
 fn cmd_doc(parsed: ParsedArgs) {

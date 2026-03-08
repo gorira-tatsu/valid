@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::Parser;
+use serde_json::Value;
 
 use crate::{
     benchmark::{
@@ -37,8 +38,9 @@ use crate::{
     },
     project::{load_project_config, rerun_recommendations},
     reporter::{
-        render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
+        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_failure, GraphView,
     },
     solver::AdapterConfig,
     support::{artifact::benchmark_baseline_path, hash::stable_hash_hex, io::write_text_file},
@@ -67,10 +69,10 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
-const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]";
+const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure>] [--property=<id>] [--json] [--progress=json]";
 const DOC_USAGE: &str =
     "usage: <registry-bin> doc <model> [--json] [--progress=json] [--write[=<path>]] [--check]";
 const LINT_USAGE: &str = "usage: <registry-bin> lint <model> [--json] [--progress=json]";
@@ -237,14 +239,79 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
     );
     let response = (model.inspect)("registry-graph");
     let view = GraphView::parse(parsed.view.as_deref());
-    match parsed.format.as_deref().unwrap_or("mermaid") {
-        "json" => println!("{}", render_inspect_json(&response)),
-        "text" => print!("{}", render_inspect_text(&response)),
-        "dot" => println!("{}", render_model_dot_with_view(&response, view)),
-        "svg" => println!("{}", render_model_svg_with_view(&response, view)),
-        _ => println!("{}", render_model_mermaid_with_view(&response, view)),
+    let render_format = parsed.format.as_deref().unwrap_or("mermaid");
+    match render_registry_graph_output(model, &response, &parsed, render_format, view) {
+        Ok(body) => print!("{body}"),
+        Err(message) => message_exit("graph", json_output, &message, Some(GRAPH_USAGE)),
     }
     progress.finish(ExitCode::Success);
+}
+
+fn render_registry_graph_output(
+    model: &RegisteredModel,
+    response: &InspectResponse,
+    parsed: &ParsedArgs,
+    render_format: &str,
+    view: GraphView,
+) -> Result<String, String> {
+    if view != GraphView::Failure {
+        return Ok(match render_format {
+            "json" => format!("{}\n", render_inspect_json(response)),
+            "text" => render_inspect_text(response),
+            "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
+            "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
+            _ => format!("{}\n", render_model_mermaid_with_view(response, view)),
+        });
+    }
+
+    let property_id = parsed
+        .property_id
+        .as_ref()
+        .ok_or_else(|| "failure graph view requires --property=<id>".to_string())?;
+    let outcome = (model.check)("registry-graph-failure", Some(property_id.as_str()), None)
+        .map_err(|message| format!("failed to evaluate property `{property_id}`: {message}"))?;
+    let result = match outcome {
+        CheckOutcome::Completed(result) => result,
+        CheckOutcome::Errored(error) => {
+            return Err(error
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.message.clone())
+                .unwrap_or_else(|| "failure graph check failed".to_string()))
+        }
+    };
+    let trace = result
+        .trace
+        .as_ref()
+        .ok_or_else(|| format!("property `{property_id}` did not produce evidence trace"))?;
+    let slice = build_failure_graph_slice(response, trace, property_id)?;
+
+    Ok(match render_format {
+        "json" => {
+            let mut body: Value = serde_json::from_str(&render_inspect_json(response))
+                .map_err(|err| format!("failed to prepare graph json: {err}"))?;
+            body["graph_view"] = Value::String("failure".to_string());
+            body["graph_slice"] = serde_json::json!({
+                "property_id": slice.property_id,
+                "failing_action_id": slice.failing_action_id,
+                "failing_step_index": slice.failing_step_index,
+                "focused_fields": slice.focused_fields,
+                "focused_reads": slice.focused_reads,
+                "focused_writes": slice.focused_writes,
+                "focused_path_tags": slice.focused_path_tags,
+                "focused_transition_indexes": slice.focused_transition_indexes,
+                "summary": slice.summary,
+            });
+            format!(
+                "{}\n",
+                serde_json::to_string(&body).map_err(|err| err.to_string())?
+            )
+        }
+        "text" => render_model_text_failure(response, &slice),
+        "dot" => format!("{}\n", render_model_dot_failure(response, &slice)),
+        "svg" => format!("{}\n", render_model_svg_failure(response, &slice)),
+        _ => format!("{}\n", render_model_mermaid_failure(response, &slice)),
+    })
 }
 
 fn cmd_doc(models: &[RegisteredModel], args: Vec<String>) {
