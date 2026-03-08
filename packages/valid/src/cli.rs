@@ -395,13 +395,13 @@ const TRACE_FORMAT_ARG: ArgSpec = ArgSpec {
 };
 const VIEW_ARG: ArgSpec = ArgSpec {
     name: "view",
-    syntax: "--view=<overview|logic>",
+    syntax: "--view=<overview|logic|failure>",
     value_type: "string",
     required: false,
     multiple: false,
     positional: false,
     description: "Graph view to render.",
-    values: &["overview", "logic"],
+    values: &["overview", "logic", "failure"],
 };
 const STRATEGY_ARG: ArgSpec = ArgSpec {
     name: "strategy",
@@ -660,7 +660,7 @@ const CHECK_OPTIONS: &[ArgSpec] = &[
     SOLVER_EXEC_ARG,
     SOLVER_ARG_ARG,
 ];
-const GRAPH_OPTIONS: &[ArgSpec] = &[FORMAT_ARG, VIEW_ARG, JSON_ARG, PROGRESS_ARG];
+const GRAPH_OPTIONS: &[ArgSpec] = &[FORMAT_ARG, VIEW_ARG, PROPERTY_ARG, JSON_ARG, PROGRESS_ARG];
 const LINT_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
 const CAPABILITY_OPTIONS: &[ArgSpec] = &[
     JSON_ARG,
@@ -784,7 +784,7 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render the model graph.",
-        usage: "valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic] [--json] [--progress=json]",
+        usage: "valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_FILE_ARG],
         options: GRAPH_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),
@@ -1027,7 +1027,7 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render a registered model graph.",
-        usage: "<registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]",
+        usage: "<registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure>] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_ARG],
         options: GRAPH_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),
@@ -1258,9 +1258,9 @@ const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render a model graph.",
-        usage: "cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]",
+        usage: "cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure>] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_ARG],
-        options: &[FORMAT_ARG, VIEW_ARG, JSON_ARG, PROGRESS_ARG, MANIFEST_ARG, REGISTRY_ARG, FILE_ARG, EXAMPLE_ARG, BIN_ARG],
+        options: &[FORMAT_ARG, VIEW_ARG, PROPERTY_ARG, JSON_ARG, PROGRESS_ARG, MANIFEST_ARG, REGISTRY_ARG, FILE_ARG, EXAMPLE_ARG, BIN_ARG],
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),
         response_schema: Some(SchemaRef { id: "schema.ai.inspect_response", builder: inspect_response_schema }),
         supports_json: true,
@@ -1905,7 +1905,14 @@ fn init_response_schema() -> Value {
             "created": { "type": "string" },
             "registry": { "type": "string" },
             "scaffolded_registry": { "type": "string" },
-            "generated_tests_dir": { "type": "string" }
+            "generated_tests_dir": { "type": "string" },
+            "artifacts_dir": { "type": "string" },
+            "benchmarks_baseline_dir": { "type": "string" },
+            "mcp_configs": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "ai_bootstrap_guide": { "type": "string" }
         }
     })
 }

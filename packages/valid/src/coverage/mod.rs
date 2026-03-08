@@ -22,6 +22,7 @@ pub struct CoverageReport {
     pub transition_coverage_percent: u32,
     pub business_transition_coverage_percent: u32,
     pub setup_transition_coverage_percent: u32,
+    pub requirement_tag_coverage_percent: u32,
     pub decision_coverage_percent: u32,
     pub guard_full_coverage_percent: u32,
     pub business_guard_full_coverage_percent: u32,
@@ -33,6 +34,9 @@ pub struct CoverageReport {
     pub action_roles: BTreeMap<String, String>,
     pub action_execution_counts: BTreeMap<String, usize>,
     pub decision_counts: BTreeMap<String, usize>,
+    pub covered_requirement_tags: BTreeSet<String>,
+    pub total_requirement_tags: BTreeSet<String>,
+    pub requirement_tag_counts: BTreeMap<String, usize>,
     pub visited_state_count: usize,
     pub repeated_state_count: usize,
     pub max_depth_observed: u32,
@@ -44,6 +48,18 @@ pub struct CoverageReport {
     pub path_tag_counts: BTreeMap<String, usize>,
     pub depth_histogram: BTreeMap<u32, usize>,
     pub step_count: usize,
+}
+
+fn requirement_tags(tags: &[String]) -> Vec<String> {
+    tags.iter()
+        .filter(|tag| {
+            !matches!(
+                tag.as_str(),
+                "guard_path" | "read_path" | "write_path" | "transition_path"
+            )
+        })
+        .cloned()
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +100,12 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         .filter(|action| action.role == ActionRole::Setup)
         .map(|action| action.action_id.clone())
         .collect::<BTreeSet<_>>();
+    let total_requirement_tags = model
+        .actions
+        .iter()
+        .filter(|action| action.role == ActionRole::Business)
+        .flat_map(|action| requirement_tags(&action.path_tags))
+        .collect::<BTreeSet<_>>();
     let total_decisions = model
         .actions
         .iter()
@@ -107,6 +129,8 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     let mut path_tag_counts = BTreeMap::new();
     let mut action_execution_counts = BTreeMap::new();
     let mut decision_counts = BTreeMap::new();
+    let mut covered_requirement_tags = BTreeSet::new();
+    let mut requirement_tag_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut step_count = 0usize;
     for trace in traces {
@@ -153,6 +177,10 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                     }
                     for tag in path.legacy_path_tags() {
                         *path_tag_counts.entry(tag).or_insert(0) += 1;
+                    }
+                    for tag in requirement_tags(&path.legacy_path_tags()) {
+                        covered_requirement_tags.insert(tag.clone());
+                        *requirement_tag_counts.entry(tag).or_insert(0) += 1;
                     }
                 }
             }
@@ -217,6 +245,11 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     } else {
         ((covered_actions.intersection(&setup_actions).count() * 100) / setup_actions.len()) as u32
     };
+    let requirement_tag_coverage_percent = if total_requirement_tags.is_empty() {
+        100
+    } else {
+        ((covered_requirement_tags.len() * 100) / total_requirement_tags.len()) as u32
+    };
     let decision_coverage_percent = if total_decisions.is_empty() {
         100
     } else {
@@ -275,6 +308,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         transition_coverage_percent,
         business_transition_coverage_percent,
         setup_transition_coverage_percent,
+        requirement_tag_coverage_percent,
         decision_coverage_percent,
         guard_full_coverage_percent,
         business_guard_full_coverage_percent,
@@ -286,6 +320,9 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         action_roles,
         action_execution_counts,
         decision_counts,
+        covered_requirement_tags,
+        total_requirement_tags,
+        requirement_tag_counts,
         visited_state_count: visited_states.len(),
         repeated_state_count: all_seen_states.saturating_sub(visited_states.len()),
         max_depth_observed,
@@ -304,15 +341,24 @@ pub fn evaluate_coverage_gate(report: &CoverageReport, minimum_percent: u32) -> 
     let mut reasons = Vec::new();
     let status = if report.transition_coverage_percent >= minimum_percent
         && report.guard_full_coverage_percent >= 80
+        && report.requirement_tag_coverage_percent >= minimum_percent
     {
         CoverageGateStatus::Pass
     } else if report.transition_coverage_percent >= minimum_percent {
-        reasons.push("guard_full_coverage below threshold".to_string());
+        if report.guard_full_coverage_percent < 80 {
+            reasons.push("guard_full_coverage below threshold".to_string());
+        }
+        if report.requirement_tag_coverage_percent < minimum_percent {
+            reasons.push("requirement_tag_coverage below threshold".to_string());
+        }
         CoverageGateStatus::Warn
     } else {
         reasons.push("transition_coverage below threshold".to_string());
         if report.guard_full_coverage_percent < 80 {
             reasons.push("guard_full_coverage below threshold".to_string());
+        }
+        if report.requirement_tag_coverage_percent < minimum_percent {
+            reasons.push("requirement_tag_coverage below threshold".to_string());
         }
         CoverageGateStatus::Fail
     };
@@ -330,10 +376,11 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
     out.push_str(&format!(",\"model_id\":\"{}\"", report.model_id));
     out.push_str(&format!(
-        ",\"summary\":{{\"transition_coverage_percent\":{},\"business_transition_coverage_percent\":{},\"setup_transition_coverage_percent\":{},\"decision_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"business_guard_full_coverage_percent\":{},\"setup_guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
+        ",\"summary\":{{\"transition_coverage_percent\":{},\"business_transition_coverage_percent\":{},\"setup_transition_coverage_percent\":{},\"requirement_tag_coverage_percent\":{},\"decision_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"business_guard_full_coverage_percent\":{},\"setup_guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
         report.transition_coverage_percent,
         report.business_transition_coverage_percent,
         report.setup_transition_coverage_percent,
+        report.requirement_tag_coverage_percent,
         report.decision_coverage_percent,
         report.guard_full_coverage_percent,
         report.business_guard_full_coverage_percent,
@@ -406,6 +453,19 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
         out.push_str(&format!("\"{}\":{}", depth, count));
     }
     out.push('}');
+    out.push_str(",\"requirement_tags\":[");
+    for (index, tag) in report.total_requirement_tags.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"tag\":\"{}\",\"covered\":{},\"count\":{}}}",
+            tag,
+            report.covered_requirement_tags.contains(tag),
+            report.requirement_tag_counts.get(tag).copied().unwrap_or(0)
+        ));
+    }
+    out.push(']');
     out.push_str(",\"path_tags\":[");
     for (index, (tag, count)) in report.path_tag_counts.iter().enumerate() {
         if index > 0 {
@@ -463,11 +523,12 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
 pub fn render_coverage_text(report: &CoverageReport) -> String {
     let gate = evaluate_coverage_gate(report, 80);
     format!(
-        "COVERAGE model={}\ntransition_coverage_percent={}\nbusiness_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\ndecision_coverage_percent={}\nguard_full_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
+        "COVERAGE model={}\ntransition_coverage_percent={}\nbusiness_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\nrequirement_tag_coverage_percent={}\ndecision_coverage_percent={}\nguard_full_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
         report.model_id,
         report.transition_coverage_percent,
         report.business_transition_coverage_percent,
         report.setup_transition_coverage_percent,
+        report.requirement_tag_coverage_percent,
         report.decision_coverage_percent,
         report.guard_full_coverage_percent,
         report.business_guard_full_coverage_percent,
@@ -477,16 +538,26 @@ pub fn render_coverage_text(report: &CoverageReport) -> String {
         report.step_count,
         report.max_depth_observed,
         coverage_gate_status_label(&gate.status),
-        if report.uncovered_guards.is_empty() && report.path_tag_counts.is_empty() {
+        if report.uncovered_guards.is_empty()
+            && report.path_tag_counts.is_empty()
+            && report.requirement_tag_counts.is_empty()
+        {
             "uncovered_guards=".to_string()
         } else {
             format!(
-                "business_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nuncovered_guards={}\npath_tag_counts={}",
+                "requirement_tag_coverage_percent={}\nbusiness_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nuncovered_guards={}\nrequirement_tag_counts={}\npath_tag_counts={}",
+                report.requirement_tag_coverage_percent,
                 report.business_transition_coverage_percent,
                 report.setup_transition_coverage_percent,
                 report.business_guard_full_coverage_percent,
                 report.setup_guard_full_coverage_percent,
                 report.uncovered_guards.join(", "),
+                report
+                    .requirement_tag_counts
+                    .iter()
+                    .map(|(tag, count)| format!("{tag}:{count}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 report
                     .path_tag_counts
                     .iter()
@@ -509,6 +580,9 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     }
     if report.setup_transition_coverage_percent > 100 {
         return Err("setup_transition_coverage_percent must not exceed 100".to_string());
+    }
+    if report.requirement_tag_coverage_percent > 100 {
+        return Err("requirement_tag_coverage_percent must not exceed 100".to_string());
     }
     if report.decision_coverage_percent > 100 {
         return Err("decision_coverage_percent must not exceed 100".to_string());
@@ -561,6 +635,12 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     for tag in report.path_tag_counts.keys() {
         require_non_empty(tag, "path_tag_counts[]")?;
     }
+    for tag in &report.total_requirement_tags {
+        require_non_empty(tag, "total_requirement_tags[]")?;
+    }
+    for tag in report.requirement_tag_counts.keys() {
+        require_non_empty(tag, "requirement_tag_counts[]")?;
+    }
     Ok(())
 }
 
@@ -578,6 +658,7 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
     require_number_field(summary, "transition_coverage_percent")?;
     require_number_field(summary, "business_transition_coverage_percent")?;
     require_number_field(summary, "setup_transition_coverage_percent")?;
+    require_number_field(summary, "requirement_tag_coverage_percent")?;
     require_number_field(summary, "decision_coverage_percent")?;
     require_number_field(summary, "guard_full_coverage_percent")?;
     require_number_field(summary, "business_guard_full_coverage_percent")?;
@@ -614,6 +695,12 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
             .ok_or_else(|| "depth_histogram must be present".to_string())?,
         "depth_histogram",
     )?;
+    for requirement_tag in require_array_field(object, "requirement_tags")? {
+        let requirement_tag_object = require_object(requirement_tag, "requirement_tags[]")?;
+        require_string_field(requirement_tag_object, "tag")?;
+        require_bool_field(requirement_tag_object, "covered")?;
+        require_number_field(requirement_tag_object, "count")?;
+    }
     for path_tag in require_array_field(object, "path_tags")? {
         let path_tag_object = require_object(path_tag, "path_tags[]")?;
         require_string_field(path_tag_object, "tag")?;
@@ -695,6 +782,7 @@ mod tests {
         assert_eq!(report.schema_version, "1.0.0");
         assert_eq!(report.model_id, "A");
         assert_eq!(report.transition_coverage_percent, 50);
+        assert_eq!(report.requirement_tag_coverage_percent, 100);
         assert_eq!(report.decision_coverage_percent, 50);
         assert_eq!(report.guard_full_coverage_percent, 0);
         assert_eq!(report.visited_state_count, 2);
@@ -719,6 +807,7 @@ mod tests {
         let text = render_coverage_text(&report);
         assert!(text.contains("gate_status=fail"));
         assert!(text.contains("transition_coverage_percent=50"));
+        assert!(text.contains("requirement_tag_coverage_percent=100"));
         assert!(text.contains("decision_coverage_percent=50"));
         assert!(text.contains("repeated_state_count=0"));
     }
@@ -770,5 +859,76 @@ mod tests {
             report.action_roles.get("SETUP").map(String::as_str),
             Some("setup")
         );
+    }
+
+    #[test]
+    fn tracks_requirement_tag_coverage_separately_from_setup_axes() {
+        let mut model = compile_model(
+            "model Refund\nstate:\n  amount: u8[0..7]\n  approved: bool\ninit:\n  amount = 0\n  approved = false\naction PREPARE:\n  role: setup\n  pre: true\n  post:\n    amount = 1\naction APPROVE:\n  pre: amount == 1\n  post:\n    approved = true\nproperty P_SAFE:\n  invariant: amount <= 7\n",
+        )
+        .unwrap();
+        model
+            .actions
+            .iter_mut()
+            .find(|action| action.action_id == "APPROVE")
+            .expect("APPROVE action should exist")
+            .path_tags = vec!["finance_path".to_string(), "risk_path".to_string()];
+        let trace = EvidenceTrace {
+            schema_version: "1.0.0".to_string(),
+            evidence_id: "ev-finance".to_string(),
+            run_id: "run-finance".to_string(),
+            property_id: "P_SAFE".to_string(),
+            evidence_kind: EvidenceKind::Trace,
+            assurance_level: AssuranceLevel::Complete,
+            trace_hash: "sha256:finance".to_string(),
+            steps: vec![
+                TraceStep {
+                    index: 0,
+                    from_state_id: "s-0".to_string(),
+                    action_id: Some("PREPARE".to_string()),
+                    action_label: Some("PREPARE".to_string()),
+                    to_state_id: "s-1".to_string(),
+                    depth: 1,
+                    state_before: BTreeMap::from([
+                        ("amount".to_string(), Value::UInt(0)),
+                        ("approved".to_string(), Value::Bool(false)),
+                    ]),
+                    state_after: BTreeMap::from([
+                        ("amount".to_string(), Value::UInt(1)),
+                        ("approved".to_string(), Value::Bool(false)),
+                    ]),
+                    path: None,
+                    note: None,
+                },
+                TraceStep {
+                    index: 1,
+                    from_state_id: "s-1".to_string(),
+                    action_id: Some("APPROVE".to_string()),
+                    action_label: Some("APPROVE".to_string()),
+                    to_state_id: "s-2".to_string(),
+                    depth: 2,
+                    state_before: BTreeMap::from([
+                        ("amount".to_string(), Value::UInt(1)),
+                        ("approved".to_string(), Value::Bool(false)),
+                    ]),
+                    state_after: BTreeMap::from([
+                        ("amount".to_string(), Value::UInt(1)),
+                        ("approved".to_string(), Value::Bool(true)),
+                    ]),
+                    path: None,
+                    note: None,
+                },
+            ],
+        };
+        let report = collect_coverage(&model, &[trace]);
+        assert_eq!(report.business_transition_coverage_percent, 100);
+        assert_eq!(report.setup_transition_coverage_percent, 100);
+        assert_eq!(report.requirement_tag_coverage_percent, 100);
+        assert_eq!(report.requirement_tag_counts.get("finance_path"), Some(&1));
+        assert_eq!(report.requirement_tag_counts.get("risk_path"), Some(&1));
+        let json = render_coverage_json(&report);
+        assert!(json.contains("\"requirement_tags\""));
+        assert!(json.contains("\"requirement_tag_coverage_percent\":100"));
+        validate_rendered_coverage_json(&json).unwrap();
     }
 }

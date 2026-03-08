@@ -1,0 +1,11 @@
+registry = "examples/valid_models.rs"
+default_backend = "explicit"
+suite_models = ["approval-model"]
+generated_tests_dir = "generated-tests"
+artifacts_dir = "artifacts"
+
+[critical_properties]
+approval-model = ["P_APPROVAL_IS_BOOLEAN"]
+
+[property_suites.smoke]
+entries = [{ model = "approval-model", properties = ["P_APPROVAL_IS_BOOLEAN"] }]
