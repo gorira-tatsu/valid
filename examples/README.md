@@ -3,6 +3,9 @@
 `examples/` is intentionally small. It only contains user-facing Rust DSL
 registries that are easy to read and debug.
 
+For broader project layout guidance, see
+[`docs/project-organization.md`](../docs/project-organization.md).
+
 Every example should start with a `/* ... */` block comment that explains:
 
 - what business rule or finite-state contract is being modeled
@@ -35,6 +38,9 @@ Heavy or fixture-like inputs live elsewhere:
   Mock solver scripts used by CLI and solver integration tests.
 - `tests/fixtures/domain/`
   Shared domain helpers used only by integration tests.
+- `src/models/` or another explicit module tree in real projects
+  The actual model logic should usually live here, while `examples/` or other
+  registry files stay thin and export-focused.
 
 Typical commands:
 
@@ -59,3 +65,5 @@ cargo valid verify failing-counter
 ```
 
 Generated tests are written under `generated-tests/`, not under `tests/`.
+Registry files should stay small enough that a reviewer can tell which models
+they export without reading pages of transition logic.

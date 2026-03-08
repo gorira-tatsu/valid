@@ -1,0 +1,270 @@
+# Project Organization Guide
+
+This guide explains how to structure `valid` projects so models stay readable
+as they grow from a single example into a real verification suite.
+
+The goal is not to impose one mandatory layout. The goal is to keep model
+intent, shared domain vocabulary, registries, and generated artifacts from
+colliding in one place.
+
+Related documents:
+
+- [AI Authoring Guide](./ai/authoring-guide.md)
+- [Rust DSL Guide](./dsl/README.md)
+- [Examples](../examples/README.md)
+
+## Default Rules
+
+Use these as the default unless you have a clear reason to deviate:
+
+- keep one model per file
+- keep registry files thin
+- keep shared enums, state helpers, and domain vocabulary in separate modules
+- keep examples small and user-facing
+- keep generated artifacts out of hand-written source trees
+- add one short comment block at the top of every model file explaining scope
+
+`valid` works best when a reviewer can answer these questions quickly:
+
+- where is the source of truth for this model
+- which file exports it to `cargo valid`
+- which shared types are local to one model vs shared across a subdomain
+- where integration models live
+- where generated tests and artifacts go
+
+## Recommended Layouts
+
+### Small Project
+
+Use this when you have one or two models and only a small amount of shared
+domain vocabulary.
+
+```text
+my-app/
+├── Cargo.toml
+├── valid.toml
+├── examples/
+│   └── valid_models.rs
+├── src/
+│   ├── models/
+│   │   ├── approval.rs
+│   │   └── tenant_access.rs
+│   └── domain/
+│       └── mod.rs
+├── generated-tests/
+└── artifacts/
+```
+
+Recommended conventions:
+
+- `valid.toml` points at `examples/valid_models.rs`
+- `examples/valid_models.rs` only wires models into `valid_models![...]`
+- `src/models/*.rs` owns the actual `valid_model!` definitions
+- `src/domain/` holds shared enums and reusable helpers
+
+### Medium Project
+
+Use this when you have multiple subdomains, more than one registry consumer, or
+explicit integration models.
+
+```text
+my-app/
+├── Cargo.toml
+├── valid.toml
+├── examples/
+│   ├── valid_models.rs
+│   └── integration_models.rs
+├── src/
+│   ├── domain/
+│   │   ├── authz.rs
+│   │   ├── billing.rs
+│   │   └── shared.rs
+│   ├── models/
+│   │   ├── authz/
+│   │   │   ├── role_assignment.rs
+│   │   │   └── access_review.rs
+│   │   ├── billing/
+│   │   │   ├── quota_guardrail.rs
+│   │   │   └── invoice_state.rs
+│   │   └── integration/
+│   │       └── tenant_lifecycle.rs
+│   └── lib.rs
+├── docs/
+│   └── verification/
+├── generated-tests/
+└── artifacts/
+```
+
+Recommended conventions:
+
+- split by subdomain before files become large
+- keep integration models under a clearly named `integration/` subtree
+- keep shared domain vocabulary in `src/domain/`, not copied across model files
+- keep registries as export surfaces, not as places where model logic accumulates
+
+## File Responsibilities
+
+### `valid.toml`
+
+Treat `valid.toml` as project policy, not as a dumping ground.
+
+Good contents:
+
+- active registry path
+- default backend preferences
+- `critical_properties`
+- `property_suites`
+- artifact directories
+
+Do not put model logic here.
+
+### Registry files
+
+A registry file should stay thin. Its main job is to export models through
+`valid_models![...]` and start the CLI with `run_registry_cli(...)`.
+
+Prefer this:
+
+```rust
+use valid::{registry::run_registry_cli, valid_models};
+
+use crate::models::approval::ApprovalModel;
+use crate::models::integration::tenant_lifecycle::TenantLifecycleModel;
+
+fn main() {
+    run_registry_cli(valid_models![
+        "approval" => ApprovalModel,
+        "tenant-lifecycle" => TenantLifecycleModel,
+    ]);
+}
+```
+
+Avoid putting large blocks of model logic directly in registry files unless the
+project is intentionally tiny.
+
+### Model files
+
+By default, keep one model per file. Split sooner when:
+
+- the file mixes unrelated actions and properties
+- the file needs many repeated helper conditions
+- the model is primarily about a different subdomain than its neighbors
+- one review regularly changes without touching the others
+
+Each model file should explain:
+
+- what workflow or rule family it covers
+- what is explicitly out of scope
+- whether it is standalone or integration-focused
+- which properties are treated as critical
+
+### Shared domain types
+
+Put shared enums, finite-key types, and reusable domain helpers under a
+dedicated domain module instead of duplicating them inside multiple model
+files.
+
+Good candidates for `src/domain/`:
+
+- tenant, plan, role, region, or entitlement enums
+- reusable finite relation/map key types
+- small helper constructors used by more than one model
+
+Keep model-specific predicates and transition logic in the model file itself.
+
+### Integration models
+
+Use integration models when you need to check the interaction between otherwise
+separate subdomains.
+
+Keep them separate from standalone models when possible:
+
+- standalone models stay focused and easier to review
+- integration models can state shared assumptions explicitly
+- CI and AI workflows can decide whether to run a small focused model or a
+  broader combined one
+
+If an integration model starts owning all the business logic, it is usually a
+sign that the underlying standalone models are too weak or too fragmented.
+
+## What Goes Where
+
+Use these repository areas intentionally:
+
+- `examples/`
+  small user-facing registries that demonstrate one idea clearly
+- `benchmarks/registries/`
+  larger or stress-oriented registries for scale/performance work
+- `tests/fixtures/models/`
+  `.valid` compatibility fixtures and frontend parsing fixtures
+- `tests/fixtures/domain/`
+  shared domain helpers for test-only model scenarios
+- `generated-tests/`
+  generated outputs from `generate-tests`
+- `artifacts/`
+  graph, report, benchmark, and verification outputs
+- `docs/`
+  long-lived explanation and workflow guidance
+
+Do not mix generated output back into `src/`, `examples/`, or `tests/`.
+
+## When To Split A Model
+
+Stay with one file when:
+
+- the action set is small
+- one bounded domain tells one coherent story
+- review discussions happen in one place
+
+Split by subdomain when:
+
+- one file is trying to cover multiple workflows
+- properties naturally cluster into separate rule families
+- action metadata becomes noisy or duplicated
+- comments start explaining several different mental models
+
+Split into an integration model when:
+
+- correctness depends on shared state slices across multiple models
+- one user journey crosses multiple bounded contexts
+- the standalone models are each useful, but a cross-model invariant also
+  matters
+
+## Templates and Examples
+
+The current repo reflects this guidance in a few ways:
+
+- `cargo valid init` scaffolds a thin project-first registry at
+  `examples/valid_models.rs`
+- [`examples/README.md`](../examples/README.md) keeps the user-facing examples
+  small and names where heavy fixtures belong instead
+- the AI authoring docs assume registry mode and project-level organization
+  instead of one giant model file
+
+When you add a new example, prefer a small purpose-built registry under
+`examples/` and keep benchmark-like or fixture-like inputs out of that path.
+
+## AI Workflow Guidance
+
+When an AI assistant works in a `valid` project, it should:
+
+1. locate `valid.toml`
+2. identify the active registry
+3. find the model file behind the registry entry
+4. check whether shared types live in a domain module
+5. decide whether the change belongs in a standalone model, integration model,
+   registry wiring, or project policy
+
+This keeps the assistant from editing registries as if they were the source of
+truth for the model logic.
+
+## Review Checklist
+
+Before merging a new model or layout change, verify:
+
+- model logic is not hidden inside the registry file
+- shared types are not duplicated across multiple models
+- integration models are clearly separated from standalone ones
+- generated artifacts stay in `generated-tests/` or `artifacts/`
+- the top of each model file explains scope and intent
+- examples stay small and human-readable
