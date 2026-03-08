@@ -41,7 +41,7 @@ pub(crate) const PROMPTS: &[PromptEntry] = &[
     PromptEntry {
         name: "clarify_requirement",
         title: "Clarify Requirement",
-        description: "Guide an LLM through turning an ambiguous requirement into a concrete modeling brief before authoring begins.",
+        description: "Compatibility alias for refine_requirement for clients that still use the older clarification-first prompt name.",
         arguments: &[
             PromptArgument {
                 name: "requirement",

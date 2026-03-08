@@ -1634,7 +1634,7 @@ fn prompt_messages(
             target_hint
         ),
         "clarify_requirement" => format!(
-            "Clarify the requirement before writing or editing a valid model.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and modeling checklist.\n2. Ask only the minimum follow-up questions needed to pin down state, actions, success/failure paths, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with a compact modeling brief that names likely scenarios, predicates, properties, and verification mode.\n\n{}",
+            "Clarify the requirement before writing or editing a valid model. This prompt is the compatibility alias for refine_requirement.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the requirement refinement workflow and AI authoring guide.\n2. Ask only the minimum follow-up questions needed to pin down state, actions, success/failure paths, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with a compact modeling brief that names likely scenarios, predicates, properties, and verification mode.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),
