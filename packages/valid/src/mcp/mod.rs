@@ -15,9 +15,9 @@ mod prompts_catalog;
 use crate::{
     api::{
         check_source, compile_source, distinguish_source, explain_source, inspect_source,
-        lint_source, render_distinguish_json, render_explain_json, render_inspect_json,
-        render_lint_json, testgen_source, CheckRequest, DistinguishRequest, InspectRequest,
-        OrchestrateRequest, TestgenRequest, orchestrate_source,
+        lint_source, orchestrate_source, render_distinguish_json, render_explain_json,
+        render_inspect_json, render_lint_json, testgen_source, CheckRequest, DistinguishRequest,
+        InspectRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::list_bundled_models,
     contract::{compare_snapshot, parse_lock_file, snapshot_model},
@@ -741,7 +741,7 @@ fn input_schema_with_backend() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -772,7 +772,7 @@ fn input_schema_with_backend_and_property() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -806,7 +806,7 @@ fn input_schema_with_testgen() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));
@@ -922,7 +922,7 @@ fn input_schema_suite_run() -> Value {
         "backend".to_string(),
         json!({
             "type": "string",
-            "enum": ["explicit", "mock-bmc", "sat-varisat", "smt-cvc5", "command"]
+            "enum": crate::solver::mcp_backend_names()
         }),
     );
     properties.insert("solver_executable".to_string(), json!({ "type": "string" }));

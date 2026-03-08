@@ -232,6 +232,34 @@ fn cli_capabilities_reports_temporal_backend_details() {
 }
 
 #[test]
+fn cli_capabilities_reports_sat_backend_availability() {
+    let output = Command::new(binary_path())
+        .arg("capabilities")
+        .arg("--backend")
+        .arg("sat-varisat")
+        .arg("--json")
+        .output()
+        .expect("capabilities should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"backend\":\"sat-varisat\""));
+    #[cfg(feature = "varisat-backend")]
+    {
+        assert!(stdout.contains("\"compiled_in\":true"));
+        assert!(stdout.contains("\"available\":true"));
+    }
+    #[cfg(not(feature = "varisat-backend"))]
+    {
+        assert!(stdout.contains("\"compiled_in\":false"));
+        assert!(stdout.contains("\"available\":false"));
+        assert!(stdout.contains(
+            "\"availability_reason\":\"this binary was built without the varisat-backend feature\""
+        ));
+        assert!(stdout.contains("\"remediation\":\"reinstall or rebuild valid with `--features varisat-backend`, or use `cargo valid --backend=sat-varisat` so the feature is added automatically\""));
+    }
+}
+
+#[test]
 fn cli_distinguish_reports_divergence_as_json() {
     let temp_root = unique_temp_dir("valid-cli-distinguish");
     fs::create_dir_all(&temp_root).expect("temp root");
