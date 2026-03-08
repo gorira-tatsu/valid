@@ -196,6 +196,22 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     assert!(initialize["capabilities"]["logging"].is_object());
 
     let tools = client.request("tools/list", json!({}));
+    #[cfg(not(feature = "varisat-backend"))]
+    {
+        let valid_check = tools["tools"]
+            .as_array()
+            .expect("tools/list should return tools")
+            .iter()
+            .find(|tool| tool["name"].as_str() == Some("valid_check"))
+            .expect("valid_check should be listed");
+        let backend_enum = valid_check["inputSchema"]["properties"]["backend"]["enum"]
+            .as_array()
+            .expect("backend enum should be listed")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(!backend_enum.iter().any(|backend| *backend == "sat-varisat"));
+    }
     let tool_names = tools
         .get("tools")
         .and_then(Value::as_array)

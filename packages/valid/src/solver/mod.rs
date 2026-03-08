@@ -28,6 +28,11 @@ use self::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityMatrix {
     pub backend_name: String,
+    pub builtin: bool,
+    pub compiled_in: bool,
+    pub available: bool,
+    pub availability_reason: Option<String>,
+    pub remediation: Option<String>,
     pub supports_explicit: bool,
     pub supports_bmc: bool,
     pub supports_certificate: bool,
@@ -138,10 +143,27 @@ pub enum AdapterConfig {
     },
 }
 
+pub const fn sat_varisat_compiled_in() -> bool {
+    cfg!(feature = "varisat-backend")
+}
+
+pub fn mcp_backend_names() -> Vec<&'static str> {
+    let mut backends = vec!["explicit", "mock-bmc", "smt-cvc5", "command"];
+    if sat_varisat_compiled_in() {
+        backends.insert(2, "sat-varisat");
+    }
+    backends
+}
+
 pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
     format!(
-        "{{\"backend\":\"{}\",\"capabilities\":{{\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{}}}}}",
+        "{{\"backend\":\"{}\",\"capabilities\":{{\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{}}}}}",
         matrix.backend_name,
+        matrix.builtin,
+        matrix.compiled_in,
+        matrix.available,
+        render_optional_string(matrix.availability_reason.as_deref()),
+        render_optional_string(matrix.remediation.as_deref()),
         matrix.supports_explicit,
         matrix.supports_bmc,
         matrix.supports_certificate,
@@ -154,9 +176,22 @@ pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
 
 pub fn validate_capability_matrix(matrix: &CapabilityMatrix) -> Result<(), String> {
     require_non_empty(&matrix.backend_name, "backend_name")?;
+    if let Some(reason) = &matrix.availability_reason {
+        require_non_empty(reason, "availability_reason")?;
+    }
+    if let Some(remediation) = &matrix.remediation {
+        require_non_empty(remediation, "remediation")?;
+    }
     require_non_empty(&matrix.temporal.status, "temporal.status")?;
     require_non_empty(&matrix.temporal.semantics, "temporal.semantics")?;
     Ok(())
+}
+
+fn render_optional_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
+    }
 }
 
 fn render_temporal_capability_json(temporal: &TemporalCapabilityMatrix) -> String {
@@ -343,6 +378,11 @@ impl SolverAdapter for ExplicitAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "explicit".to_string(),
+            builtin: true,
+            compiled_in: true,
+            available: true,
+            availability_reason: None,
+            remediation: None,
             supports_explicit: true,
             supports_bmc: false,
             supports_certificate: false,
@@ -437,6 +477,11 @@ impl SolverAdapter for MockBmcAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "mock-bmc".to_string(),
+            builtin: true,
+            compiled_in: true,
+            available: true,
+            availability_reason: None,
+            remediation: None,
             supports_explicit: false,
             supports_bmc: true,
             supports_certificate: false,
@@ -535,6 +580,11 @@ impl SolverAdapter for Cvc5Adapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "smt-cvc5".to_string(),
+            builtin: false,
+            compiled_in: false,
+            available: true,
+            availability_reason: None,
+            remediation: None,
             supports_explicit: false,
             supports_bmc: true,
             supports_certificate: false,
@@ -647,6 +697,21 @@ impl SolverAdapter for VarisatAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "sat-varisat".to_string(),
+            builtin: true,
+            compiled_in: cfg!(feature = "varisat-backend"),
+            available: cfg!(feature = "varisat-backend"),
+            availability_reason: if cfg!(feature = "varisat-backend") {
+                None
+            } else {
+                Some("this binary was built without the varisat-backend feature".to_string())
+            },
+            remediation: if cfg!(feature = "varisat-backend") {
+                None
+            } else {
+                Some(
+                    "reinstall or rebuild valid with `--features varisat-backend`, or use `cargo valid --backend=sat-varisat` so the feature is added automatically".to_string(),
+                )
+            },
             supports_explicit: false,
             supports_bmc: true,
             supports_certificate: false,
@@ -753,6 +818,11 @@ impl SolverAdapter for CommandSolverAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: self.backend_name.clone(),
+            builtin: false,
+            compiled_in: false,
+            available: true,
+            availability_reason: None,
+            remediation: None,
             supports_explicit: false,
             supports_bmc: true,
             supports_certificate: false,
