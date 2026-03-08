@@ -78,7 +78,7 @@ impl McpClient {
         let result = self.request(
             "initialize",
             json!({
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": "2025-11-25",
                 "capabilities": {},
                 "clientInfo": { "name": "valid-test", "version": "0.1.0" }
             }),
@@ -126,6 +126,10 @@ impl McpClient {
                 "arguments": arguments
             }),
         )
+    }
+
+    fn set_log_level(&mut self, level: &str) -> Value {
+        self.request("logging/setLevel", json!({ "level": level }))
     }
 
     fn send(&mut self, message: Value) {
@@ -179,8 +183,17 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
             .get("protocolVersion")
             .and_then(Value::as_str)
             .expect("protocol version should be present"),
-        "2025-06-18"
+        "2025-11-25"
     );
+    assert_eq!(
+        initialize["capabilities"]["tools"]["listChanged"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        initialize["capabilities"]["resources"]["subscribe"].as_bool(),
+        Some(false)
+    );
+    assert!(initialize["capabilities"]["logging"].is_object());
 
     let tools = client.request("tools/list", json!({}));
     let tool_names = tools
@@ -209,6 +222,52 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     ] {
         assert!(tool_names.contains(&expected), "missing tool {expected}");
     }
+    assert!(tools["tools"]
+        .as_array()
+        .expect("tools should be present")
+        .iter()
+        .all(|tool| tool.get("outputSchema").is_some()));
+
+    let resources = client.request("resources/list", json!({}));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
+        .any(|item| item["uri"] == "valid://docs/ai-authoring-guide"));
+
+    let authoring_resource = client.request(
+        "resources/read",
+        json!({ "uri": "valid://docs/ai-authoring-guide" }),
+    );
+    assert!(authoring_resource["contents"][0]["text"]
+        .as_str()
+        .expect("resource text should be present")
+        .contains("AI Authoring Guide"));
+
+    let prompts = client.request("prompts/list", json!({}));
+    assert!(prompts["prompts"]
+        .as_array()
+        .expect("prompts should be present")
+        .iter()
+        .any(|item| item["name"] == "author_model"));
+
+    let prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "author_model",
+            "arguments": {
+                "domain": "approval flow with review and export policy"
+            }
+        }),
+    );
+    assert!(prompt["messages"]
+        .as_array()
+        .expect("prompt messages should be present")
+        .iter()
+        .any(|item| item["content"]["type"] == "resource"));
+
+    let logging = client.set_log_level("debug");
+    assert_eq!(logging, json!({}));
 
     let docs_index = structured_content(client.call_tool("valid_docs_index", json!({})));
     assert_eq!(docs_index["canonical_entry"], "ai-authoring-guide");
@@ -427,6 +486,13 @@ fn valid_mcp_supports_registry_mode_with_default_binary() {
     let mut client = McpClient::spawn(&["--registry-binary", &registry_str], temp.path());
     client.initialize();
 
+    let resources = client.request("resources/list", json!({}));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
+        .any(|item| item["uri"] == "valid://targets/default-registry-binary"));
+
     let listed = structured_content(client.call_tool("valid_list_models", json!({})));
     assert_eq!(listed["models"][0], "mock-safe");
 
@@ -481,4 +547,29 @@ fn valid_mcp_allows_explicit_dsl_calls_when_default_registry_is_configured() {
         .expect("bundled models should be present")
         .iter()
         .any(|item| item == "counter"));
+}
+
+#[test]
+fn valid_mcp_exposes_default_model_file_as_resource() {
+    let temp = TempDir::new("mcp-default-model-file");
+    let model_file = fixture("failing_counter.valid");
+    let model_file_str = model_file.to_string_lossy().to_string();
+    let mut client = McpClient::spawn(&["--model-file", &model_file_str], temp.path());
+    client.initialize();
+
+    let resources = client.request("resources/list", json!({}));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
+        .any(|item| item["uri"] == "valid://targets/default-model-file"));
+
+    let contents = client.request(
+        "resources/read",
+        json!({ "uri": "valid://targets/default-model-file" }),
+    );
+    assert!(contents["contents"][0]["text"]
+        .as_str()
+        .expect("resource text should be present")
+        .contains("model FailingCounter"));
 }

@@ -2,13 +2,15 @@ use std::{
     collections::BTreeSet,
     fs,
     io::{self, BufRead, Write},
+    path::Path as FsPath,
     process::Command,
 };
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 mod docs_catalog;
+mod prompts_catalog;
 
 use crate::{
     api::{
@@ -31,14 +33,73 @@ use crate::{
     testgen::render_replay_json,
 };
 
-const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
-    &["2025-11-05", "2025-06-18", "2025-03-26", "2024-11-05"];
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25"];
+const JSON_SCHEMA_DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
+const PAGE_SIZE: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub server_name: String,
     pub default_model_file: Option<String>,
     pub default_registry_binary: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LogLevel {
+    Debug,
+    Info,
+    Notice,
+    Warning,
+    Error,
+    Critical,
+    Alert,
+    Emergency,
+}
+
+impl LogLevel {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "debug" => Some(Self::Debug),
+            "info" => Some(Self::Info),
+            "notice" => Some(Self::Notice),
+            "warning" => Some(Self::Warning),
+            "error" => Some(Self::Error),
+            "critical" => Some(Self::Critical),
+            "alert" => Some(Self::Alert),
+            "emergency" => Some(Self::Emergency),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Notice => "notice",
+            Self::Warning => "warning",
+            Self::Error => "error",
+            Self::Critical => "critical",
+            Self::Alert => "alert",
+            Self::Emergency => "emergency",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SessionState {
+    initialize_seen: bool,
+    client_initialized: bool,
+    log_level: LogLevel,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            initialize_seen: false,
+            client_initialized: false,
+            log_level: LogLevel::Info,
+        }
+    }
 }
 
 impl Default for ServerConfig {
@@ -55,6 +116,7 @@ pub fn serve_stdio(config: ServerConfig) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
+    let mut session = SessionState::default();
 
     for line in stdin.lock().lines() {
         let line = line.map_err(|err| format!("failed to read stdin: {err}"))?;
@@ -76,7 +138,7 @@ pub fn serve_stdio(config: ServerConfig) -> Result<(), String> {
         let maybe_response = if let Some(batch) = incoming.as_array() {
             let responses = batch
                 .iter()
-                .filter_map(|message| handle_message(message, &config))
+                .filter_map(|message| handle_message(message, &config, &mut session, &mut writer))
                 .collect::<Vec<_>>();
             if responses.is_empty() {
                 None
@@ -84,7 +146,7 @@ pub fn serve_stdio(config: ServerConfig) -> Result<(), String> {
                 Some(Value::Array(responses))
             }
         } else {
-            handle_message(&incoming, &config)
+            handle_message(&incoming, &config, &mut session, &mut writer)
         };
 
         if let Some(response) = maybe_response {
@@ -106,7 +168,12 @@ fn write_message(writer: &mut impl Write, payload: &Value) -> Result<(), String>
         .map_err(|err| format!("failed to flush response: {err}"))
 }
 
-fn handle_message(message: &Value, config: &ServerConfig) -> Option<Value> {
+fn handle_message(
+    message: &Value,
+    config: &ServerConfig,
+    session: &mut SessionState,
+    writer: &mut impl Write,
+) -> Option<Value> {
     let object = match message.as_object() {
         Some(object) => object,
         None => {
@@ -145,28 +212,137 @@ fn handle_message(message: &Value, config: &ServerConfig) -> Option<Value> {
     let params = object.get("params").cloned().unwrap_or(Value::Null);
 
     if id.is_none() {
-        handle_notification(method);
+        handle_notification(method, &params, session);
         return None;
     }
 
     let id = id.unwrap_or(Value::Null);
+    if !session.initialize_seen && !matches!(method, "initialize" | "ping") {
+        return Some(error_response(
+            id,
+            -32002,
+            "server must be initialized before calling this method",
+        ));
+    }
+
     Some(match method {
-        "initialize" => response(id, initialize_result(config, &params)),
+        "initialize" => {
+            session.initialize_seen = true;
+            maybe_log(
+                writer,
+                session,
+                LogLevel::Info,
+                "initialize",
+                json!({
+                    "requestedProtocolVersion": params.get("protocolVersion").and_then(Value::as_str),
+                    "serverName": config.server_name,
+                }),
+            );
+            response(id, initialize_result(config, &params))
+        }
         "ping" => response(id, json!({})),
-        "tools/list" => response(id, json!({ "tools": tool_definitions() })),
-        "tools/call" => match handle_tool_call(config, &params) {
-            Ok(result) => response(id, result.into_value()),
+        "logging/setLevel" => match logging_set_level(session, &params) {
+            Ok(result) => response(id, result),
             Err(error) => error_response(id, -32602, &error),
+        },
+        "tools/list" => match list_tools(&params) {
+            Ok(result) => {
+                maybe_log(writer, session, LogLevel::Debug, "tools/list", json!({}));
+                response(id, result)
+            }
+            Err(error) => error_response(id, -32602, &error),
+        },
+        "tools/call" => {
+            let tool_name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let result = handle_tool_call(config, &params);
+            maybe_log(
+                writer,
+                session,
+                if result.is_error {
+                    LogLevel::Warning
+                } else {
+                    LogLevel::Info
+                },
+                "tools/call",
+                json!({
+                    "tool": tool_name,
+                    "isError": result.is_error
+                }),
+            );
+            response(id, result.into_value())
+        }
+        "resources/list" => match list_resources(config, &params) {
+            Ok(result) => {
+                maybe_log(
+                    writer,
+                    session,
+                    LogLevel::Debug,
+                    "resources/list",
+                    json!({}),
+                );
+                response(id, result)
+            }
+            Err(error) => error_response(id, -32602, &error),
+        },
+        "resources/read" => match read_resource(config, &params) {
+            Ok(result) => {
+                maybe_log(
+                    writer,
+                    session,
+                    LogLevel::Info,
+                    "resources/read",
+                    json!({
+                        "uri": params.get("uri").and_then(Value::as_str)
+                    }),
+                );
+                response(id, result)
+            }
+            Err(error) => error_response(id, -32002, &error),
+        },
+        "resources/templates/list" => match list_resource_templates(&params) {
+            Ok(result) => response(id, result),
+            Err(error) => error_response(id, -32602, &error),
+        },
+        "prompts/list" => match list_prompts(&params) {
+            Ok(result) => {
+                maybe_log(writer, session, LogLevel::Debug, "prompts/list", json!({}));
+                response(id, result)
+            }
+            Err(error) => error_response(id, -32602, &error),
+        },
+        "prompts/get" => match get_prompt(config, &params) {
+            Ok(result) => {
+                maybe_log(
+                    writer,
+                    session,
+                    LogLevel::Info,
+                    "prompts/get",
+                    json!({
+                        "name": params.get("name").and_then(Value::as_str)
+                    }),
+                );
+                response(id, result)
+            }
+            Err(error) => error_response(id, -32002, &error),
         },
         _ => error_response(id, -32601, &format!("method `{method}` is not supported")),
     })
 }
 
-fn handle_notification(method: &str) {
+fn handle_notification(method: &str, params: &Value, session: &mut SessionState) {
     if matches!(
         method,
         "notifications/initialized" | "notifications/cancelled"
     ) {
+        if method == "notifications/initialized" {
+            session.client_initialized = true;
+        }
+        return;
+    }
+    if method == "notifications/message" && params.get("level").is_some() {
         return;
     }
 }
@@ -184,13 +360,19 @@ fn initialize_result(config: &ServerConfig, params: &Value) -> Value {
     json!({
         "protocolVersion": protocol_version,
         "capabilities": {
-            "tools": {}
+            "tools": { "listChanged": true },
+            "resources": {
+                "subscribe": false,
+                "listChanged": true
+            },
+            "prompts": { "listChanged": true },
+            "logging": {}
         },
         "serverInfo": {
             "name": config.server_name,
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use valid_docs_index then valid_docs_get for guidance. Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
+        "instructions": "Use resources/list or valid_docs_index to discover guidance. Start with ai-authoring-guide, then valid_example_get or resources/read for examples. Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
     })
 }
 
@@ -219,107 +401,256 @@ fn tool_definitions() -> Vec<Value> {
             "valid_docs_index",
             "List AI-facing docs with stable ids, audience, and recommended entrypoints.",
             input_schema_empty(),
+            output_schema_docs_index(),
             true,
         ),
         tool(
             "valid_docs_get",
             "Fetch a documentation entry by stable doc id with structured guidance and markdown body.",
             input_schema_with_doc_id(),
+            output_schema_docs_get(),
             true,
         ),
         tool(
             "valid_examples_list",
             "List curated learning examples with concepts, mode, and recommended order.",
             input_schema_empty(),
+            output_schema_examples_list(),
             true,
         ),
         tool(
             "valid_example_get",
             "Fetch a curated example by stable example id with commands, concepts, and source text.",
             input_schema_with_example_id(),
+            output_schema_example_get(),
             true,
         ),
         tool(
             "valid_inspect",
             "Inspect a valid model and return state fields, actions, properties, and capabilities.",
             input_schema_with_backend(),
+            output_schema_with_success_required(&["model_id", "actions", "properties", "capabilities"]),
             true,
         ),
         tool(
             "valid_check",
             "Run property verification and return PASS, FAIL, or UNKNOWN with evidence details.",
             input_schema_with_backend_and_property(),
+            output_schema_with_success_required(&["status", "property_result"]),
             true,
         ),
         tool(
             "valid_explain",
             "Explain a counterexample and return likely causes, hints, and involved fields.",
             input_schema_with_backend_and_property(),
+            output_schema_with_success_required(&["property_id"]),
             true,
         ),
         tool(
             "valid_coverage",
             "Compute transition and guard coverage from the current verification trace.",
             input_schema_with_backend_and_property(),
+            output_schema_with_success_required(&["model_id", "summary"]),
             true,
         ),
         tool(
             "valid_testgen",
             "Generate regression or witness vectors for a model.",
             input_schema_with_testgen(),
+            output_schema_with_success_required(&["status", "vector_ids", "generated_files"]),
             false,
         ),
         tool(
             "valid_replay",
             "Replay an action sequence and report the terminal state and property result.",
             input_schema_with_replay(),
+            output_schema_with_success_required(&["status"]),
             true,
         ),
         tool(
             "valid_contract_snapshot",
             "Return the current contract hash for a model or registry.",
             input_schema_with_contract_snapshot(),
+            output_schema_any_object(),
             true,
         ),
         tool(
             "valid_contract_check",
             "Compare the current contract against a lock file and report drift.",
             input_schema_with_contract_check(),
+            output_schema_any_object(),
             true,
         ),
         tool(
             "valid_list_models",
             "List bundled models or models exported by a registry binary.",
             input_schema_list_models(),
+            output_schema_with_success_required(&["models"]),
             true,
         ),
         tool(
             "valid_graph",
             "Render a model graph as Mermaid, DOT, SVG, text, or JSON.",
             input_schema_with_graph(),
+            output_schema_with_success_required(&["format"]),
             true,
         ),
         tool(
             "valid_lint",
             "Run static analysis and capability lint checks on a model.",
             input_schema_basic(),
+            output_schema_with_success_required(&["status", "findings"]),
             true,
         ),
     ]
 }
 
-fn tool(name: &str, description: &str, input_schema: Value, read_only: bool) -> Value {
+fn tool(
+    name: &str,
+    description: &str,
+    input_schema: Value,
+    output_schema: Value,
+    read_only: bool,
+) -> Value {
     json!({
         "name": name,
         "title": name,
         "description": description,
         "inputSchema": input_schema,
+        "outputSchema": output_schema,
         "annotations": {
             "readOnlyHint": read_only,
             "destructiveHint": false,
             "idempotentHint": read_only,
             "openWorldHint": false
         }
+    })
+}
+
+fn output_schema_any_object() -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn output_schema_with_success_required(required: &[&str]) -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "required": required,
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn output_schema_docs_index() -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["canonical_entry", "docs"],
+                "properties": {
+                    "canonical_entry": { "type": "string" },
+                    "docs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["doc_id", "title", "source_path"],
+                            "additionalProperties": true
+                        }
+                    }
+                },
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn output_schema_docs_get() -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["doc_id", "title", "source_path", "body_markdown"],
+                "properties": {
+                    "doc_id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "source_path": { "type": "string" },
+                    "body_markdown": { "type": "string" }
+                },
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn output_schema_examples_list() -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["examples"],
+                "properties": {
+                    "examples": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["example_id", "title", "source_path"],
+                            "additionalProperties": true
+                        }
+                    }
+                },
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn output_schema_example_get() -> Value {
+    json!({
+        "$schema": JSON_SCHEMA_DRAFT_2020_12,
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["example_id", "title", "source_path", "source_text"],
+                "properties": {
+                    "example_id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "source_path": { "type": "string" },
+                    "source_text": { "type": "string" }
+                },
+                "additionalProperties": true
+            },
+            error_object_schema()
+        ]
+    })
+}
+
+fn error_object_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+            "error": { "type": "string" }
+        },
+        "additionalProperties": true
     })
 }
 
@@ -560,68 +891,110 @@ fn common_target_properties() -> serde_json::Map<String, Value> {
     properties
 }
 
-fn handle_tool_call(config: &ServerConfig, params: &Value) -> Result<ToolResult, String> {
-    let call: ToolCallParams = serde_json::from_value(params.clone())
-        .map_err(|err| format!("invalid tool call: {err}"))?;
+fn handle_tool_call(config: &ServerConfig, params: &Value) -> ToolResult {
+    let call: ToolCallParams = match serde_json::from_value(params.clone()) {
+        Ok(call) => call,
+        Err(err) => return ToolResult::error_message(format!("invalid tool call: {err}")),
+    };
     let arguments = call.arguments.unwrap_or_else(|| json!({}));
 
-    match call.name.as_str() {
+    let outcome = match call.name.as_str() {
         "valid_docs_index" => docs_index_tool(),
         "valid_docs_get" => {
-            let args = parse_args::<DocGetArgs>(&arguments)?;
-            docs_get_tool(&args)
+            let args = parse_args::<DocGetArgs>(&arguments);
+            match args {
+                Ok(args) => docs_get_tool(&args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_examples_list" => examples_list_tool(),
         "valid_example_get" => {
-            let args = parse_args::<ExampleGetArgs>(&arguments)?;
-            example_get_tool(&args)
+            let args = parse_args::<ExampleGetArgs>(&arguments);
+            match args {
+                Ok(args) => example_get_tool(&args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_inspect" => {
-            let args = parse_args::<BasicArgs>(&arguments)?;
-            inspect_tool(config, &args)
+            let args = parse_args::<BasicArgs>(&arguments);
+            match args {
+                Ok(args) => inspect_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_check" => {
-            let args = parse_args::<BackendArgs>(&arguments)?;
-            check_tool(config, &args)
+            let args = parse_args::<BackendArgs>(&arguments);
+            match args {
+                Ok(args) => check_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_explain" => {
-            let args = parse_args::<BackendArgs>(&arguments)?;
-            explain_tool(config, &args)
+            let args = parse_args::<BackendArgs>(&arguments);
+            match args {
+                Ok(args) => explain_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_coverage" => {
-            let args = parse_args::<BackendArgs>(&arguments)?;
-            coverage_tool(config, &args)
+            let args = parse_args::<BackendArgs>(&arguments);
+            match args {
+                Ok(args) => coverage_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_testgen" => {
-            let args = parse_args::<TestgenArgs>(&arguments)?;
-            testgen_tool(config, &args)
+            let args = parse_args::<TestgenArgs>(&arguments);
+            match args {
+                Ok(args) => testgen_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_replay" => {
-            let args = parse_args::<ReplayArgs>(&arguments)?;
-            replay_tool(config, &args)
+            let args = parse_args::<ReplayArgs>(&arguments);
+            match args {
+                Ok(args) => replay_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_contract_snapshot" => {
-            let args = parse_args::<ContractSnapshotArgs>(&arguments)?;
-            contract_snapshot_tool(config, &args)
+            let args = parse_args::<ContractSnapshotArgs>(&arguments);
+            match args {
+                Ok(args) => contract_snapshot_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_contract_check" => {
-            let args = parse_args::<ContractCheckArgs>(&arguments)?;
-            contract_check_tool(config, &args)
+            let args = parse_args::<ContractCheckArgs>(&arguments);
+            match args {
+                Ok(args) => contract_check_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_list_models" => {
-            let args = parse_args::<ListModelsArgs>(&arguments)?;
-            list_models_tool(config, &args)
+            let args = parse_args::<ListModelsArgs>(&arguments);
+            match args {
+                Ok(args) => list_models_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_graph" => {
-            let args = parse_args::<GraphArgs>(&arguments)?;
-            graph_tool(config, &args)
+            let args = parse_args::<GraphArgs>(&arguments);
+            match args {
+                Ok(args) => graph_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
         "valid_lint" => {
-            let args = parse_args::<BasicArgs>(&arguments)?;
-            lint_tool(config, &args)
+            let args = parse_args::<BasicArgs>(&arguments);
+            match args {
+                Ok(args) => lint_tool(config, &args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
         }
-        other => Err(format!("unknown tool `{other}`")),
-    }
+        other => Ok(ToolResult::error_message(format!("unknown tool `{other}`"))),
+    };
+    outcome.unwrap_or_else(ToolResult::error_message)
 }
 
 fn parse_args<T>(arguments: &Value) -> Result<T, String>
@@ -637,6 +1010,32 @@ struct ToolCallParams {
     name: String,
     #[serde(default)]
     arguments: Option<Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct PaginatedParams {
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ReadResourceParams {
+    uri: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct GetPromptParams {
+    name: String,
+    #[serde(default)]
+    arguments: Map<String, Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SetLevelParams {
+    level: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -926,6 +1325,303 @@ fn registry_tool_result(result: Result<(i32, Value), String>, success_codes: &[i
         Ok((code, value)) if success_codes.contains(&code) => ToolResult::success(value),
         Ok((_, value)) => ToolResult::error(value),
         Err(message) => ToolResult::error_message(message),
+    }
+}
+
+fn logging_set_level(session: &mut SessionState, params: &Value) -> Result<Value, String> {
+    let request = parse_args::<SetLevelParams>(params)?;
+    let level = LogLevel::parse(&request.level)
+        .ok_or_else(|| format!("unsupported logging level `{}`", request.level))?;
+    session.log_level = level;
+    Ok(json!({}))
+}
+
+fn maybe_log(
+    writer: &mut impl Write,
+    session: &SessionState,
+    level: LogLevel,
+    method: &str,
+    data: Value,
+) {
+    if !session.client_initialized || level < session.log_level {
+        return;
+    }
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/message",
+        "params": {
+            "level": level.as_str(),
+            "logger": "valid-mcp",
+            "data": {
+                "method": method,
+                "details": data
+            }
+        }
+    });
+    let _ = write_message(writer, &payload);
+}
+
+fn list_tools(params: &Value) -> Result<Value, String> {
+    let request = parse_args::<PaginatedParams>(params)?;
+    let tools = tool_definitions();
+    let (items, next_cursor) = paginate(&tools, request.cursor.as_deref())?;
+    Ok(json!({
+        "tools": items,
+        "nextCursor": next_cursor
+    }))
+}
+
+fn list_resources(config: &ServerConfig, params: &Value) -> Result<Value, String> {
+    let request = parse_args::<PaginatedParams>(params)?;
+    let resources = build_resources(config);
+    let (items, next_cursor) = paginate(&resources, request.cursor.as_deref())?;
+    Ok(json!({
+        "resources": items,
+        "nextCursor": next_cursor
+    }))
+}
+
+fn list_resource_templates(params: &Value) -> Result<Value, String> {
+    let request = parse_args::<PaginatedParams>(params)?;
+    let empty: Vec<Value> = Vec::new();
+    let (items, next_cursor) = paginate(&empty, request.cursor.as_deref())?;
+    Ok(json!({
+        "resourceTemplates": items,
+        "nextCursor": next_cursor
+    }))
+}
+
+fn read_resource(config: &ServerConfig, params: &Value) -> Result<Value, String> {
+    let request = parse_args::<ReadResourceParams>(params)?;
+    let (mime_type, text) = resource_contents(config, &request.uri)?;
+    Ok(json!({
+        "contents": [{
+            "uri": request.uri,
+            "mimeType": mime_type,
+            "text": text
+        }]
+    }))
+}
+
+fn list_prompts(params: &Value) -> Result<Value, String> {
+    let request = parse_args::<PaginatedParams>(params)?;
+    let prompts = prompts_catalog::PROMPTS
+        .iter()
+        .copied()
+        .map(prompts_catalog::prompt_definition)
+        .collect::<Vec<_>>();
+    let (items, next_cursor) = paginate(&prompts, request.cursor.as_deref())?;
+    Ok(json!({
+        "prompts": items,
+        "nextCursor": next_cursor
+    }))
+}
+
+fn get_prompt(config: &ServerConfig, params: &Value) -> Result<Value, String> {
+    let request = parse_args::<GetPromptParams>(params)?;
+    let entry = prompts_catalog::prompt_entry(&request.name)
+        .ok_or_else(|| format!("unknown prompt `{}`", request.name))?;
+    let messages = prompt_messages(config, entry, &request.arguments)?;
+    Ok(json!({
+        "description": entry.description,
+        "messages": messages
+    }))
+}
+
+fn paginate(items: &[Value], cursor: Option<&str>) -> Result<(Vec<Value>, Option<String>), String> {
+    let start = match cursor {
+        Some(cursor) if !cursor.trim().is_empty() => parse_cursor(cursor)?,
+        _ => 0,
+    };
+    if start > items.len() {
+        return Err("cursor is out of bounds".to_string());
+    }
+    let end = usize::min(start + PAGE_SIZE, items.len());
+    let next_cursor = (end < items.len()).then(|| end.to_string());
+    Ok((items[start..end].to_vec(), next_cursor))
+}
+
+fn parse_cursor(cursor: &str) -> Result<usize, String> {
+    cursor
+        .parse::<usize>()
+        .map_err(|_| format!("invalid cursor `{cursor}`"))
+}
+
+fn build_resources(config: &ServerConfig) -> Vec<Value> {
+    let mut resources = Vec::new();
+    for doc in docs_catalog::DOCS {
+        resources.push(json!({
+            "uri": format!("valid://docs/{}", doc.id),
+            "name": doc.title,
+            "description": doc.summary,
+            "mimeType": "text/markdown"
+        }));
+    }
+    for example in docs_catalog::EXAMPLES {
+        resources.push(json!({
+            "uri": format!("valid://examples/{}", example.id),
+            "name": example.title,
+            "description": example.summary,
+            "mimeType": "text/x-rust"
+        }));
+    }
+    if let Some(model_file) = normalized_option(&config.default_model_file) {
+        if FsPath::new(&model_file).is_file() {
+            resources.push(json!({
+                "uri": "valid://targets/default-model-file",
+                "name": "Default model file",
+                "description": format!("Configured default model file: {model_file}"),
+                "mimeType": mime_type_for_path(&model_file)
+            }));
+        }
+    }
+    if let Some(registry_binary) = normalized_option(&config.default_registry_binary) {
+        if FsPath::new(&registry_binary).exists() {
+            resources.push(json!({
+                "uri": "valid://targets/default-registry-binary",
+                "name": "Default registry binary",
+                "description": format!("Configured default registry binary: {registry_binary}"),
+                "mimeType": "application/json"
+            }));
+        }
+    }
+    resources
+}
+
+fn resource_contents(config: &ServerConfig, uri: &str) -> Result<(&'static str, String), String> {
+    if let Some(doc_id) = uri.strip_prefix("valid://docs/") {
+        let doc = docs_catalog::doc_entry(doc_id)
+            .ok_or_else(|| format!("unknown doc resource `{uri}`"))?;
+        return Ok(("text/markdown", doc.body_markdown.to_string()));
+    }
+    if let Some(example_id) = uri.strip_prefix("valid://examples/") {
+        let example = docs_catalog::example_entry(example_id)
+            .ok_or_else(|| format!("unknown example resource `{uri}`"))?;
+        return Ok(("text/x-rust", example.source_text.to_string()));
+    }
+    if uri == "valid://targets/default-model-file" {
+        let model_file = normalized_option(&config.default_model_file)
+            .ok_or_else(|| "default model file is not configured".to_string())?;
+        let text = fs::read_to_string(&model_file)
+            .map_err(|err| format!("failed to read `{model_file}`: {err}"))?;
+        let mime = mime_type_for_path(&model_file);
+        return Ok((mime, text));
+    }
+    if uri == "valid://targets/default-registry-binary" {
+        let registry_binary = normalized_option(&config.default_registry_binary)
+            .ok_or_else(|| "default registry binary is not configured".to_string())?;
+        let metadata = fs::metadata(&registry_binary)
+            .map_err(|err| format!("failed to stat `{registry_binary}`: {err}"))?;
+        let body = json!({
+            "path": registry_binary,
+            "is_file": metadata.is_file(),
+            "len": metadata.len(),
+            "executable_hint": true
+        });
+        return Ok(("application/json", default_text(&body)));
+    }
+    Err(format!("unknown resource `{uri}`"))
+}
+
+fn mime_type_for_path(path: &str) -> &'static str {
+    if path.ends_with(".md") {
+        "text/markdown"
+    } else if path.ends_with(".rs") {
+        "text/x-rust"
+    } else if path.ends_with(".valid") {
+        "text/plain"
+    } else {
+        "text/plain"
+    }
+}
+
+fn prompt_messages(
+    config: &ServerConfig,
+    entry: prompts_catalog::PromptEntry,
+    arguments: &Map<String, Value>,
+) -> Result<Vec<Value>, String> {
+    let guide = docs_catalog::doc_entry("ai-authoring-guide")
+        .ok_or_else(|| "ai-authoring-guide is missing from docs catalog".to_string())?;
+    let args = arguments
+        .iter()
+        .map(|(key, value)| format!("- {key}: {}", render_prompt_value(value)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let target_hint = target_prompt_hint(config);
+    let body = match entry.name {
+        "author_model" => format!(
+            "Author a new valid model for the following domain.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide.\n2. Read one curated example close to the domain.\n3. Prefer declarative transitions unless explicit-first constraints force step.\n4. Use inspect and lint before verify.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "review_model" => format!(
+            "Review the target valid model for correctness, capability/readiness, and migration risks.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and common pitfalls.\n2. Inspect the model.\n3. Run lint/readiness and explain the highest-impact findings.\n4. Separate bugs from capability limitations.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "migrate_step_to_transitions" => format!(
+            "Migrate the target model from step-oriented behavior to declarative transitions where feasible.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and examples curriculum.\n2. Inspect the existing model and identify state/action boundaries.\n3. Preserve action ids and properties unless the request says otherwise.\n4. Re-run lint/readiness after migration.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "explain_readiness_failure" => format!(
+            "Explain the readiness or lint failure for the target model and propose the minimum next actions.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and language spec.\n2. Inspect or lint the model if the finding payload is incomplete.\n3. Classify each issue as syntax, capability, unsupported expression, or migration guidance.\n4. Recommend the next doc, tool, or rewrite.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        _ => return Err(format!("unsupported prompt `{}`", entry.name)),
+    };
+    Ok(vec![
+        json!({
+            "role": "user",
+            "content": {
+                "type": "text",
+                "text": body
+            }
+        }),
+        json!({
+            "role": "user",
+            "content": {
+                "type": "resource",
+                "resource": {
+                    "uri": "valid://docs/ai-authoring-guide",
+                    "mimeType": "text/markdown",
+                    "text": guide.body_markdown
+                }
+            }
+        }),
+    ])
+}
+
+fn render_prompt_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        _ => default_text(value),
+    }
+}
+
+fn blank_if_empty(text: &str) -> String {
+    if text.trim().is_empty() {
+        "- none supplied".to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn target_prompt_hint(config: &ServerConfig) -> String {
+    let mut lines = Vec::new();
+    if let Some(model_file) = normalized_option(&config.default_model_file) {
+        lines.push(format!("Default model_file available: `{model_file}`."));
+    }
+    if let Some(registry_binary) = normalized_option(&config.default_registry_binary) {
+        lines.push(format!(
+            "Default registry_binary available: `{registry_binary}`."
+        ));
+    }
+    if lines.is_empty() {
+        "No startup default model target is configured.".to_string()
+    } else {
+        lines.join("\n")
     }
 }
 
