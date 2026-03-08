@@ -386,7 +386,7 @@ fn initialize_result(config: &ServerConfig, params: &Value) -> Value {
             "name": config.server_name,
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use resources/list or valid_docs_index to discover guidance. Start with ai-authoring-guide, then valid_example_get or resources/read for examples. Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
+        "instructions": "Use resources/list or valid_docs_index to discover guidance. Start with ai-authoring-guide, and switch to ai-requirement-refinement-workflow when the requirement or evidence is still moving. Then use valid_example_get or resources/read for examples. Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
     })
 }
 
@@ -1617,6 +1617,10 @@ fn prompt_messages(
 ) -> Result<Vec<Value>, String> {
     let guide = docs_catalog::doc_entry("ai-authoring-guide")
         .ok_or_else(|| "ai-authoring-guide is missing from docs catalog".to_string())?;
+    let refinement =
+        docs_catalog::doc_entry("ai-requirement-refinement-workflow").ok_or_else(|| {
+            "ai-requirement-refinement-workflow is missing from docs catalog".to_string()
+        })?;
     let args = arguments
         .iter()
         .map(|(key, value)| format!("- {key}: {}", render_prompt_value(value)))
@@ -1624,18 +1628,28 @@ fn prompt_messages(
         .join("\n");
     let target_hint = target_prompt_hint(config);
     let body = match entry.name {
+        "refine_requirement" => format!(
+            "Refine the requirement into a stable modeling brief before writing or reviewing a valid model.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the requirement refinement workflow and AI authoring guide.\n2. Ask only the minimum product-facing follow-up questions needed to pin down state, actions, failure/retry paths, side effects, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with: confirmed decisions, open questions, and a compact modeling brief naming likely predicates, scenarios, properties, and verification mode.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
         "clarify_requirement" => format!(
-            "Clarify the requirement before writing or editing a valid model.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and modeling checklist.\n2. Ask only the minimum follow-up questions needed to pin down state, actions, success/failure paths, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with a compact modeling brief that names likely scenarios, predicates, properties, and verification mode.\n\n{}",
+            "Clarify the requirement before writing or editing a valid model. This prompt is the compatibility alias for refine_requirement.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the requirement refinement workflow and AI authoring guide.\n2. Ask only the minimum follow-up questions needed to pin down state, actions, success/failure paths, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with a compact modeling brief that names likely scenarios, predicates, properties, and verification mode.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "refine_requirement_from_evidence" => format!(
+            "Refine the current requirement brief using model evidence instead of patching the model blindly.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the requirement refinement workflow, AI authoring guide, and modeling checklist.\n2. Translate the evidence into requirement-level hypotheses before proposing model edits.\n3. Ask only the targeted follow-up questions needed to resolve the semantics exposed by the counterexample, dead action, vacuity clue, coverage gap, or mismatch.\n4. End with: what the evidence means, what requirement decision changed, which properties/scenarios should be added or revised, and which open questions remain.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),
         "author_model" => format!(
-            "Author a new valid model for the following domain.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide.\n2. Read one curated example close to the domain.\n3. Prefer declarative transitions unless explicit-first constraints force step.\n4. Use inspect and lint before verify.\n\n{}",
+            "Author a new valid model for the following domain.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. If the requirement is still ambiguous, run refine_requirement first.\n2. Read the AI authoring guide.\n3. Read one curated example close to the domain.\n4. Prefer declarative transitions unless explicit-first constraints force step.\n5. Use inspect and lint before verify.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),
         "review_model" => format!(
-            "Review the target valid model for correctness, capability/readiness, and migration risks.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and common pitfalls.\n2. Inspect the model.\n3. Run lint/readiness and explain the highest-impact findings.\n4. Separate bugs from capability limitations.\n\n{}",
+            "Review the target valid model for correctness, capability/readiness, and migration risks.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and common pitfalls.\n2. If the findings suggest requirement drift, run refine_requirement_from_evidence before editing the model.\n3. Inspect the model.\n4. Run lint/readiness and explain the highest-impact findings.\n5. Separate bugs from capability limitations.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),
@@ -1662,6 +1676,17 @@ fn prompt_messages(
             "content": {
                 "type": "text",
                 "text": body
+            }
+        }),
+        json!({
+            "role": "user",
+            "content": {
+                "type": "resource",
+                "resource": {
+                    "uri": "valid://docs/ai-requirement-refinement-workflow",
+                    "mimeType": "text/markdown",
+                    "text": refinement.body_markdown
+                }
             }
         }),
         json!({

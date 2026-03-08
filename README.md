@@ -232,12 +232,15 @@ Recommended AI flow:
 
 1. call `valid_docs_index`
 2. read `ai-authoring-guide` and `ai-curriculum` through `valid_docs_get`
-3. read one curated example through `valid_example_get`
-4. move to `valid_inspect`, `valid_lint`, and `valid_check`
+3. if the brief is still moving, read `ai-requirement-refinement-workflow`
+4. read one curated example through `valid_example_get`
+5. move to `valid_inspect`, `valid_lint`, and `valid_check`
 
 Available prompts:
 
+- `refine_requirement`
 - `clarify_requirement`
+- `refine_requirement_from_evidence`
 - `author_model`
 - `review_model`
 - `migrate_step_to_transitions`
@@ -246,10 +249,12 @@ Available prompts:
 
 Prompt-driven flow:
 
-1. start with `clarify_requirement` when the requirement is still ambiguous
-2. move to `author_model` or `review_model`
-3. use `migrate_step_to_transitions` for step-heavy models
-4. use `explain_readiness_failure` or `triage_conformance_failure` when a run
+1. start with `refine_requirement` when the requirement is still ambiguous
+2. use `refine_requirement_from_evidence` when counterexamples, dead actions, vacuity clues, or mismatches show requirement drift
+3. `clarify_requirement` remains available for compatibility-oriented clients
+4. move to `author_model` or `review_model`
+5. use `migrate_step_to_transitions` for step-heavy models
+6. use `explain_readiness_failure` or `triage_conformance_failure` when a run
    already failed
 
 Available tools:
