@@ -214,21 +214,13 @@ For MCP-driven authoring:
 
 ## Next read
 
-<<<<<<< HEAD
 - If you need the learning path or task map: [AI Docs Curriculum](./curriculum.md)
-||||||| ef02a07
-=======
 - If you need source-adjacent comment guidance: [Model Authoring Best Practices](./model-authoring-best-practices.md)
->>>>>>> origin/main
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)
 - If you need examples in learning order: [Examples Curriculum](./examples-curriculum.md)
-<<<<<<< HEAD
 - If you need review flow: [Review Workflow](./review-workflow.md)
 - If you need migration flow: [Migration Guide](./migration-guide.md)
 - If you need implementation handoff: [Conformance Workflow](./conformance-workflow.md)
-||||||| ef02a07
-=======
 - If you need project layout guidance: [Project Organization Guide](../project-organization.md)
->>>>>>> origin/main
 - If you need the full supported surface: [DSL Language Spec](../dsl/language-spec.md)
