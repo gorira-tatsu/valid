@@ -2,7 +2,11 @@ use serde_json::json;
 
 use crate::{
     api::InspectResponse,
-    support::{hash::stable_hash_hex, io::write_text_file},
+    support::{
+        artifact_index::{record_artifact, synthetic_run_id, ArtifactRecord},
+        hash::stable_hash_hex,
+        io::write_text_file,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,7 +109,18 @@ pub fn check_doc(
 }
 
 pub fn write_doc(path: &str, generated: &GeneratedDoc) -> Result<(), String> {
-    write_text_file(path, &generated.markdown)
+    write_text_file(path, &generated.markdown)?;
+    record_artifact(ArtifactRecord {
+        artifact_kind: "generated_doc".to_string(),
+        path: path.to_string(),
+        run_id: synthetic_run_id("doc", &generated.model_id),
+        model_id: Some(generated.model_id.clone()),
+        property_id: None,
+        evidence_id: None,
+        vector_id: None,
+        suite_id: None,
+    })?;
+    Ok(())
 }
 
 pub fn render_doc_text(generated: &GeneratedDoc, output_path: Option<&str>) -> String {

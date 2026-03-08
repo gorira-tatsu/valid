@@ -52,6 +52,10 @@ use valid::{
         render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
+    support::artifact_index::{
+        load_artifact_index, load_run_history, render_artifact_inventory_json,
+        render_artifact_inventory_text,
+    },
     testgen::{render_replay_json, replay_path_for_model},
 };
 
@@ -83,6 +87,7 @@ enum ValidCommand {
     Replay(ReplayArgs),
     Coverage(CommonModelArgs),
     Conformance(ConformanceArgs),
+    Artifacts(JsonOnlyArgs),
     Clean(CleanArgs),
     Selfcheck(JsonProgressArgs),
     Mcp(McpArgs),
@@ -313,6 +318,7 @@ fn main() {
         Some(ValidCommand::Conformance(args)) => {
             cmd_conformance_from_parsed(conformance_to_parsed(args))
         }
+        Some(ValidCommand::Artifacts(args)) => cmd_artifacts_from_parsed(args),
         Some(ValidCommand::Clean(args)) => cmd_clean_from_parsed(args),
         Some(ValidCommand::Selfcheck(args)) => cmd_selfcheck_from_parsed(args),
         Some(ValidCommand::Mcp(args)) => cmd_mcp_from_parsed(args),
@@ -323,9 +329,28 @@ fn main() {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|clean|selfcheck|mcp|commands|schema|batch> ...",
+                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|schema|batch> ...",
             );
         }
+    }
+}
+
+fn cmd_artifacts_from_parsed(args: JsonOnlyArgs) {
+    let index = load_artifact_index().unwrap_or_else(|message| {
+        message_exit("artifacts", args.json, &message, None);
+    });
+    let history = load_run_history().unwrap_or_else(|message| {
+        message_exit("artifacts", args.json, &message, None);
+    });
+    if args.json {
+        println!(
+            "{}",
+            render_artifact_inventory_json(&index, &history).unwrap_or_else(|message| {
+                message_exit("artifacts", true, &message, None);
+            })
+        );
+    } else {
+        print!("{}", render_artifact_inventory_text(&index, &history));
     }
 }
 
@@ -1389,8 +1414,9 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
                             vector.vector_id,
+                            vector.run_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
@@ -1409,8 +1435,9 @@ fn cmd_testgen(args: Vec<String>) {
                 println!("generated {} vector(s)", response.vector_ids.len());
                 for vector in &response.vectors {
                     println!(
-                        "  {} strictness={} derivation={} source={} strategy={}",
+                        "  {} run_id={} strictness={} derivation={} source={} strategy={}",
                         vector.vector_id,
+                        vector.run_id,
                         vector.strictness,
                         vector.derivation,
                         vector.source_kind,
