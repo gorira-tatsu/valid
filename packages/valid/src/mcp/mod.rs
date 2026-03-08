@@ -8,6 +8,8 @@ use std::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+mod docs_catalog;
+
 use crate::{
     api::{
         check_source, compile_source, explain_source, inspect_source, lint_source,
@@ -188,7 +190,7 @@ fn initialize_result(config: &ServerConfig, params: &Value) -> Value {
             "name": config.server_name,
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
+        "instructions": "Use valid_docs_index then valid_docs_get for guidance. Use model_file or source for .valid files, or registry_binary plus model_name for Rust registry mode."
     })
 }
 
@@ -213,6 +215,30 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
 
 fn tool_definitions() -> Vec<Value> {
     vec![
+        tool(
+            "valid_docs_index",
+            "List AI-facing docs with stable ids, audience, and recommended entrypoints.",
+            input_schema_empty(),
+            true,
+        ),
+        tool(
+            "valid_docs_get",
+            "Fetch a documentation entry by stable doc id with structured guidance and markdown body.",
+            input_schema_with_doc_id(),
+            true,
+        ),
+        tool(
+            "valid_examples_list",
+            "List curated learning examples with concepts, mode, and recommended order.",
+            input_schema_empty(),
+            true,
+        ),
+        tool(
+            "valid_example_get",
+            "Fetch a curated example by stable example id with commands, concepts, and source text.",
+            input_schema_with_example_id(),
+            true,
+        ),
         tool(
             "valid_inspect",
             "Inspect a valid model and return state fields, actions, properties, and capabilities.",
@@ -294,6 +320,36 @@ fn tool(name: &str, description: &str, input_schema: Value, read_only: bool) -> 
             "idempotentHint": read_only,
             "openWorldHint": false
         }
+    })
+}
+
+fn input_schema_empty() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
+fn input_schema_with_doc_id() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "doc_id": { "type": "string" }
+        },
+        "required": ["doc_id"],
+        "additionalProperties": false
+    })
+}
+
+fn input_schema_with_example_id() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "example_id": { "type": "string" }
+        },
+        "required": ["example_id"],
+        "additionalProperties": false
     })
 }
 
@@ -510,6 +566,16 @@ fn handle_tool_call(config: &ServerConfig, params: &Value) -> Result<ToolResult,
     let arguments = call.arguments.unwrap_or_else(|| json!({}));
 
     match call.name.as_str() {
+        "valid_docs_index" => docs_index_tool(),
+        "valid_docs_get" => {
+            let args = parse_args::<DocGetArgs>(&arguments)?;
+            docs_get_tool(&args)
+        }
+        "valid_examples_list" => examples_list_tool(),
+        "valid_example_get" => {
+            let args = parse_args::<ExampleGetArgs>(&arguments)?;
+            example_get_tool(&args)
+        }
         "valid_inspect" => {
             let args = parse_args::<BasicArgs>(&arguments)?;
             inspect_tool(config, &args)
@@ -571,6 +637,18 @@ struct ToolCallParams {
     name: String,
     #[serde(default)]
     arguments: Option<Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DocGetArgs {
+    doc_id: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ExampleGetArgs {
+    example_id: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -676,16 +754,16 @@ enum ContractTarget {
 
 impl TargetArgs {
     fn resolve(&self, config: &ServerConfig) -> Result<ResolvedTarget, String> {
-        let registry_binary = self
-            .registry_binary
-            .clone()
-            .or_else(|| config.default_registry_binary.clone());
-        let model_file = self
-            .model_file
-            .clone()
-            .or_else(|| config.default_model_file.clone());
-        let uses_registry = registry_binary.is_some() || self.model_name.is_some();
-        let uses_dsl = model_file.is_some() || self.source.is_some();
+        let explicit_registry_binary = normalized_option(&self.registry_binary);
+        let explicit_model_name = normalized_option(&self.model_name);
+        let explicit_model_file = normalized_option(&self.model_file);
+        let explicit_source = normalized_option(&self.source);
+        let source_name = normalized_option(&self.source_name);
+        let default_registry_binary =
+            explicit_or_default(&self.registry_binary, &config.default_registry_binary);
+        let default_model_file = explicit_or_default(&self.model_file, &config.default_model_file);
+        let uses_registry = explicit_registry_binary.is_some() || explicit_model_name.is_some();
+        let uses_dsl = explicit_model_file.is_some() || explicit_source.is_some();
 
         if uses_registry && uses_dsl {
             return Err(
@@ -695,11 +773,10 @@ impl TargetArgs {
         }
 
         if uses_registry {
-            let registry_binary =
-                registry_binary.ok_or_else(|| "registry_binary is required".to_string())?;
-            let model_name = self
-                .model_name
-                .clone()
+            let registry_binary = explicit_registry_binary
+                .or(default_registry_binary)
+                .ok_or_else(|| "registry_binary is required".to_string())?;
+            let model_name = explicit_model_name
                 .ok_or_else(|| "model_name is required when using registry mode".to_string())?;
             return Ok(ResolvedTarget::Registry {
                 registry_binary,
@@ -707,9 +784,9 @@ impl TargetArgs {
             });
         }
 
-        let source = if let Some(source) = &self.source {
-            source.clone()
-        } else if let Some(path) = model_file.clone() {
+        let source = if let Some(source) = explicit_source {
+            source
+        } else if let Some(path) = explicit_model_file.clone().or(default_model_file.clone()) {
             fs::read_to_string(&path).map_err(|err| format!("failed to read `{path}`: {err}"))?
         } else {
             return Err(
@@ -723,25 +800,24 @@ impl TargetArgs {
         }
 
         Ok(ResolvedTarget::Dsl {
-            source_name: self
-                .source_name
-                .clone()
-                .or(model_file)
+            source_name: source_name
+                .or(explicit_model_file)
+                .or(default_model_file)
                 .unwrap_or_else(|| "inline.valid".to_string()),
             source,
         })
     }
 
     fn registry_binary(&self, config: &ServerConfig) -> Result<String, String> {
-        self.registry_binary
-            .clone()
-            .or_else(|| config.default_registry_binary.clone())
+        explicit_or_default(&self.registry_binary, &config.default_registry_binary)
             .ok_or_else(|| "registry_binary is required".to_string())
     }
 
     fn resolve_contract_target(&self, config: &ServerConfig) -> Result<ContractTarget, String> {
-        let explicit_dsl = self.model_file.is_some() || self.source.is_some();
-        let explicit_registry = self.registry_binary.is_some();
+        let explicit_model_file = normalized_option(&self.model_file);
+        let explicit_source = normalized_option(&self.source);
+        let explicit_dsl = explicit_model_file.is_some() || explicit_source.is_some();
+        let explicit_registry = normalized_option(&self.registry_binary).is_some();
         if explicit_dsl && explicit_registry {
             return Err(
                 "provide either model_file/source or registry_binary for contract operations"
@@ -749,13 +825,11 @@ impl TargetArgs {
             );
         }
         if explicit_dsl {
-            let source = if let Some(source) = &self.source {
-                source.clone()
+            let source = if let Some(source) = explicit_source {
+                source
             } else {
-                let path = self
-                    .model_file
-                    .clone()
-                    .or_else(|| config.default_model_file.clone())
+                let path = explicit_model_file
+                    .or_else(|| explicit_or_default(&self.model_file, &config.default_model_file))
                     .ok_or_else(|| "model_file is required".to_string())?;
                 fs::read_to_string(&path)
                     .map_err(|err| format!("failed to read `{path}`: {err}"))?
@@ -765,13 +839,15 @@ impl TargetArgs {
             }
             return Ok(ContractTarget::Dsl { source });
         }
-        if explicit_registry || config.default_registry_binary.is_some() {
+        if explicit_registry
+            || explicit_or_default(&self.registry_binary, &config.default_registry_binary).is_some()
+        {
             return Ok(ContractTarget::Registry {
                 registry_binary: self.registry_binary(config)?,
-                model_name: self.model_name.clone(),
+                model_name: normalized_option(&self.model_name),
             });
         }
-        if let Some(path) = config.default_model_file.clone() {
+        if let Some(path) = explicit_or_default(&self.model_file, &config.default_model_file) {
             let source = fs::read_to_string(&path)
                 .map_err(|err| format!("failed to read `{path}`: {err}"))?;
             if source.trim().is_empty() {
@@ -851,6 +927,89 @@ fn registry_tool_result(result: Result<(i32, Value), String>, success_codes: &[i
         Ok((_, value)) => ToolResult::error(value),
         Err(message) => ToolResult::error_message(message),
     }
+}
+
+fn docs_index_tool() -> Result<ToolResult, String> {
+    Ok(ToolResult::success(json!({
+        "canonical_entry": docs_catalog::docs_canonical_entry(),
+        "docs": docs_catalog::docs_index()
+    })))
+}
+
+fn docs_get_tool(args: &DocGetArgs) -> Result<ToolResult, String> {
+    let Some(doc) = docs_catalog::doc_entry(&args.doc_id) else {
+        return Ok(ToolResult::error_message(format!(
+            "unknown doc_id `{}`",
+            args.doc_id
+        )));
+    };
+
+    let structured = json!({
+        "doc_id": doc.id,
+        "title": doc.title,
+        "kind": doc.kind,
+        "audience": doc.audience,
+        "recommended_for": doc.recommended_for,
+        "canonical_entry": doc.canonical_entry,
+        "summary": doc.summary,
+        "key_points": doc.key_points,
+        "canonical_rules": doc.canonical_rules,
+        "supported_features": doc.supported_features,
+        "unsupported_features": doc.unsupported_features,
+        "related_docs": doc.related_docs,
+        "source_path": doc.source_path,
+        "body_markdown": doc.body_markdown
+    });
+    let text = format!(
+        "# {}\n\n{}\n\nSource: `{}`\n\n{}",
+        doc.title, doc.summary, doc.source_path, doc.body_markdown
+    );
+    Ok(ToolResult::success_with_text(structured, text))
+}
+
+fn examples_list_tool() -> Result<ToolResult, String> {
+    Ok(ToolResult::success(json!({
+        "examples": docs_catalog::examples_index()
+    })))
+}
+
+fn example_get_tool(args: &ExampleGetArgs) -> Result<ToolResult, String> {
+    let Some(example) = docs_catalog::example_entry(&args.example_id) else {
+        return Ok(ToolResult::error_message(format!(
+            "unknown example_id `{}`",
+            args.example_id
+        )));
+    };
+
+    let structured = json!({
+        "example_id": example.id,
+        "title": example.title,
+        "difficulty": example.difficulty,
+        "concepts": example.concepts,
+        "mode": example.mode,
+        "backend_expectation": example.backend_expectation,
+        "source_path": example.source_path,
+        "recommended_order": example.recommended_order,
+        "recommended_docs": example.recommended_docs,
+        "focus_models": example.focus_models,
+        "summary": example.summary,
+        "commands": example.commands,
+        "source_text": example.source_text
+    });
+    let text = format!(
+        "# {}\n\n{}\n\nSource: `{}`\n\nRecommended commands:\n{}\n\n```rust\n{}\n```",
+        example.title,
+        example.summary,
+        example.source_path,
+        example
+            .commands
+            .iter()
+            .map(|command| format!("- `{command}`"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        example.source_text
+    );
+    Ok(ToolResult::success_with_text(structured, text))
 }
 
 fn inspect_tool(config: &ServerConfig, args: &BasicArgs) -> Result<ToolResult, String> {
@@ -1311,10 +1470,8 @@ fn contract_check_tool(
 }
 
 fn list_models_tool(config: &ServerConfig, args: &ListModelsArgs) -> Result<ToolResult, String> {
-    let registry_binary = args
-        .registry_binary
-        .clone()
-        .or_else(|| config.default_registry_binary.clone());
+    let registry_binary =
+        explicit_or_default(&args.registry_binary, &config.default_registry_binary);
     if let Some(registry_binary) = registry_binary {
         return Ok(registry_tool_result(
             run_registry_json(&registry_binary, &["list", "--json"]),
@@ -1325,6 +1482,22 @@ fn list_models_tool(config: &ServerConfig, args: &ListModelsArgs) -> Result<Tool
     Ok(ToolResult::success(json!({
         "models": list_bundled_models()
     })))
+}
+
+fn normalized_option(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn explicit_or_default(explicit: &Option<String>, default: &Option<String>) -> Option<String> {
+    if explicit.is_some() {
+        normalized_option(explicit)
+    } else {
+        normalized_option(default)
+    }
 }
 
 fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, String> {

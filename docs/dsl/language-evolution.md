@@ -1,24 +1,26 @@
 # valid Language Evolution
 
-この文書は、`valid` DSL の検討中仕様と設計メモをまとめるための非規範文書です。
-ここに書かれている内容は、現行実装ではなく「次にどう育てるか」です。
+This document is a non-normative collection of design notes and candidate
+features for the `valid` DSL. It describes where the language may evolve next,
+not what is currently implemented.
 
-## 目的
+## Goal
 
-`valid` は次の中間を狙います。
+`valid` aims for a middle ground between:
 
-- SPIN 的な状態遷移・反例・deadlock
-- Alloy 的な relation / set / map
-- Dafny 的な contract / property / specification readability
+- SPIN-style state transitions, counterexamples, and deadlock reasoning
+- Alloy-style relations, sets, and maps
+- Dafny-style contract and property readability
 
-つまり、単なる model checker でも theorem prover でもなく、
-実務向け finite-state formal verification platform を目指します。
+The target is a practical finite-state formal verification platform, not just a
+generic model checker or theorem prover.
 
-## 検討中 1: action の relational semantics
+## Candidate 1: relational action semantics
 
-現在の canonical path は guarded update です。
+The current canonical path is guarded updates.
 
-将来的には、action をより pre/post relation として直接書ける形が候補です。
+In the future, actions may also be expressible more directly as pre/post
+relations:
 
 ```rust
 on Inc {
@@ -30,20 +32,21 @@ on Inc {
 }
 ```
 
-ただし内部 IR は引き続き flat transition 列に lower する想定です。
+The internal representation is still expected to lower to flat transition
+lists.
 
-## 検討中 2: property kind の拡張
+## Candidate 2: richer property kinds
 
-現行は `Invariant` のみです。候補:
+The current surface only supports `Invariant`. Candidates include:
 
 - `DeadlockFreedom`
 - `Reachability`
-- 将来的な contract/assertion 系
+- future contract/assertion-oriented property kinds
 
-## 検討中 3: Decision / Path IR
+## Candidate 3: Decision / Path IR
 
-`explain`, `coverage`, `generate-tests` を別々に進化させるのではなく、
-次を共通抽象にしたいです。
+Rather than evolving `explain`, `coverage`, and `generate-tests` separately, a
+shared abstraction is desirable around:
 
 - action
 - guard
@@ -52,40 +55,38 @@ on Inc {
 - path tags
 - property branch
 
-これにより:
+This would make the following easier:
 
 - policy-path coverage
-- explain の一貫性
-- path-based testgen
-- solver/exploration witness の統一
+- consistent `explain`
+- path-based test generation
+- unified witnesses across solvers and exploration modes
 
-がやりやすくなります。
+## Candidate 4: richer finite data model
 
-## 検討中 4: richer finite data model
-
-現在:
+Current surface:
 
 - finite enum
 - `Option<FiniteEnum>`
 - `FiniteEnumSet`
 - `FiniteRelation`
 - `FiniteMap`
-- `String` + explicit regex helpers
+- `String` with explicit regex helpers
 
-今後の候補:
+Possible future additions:
 
 - `FiniteTuple`
-- relation / map の sugar 強化
-- finite multiset 的表現
-- text abstraction
-  - raw string theoryではなく、policy/password向けの bounded abstraction
+- richer relation/map sugar
+- finite multiset-style representations
+- bounded text abstraction for policy/password use cases instead of raw string
+  theory
 
-## 検討中 5: transition updates sugar (`..state`)
+## Candidate 5: transition update sugar (`..state`)
 
-### 背景
+### Background
 
-declarative `transitions` は canonical path ですが、更新対象が少ない遷移でも
-現状は state literal を全面的に書き下ろす必要がありました。
+Declarative `transitions` is the canonical path, but even small updates used to
+require fully spelled-out state literals:
 
 ```rust
 on Approve {
@@ -98,18 +99,16 @@ on Approve {
 }
 ```
 
-これは:
+That has several downsides:
 
-- frame condition が冗長になる
-- `String` など非 `Copy` field の保持が書きづらい
-- arbitrary expr list に逃げると transition metadata が薄くなる
+- frame conditions become verbose
+- retaining non-`Copy` fields such as `String` is awkward
+- falling back to arbitrary expression lists weakens transition metadata
 
-という問題を持ちます。
+### Decision
 
-### 決定
-
-declarative transition 内の state literal に、明示的な frame condition sugar として
-`..state` を導入します。
+Declarative transition literals support explicit frame-condition sugar with
+`..state`:
 
 ```rust
 on Approve {
@@ -121,47 +120,52 @@ on Approve {
 }
 ```
 
-意味は次の通りです。
+Semantics:
 
-- 明示した field だけが update
-- `..state` が未指定 field の保持を表す
-- implicit retention はしない
+- only explicitly listed fields are updates
+- `..state` retains every omitted field
+- there is no implicit retention
 
-つまり、未変更 field を残したいときは必ず `..state` を書きます。
+If unchanged fields should stay unchanged, `..state` must be written
+explicitly.
 
-### lowering / IR 方針
+### Lowering and IR policy
 
-- generated `step` では `State { approved: true, ..state.clone() }` 相当に展開する
-- `TransitionUpdateDescriptor` / machine IR updates には明示 field だけを残す
-- `effect` 文字列は source-level の `..state` 形を保持する
-- `reads` / `writes` は従来どおり action metadata を一次ソースとする
+- generated `step` code expands to something like
+  `State { approved: true, ..state.clone() }`
+- `TransitionUpdateDescriptor` / machine IR updates keep only explicitly
+  updated fields
+- `effect` strings preserve the source-level `..state` shape
+- `reads` / `writes` continue to treat action metadata as the primary source
 
-これにより core IR は flat guarded transition のまま保てます。
+This keeps the core IR flat and guarded-update-oriented.
 
-### `macro_rules!` 制約との整合
+### `macro_rules!` constraints
 
-今回の採用構文は `macro_rules!` で扱える範囲に限定します。
+The chosen syntax stays within what `macro_rules!` can handle well.
 
-- 許可: `..state` のような identifier-based struct update
-- 非採用: `..state.clone()` のような arbitrary expression
+- allowed: identifier-based struct update such as `..state`
+- rejected: arbitrary expressions such as `..state.clone()`
 
-後者を許すと、opaque expr path に落ちて transition metadata を失いやすいためです。
+Allowing the latter would make it easier to fall into opaque expression paths
+and lose transition metadata.
 
-### 後方互換性
+### Backward compatibility
 
-- 既存の `field: expr` を並べる完全な state literal はそのまま使える
-- `=> [expr, ...];` の generic form もそのまま使える
-- 新しい sugar は declarative transition literal の ergonomic improvement に留める
+- fully explicit `field: expr` state literals continue to work
+- the generic `=> [expr, ...];` form continues to work
+- the new sugar is only an ergonomic improvement for declarative transition
+  literals
 
-### non-goals
+### Non-goals
 
-- implicit frame condition inference
-- nested spread / multiple spread
-- write-set の自動推論変更
+- implicit frame-condition inference
+- nested or multiple spreads
+- changes to write-set inference policy
 
-## 検討中 6: logic sugar
+## Candidate 6: logic sugar
 
-今後の候補:
+Possible future additions:
 
 - `all_of(...)`
 - `any_of(...)`
@@ -169,74 +173,74 @@ on Approve {
 - more ergonomic grouped transitions
 - `otherwise` sugar
 
-ただし core IR は小さく保つ方針です。
+The core IR should still stay small.
 
-## 検討中 7: text / regex story
+## Candidate 7: text / regex story
 
-現在の text support は explicit-first です。
+Current text support is explicit-first:
 
 - `String`
 - `len`
 - `str_contains`
 - `regex_match`
 
-将来的な選択肢:
+Possible future directions:
 
-1. explicit-only のままにする
-2. restricted regex fragment を SAT/SMT に落とす
-3. password / token / identifier 用の higher-level predicate を導入する
+1. keep text support explicit-only
+2. lower a restricted regex fragment to SAT/SMT
+3. introduce higher-level predicates for passwords, tokens, and identifiers
 
-今のところ 3 が現実的です。
+Option 3 currently looks the most practical.
 
-例:
+Examples:
 
 - `has_uppercase(password)`
 - `has_digit(password)`
 - `has_symbol(password)`
 - `min_length(password, 12)`
 
-これは backend-neutral にしやすい可能性があります。
+These may be easier to keep backend-neutral.
 
-## 検討中 8: step の位置づけ
+## Candidate 8: the role of `step`
 
-`step` を完全に消す予定はありませんが、位置づけはかなり明確です。
+There is no current plan to remove `step`, but its role should remain clear.
 
 - `step`
-  - prototype
+  - prototype-oriented
   - explicit-first
   - migration source
 - `transitions`
   - canonical specification
   - solver-visible
-  - graph/coverage/testgen/explain の正規入力
+  - canonical input for `graph`, `coverage`, `testgen`, and `explain`
 
-## 検討中 9: IDE / diagnostics
+## Candidate 9: IDE and diagnostics
 
-今後強めたいもの:
+Areas to strengthen:
 
-- `valid_model!` parser の span diagnostics
-- `trybuild` UI tests
-- rust-analyzer での誤診断低減
-- `cargo valid readiness` / `cargo valid migrate` の提案精度向上
+- better parser span diagnostics for `valid_model!`
+- more `trybuild` UI tests
+- fewer `rust-analyzer` false diagnostics
+- more precise `cargo valid readiness` / `cargo valid migrate` suggestions
 
-## 検討中 10: packaging
+## Candidate 10: packaging
 
-目標:
+Goals:
 
-- Rust user 以外でも binary で使える
-- Rust model author は Cargo で快適
-- solver backend は plug-in 的に差し替えられる
+- binary-only users should still be able to use the tool
+- Rust model authors should get a smooth Cargo workflow
+- solver backends should remain pluggable
 
-方針:
+Policy:
 
-- core は solver-neutral
-- embedded backend は pure Rust を優先
-- external solver backend は optional
+- keep the core solver-neutral
+- prefer pure-Rust embedded backends where practical
+- keep external solver backends optional
 
-## 近い将来の候補タスク
+## Near-term candidate tasks
 
-- `DeadlockFreedom` の first-class property 化
-- `Reachability` の first-class property 化
-- `FiniteRelation` / `FiniteMap` の solver encoding 拡張
-- password / token / policy 向け text abstraction
-- capability matrix の migration hint 強化
+- make `DeadlockFreedom` a first-class property kind
+- make `Reachability` a first-class property kind
+- extend solver encoding for `FiniteRelation` / `FiniteMap`
+- add text abstraction for passwords, tokens, and policy use cases
+- improve migration hints in the capability matrix

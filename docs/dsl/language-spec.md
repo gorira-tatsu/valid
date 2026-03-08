@@ -1,36 +1,47 @@
 # valid Language Spec
 
-この文書は、現在の `valid` Rust DSL の実装済み言語仕様をまとめるための
-現行仕様書です。`docs/dsl/README.md` が利用ガイドであるのに対して、この文書は
-「何が現在サポートされているか」を固定的に書きます。
+This document is the normative description of the currently implemented
+`valid` Rust DSL surface. Unlike [docs/dsl/README.md](./README.md), which is a
+user guide, this file is about the supported syntax, semantics, and current
+capability boundaries.
 
-## 位置づけ
+## Positioning
 
-`valid` は Rust-first の有限状態仕様記述 DSL です。
+`valid` is a Rust-first finite-state specification DSL.
 
-- 主用途は業務ルール、承認フロー、IAM/マルチテナント、料金、entitlement などの
-  有限状態検証
-- canonical path は declarative `transitions { ... }`
-- `step` は explicit-first / migration-oriented な補助表現
+- Main use cases are business-rule verification, approval flows, IAM and
+  multi-tenant policy, pricing, and entitlements
+- The canonical path is declarative `transitions { ... }`
+- `step` is still supported, but should be treated as explicit-first and
+  migration-oriented
 
-## モデルの構成
+## Canonical modeling rules
 
-現在の標準形は次です。
+The standard model shape is:
 
-1. 状態型
-2. action 型
+1. state type
+2. action type
 3. `valid_model!`
-4. registry (`valid_models!`)
+4. registry via `valid_models!`
 
-## 状態型
+Rules:
 
-状態は Rust struct として表現します。現時点で machine IR に落ちる field 種別は次です。
+- model headers must be explicit: `model Name<State, Action>;`
+- shorthand `model Name;` is not supported
+- declarative solver-oriented models should use a single `init [ ... ];`
+- new long-lived models should prefer declarative `transitions`
+
+## Supported syntax
+
+### State types
+
+State is expressed as a Rust struct. The current field classes that lower to
+machine IR are:
 
 - `bool`
 - `String`
-  - `#[valid(range = "8..=64")]` または `password: String [range = "8..=64"]` は
-    文字列長の制約として扱う
-  - 現時点では explicit backend 向け
+  - `#[valid(range = "8..=64")]` or `password: String [range = "8..=64"]`
+    constrains string length
 - bounded unsigned integers
   - `u8`
   - `u16`
@@ -41,24 +52,24 @@
 - `FiniteRelation<A, B>`
 - `FiniteMap<K, V>`
 
-### 状態メタデータ
+### State field metadata
 
-現在の field metadata は次です。
+The current field metadata is:
 
 - `range = "..."`
-  - 数値なら値域
-  - `String` なら長さ範囲
+  - numeric range for integers
+  - length range for `String`
 - `enum`
 - `set`
 - `relation`
 - `map`
 
-## action
+### Actions
 
-action は有限 enum です。各 variant は `action_id` を持ち、可能なら `reads` と
-`writes` を宣言します。
+Actions are finite enums. Each variant must have an `action_id`, and should
+declare `reads` and `writes` metadata when possible.
 
-この metadata は次に使われます。
+This metadata feeds:
 
 - `inspect`
 - `graph`
@@ -67,9 +78,9 @@ action は有限 enum です。各 variant は `action_id` を持ち、可能な
 - `coverage`
 - `generate-tests`
 
-## モデル定義
+### Model definition
 
-`valid_model!` の header は明示型必須です。
+`valid_model!` requires an explicit header.
 
 ```rust
 valid_model! {
@@ -78,19 +89,16 @@ valid_model! {
 }
 ```
 
-`model Name;` の shorthand は現行仕様では無効です。
+### Init
 
-## 初期状態
+Use `init [ ... ];` to define the initial state set.
 
-`init [ ... ];` で初期状態を与えます。
+Declarative IR lowering currently assumes a single initial state for
+solver-oriented models.
 
-declarative IR lowering では、現在 1 つの初期状態を前提とします。
+### Declarative transitions
 
-## 振る舞い記述
-
-### 1. Declarative transitions
-
-canonical path です。
+This is the canonical path.
 
 ```rust
 transitions {
@@ -105,7 +113,8 @@ transitions {
 }
 ```
 
-未変更 field を明示的に保持したいときは、struct update 形式の `..state` を使えます。
+If unchanged fields should be retained explicitly, use struct-update syntax
+with `..state`.
 
 ```rust
 => [ReviewState {
@@ -114,10 +123,10 @@ transitions {
 }];
 ```
 
-この `..state` は frame condition sugar です。内部では flat な guarded
-transition IR に lower され、IR 上の update として残るのは明示 field だけです。
+`..state` is frame-condition sugar. The lowering keeps only explicitly updated
+fields in the flat guarded transition IR.
 
-### 2. step
+### Step
 
 ```rust
 step |state, action| {
@@ -127,15 +136,15 @@ step |state, action| {
 }
 ```
 
-これはまだサポートされていますが、canonical ではありません。
+This is supported, but not canonical.
 
-- explicit exploration には使える
-- solver lowering は弱い
-- `graph` / `coverage` / `testgen` の情報量は declarative より低い
+- usable for explicit exploration
+- weaker for solver lowering
+- weaker for `graph`, `coverage`, and `testgen` structure
 
-## property
+### Properties
 
-現在の `PropertyKind` は `Invariant` のみです。
+The current `PropertyKind` surface contains only `Invariant`.
 
 ```rust
 properties {
@@ -144,11 +153,12 @@ properties {
 }
 ```
 
-property は「Rust の型」ではなく、「到達可能状態に対する意味的制約」です。
+Properties are semantic constraints over reachable states, not Rust type-level
+claims.
 
-## 現在の式仕様
+### Expressions
 
-### bool / arithmetic
+Boolean and arithmetic:
 
 - `!`
 - `&&`
@@ -159,7 +169,7 @@ property は「Rust の型」ではなく、「到達可能状態に対する意
 - `==`, `!=`, `<`, `<=`, `>`, `>=`
 - `+`, `-`, `%`
 
-### finite collections
+Finite collections:
 
 - `contains(set, item)`
 - `insert(set, item)`
@@ -174,26 +184,13 @@ property は「Rust の型」ではなく、「到達可能状態に対する意
 - `map_put(map, key, value)`
 - `map_remove(map, key)`
 
-### string / password-oriented helpers
-
-現在の explicit-first helper:
+String and password-oriented helpers:
 
 - `len(&state.password)`
 - `str_contains(&state.password, "@")`
 - `regex_match(&state.password, r"[A-Z]")`
 
-補足:
-
-- 文字列 helper は current explicit backend では評価できる
-- current SAT/SMT backend では solver-ready ではない
-- `readiness` / `lint` は `string_fields_require_explicit_backend`,
-  `string_ops_require_explicit_backend`,
-  `regex_match_requires_explicit_backend`
-  を返す
-
-### 文字列リテラル
-
-現在の lowering で扱う文字列リテラルは次です。
+String literals currently supported by lowering:
 
 - `"abc"`
 - `r"[A-Z]"`
@@ -201,9 +198,9 @@ property は「Rust の型」ではなく、「到達可能状態に対する意
 - `"abc".to_string()`
 - `String::from("abc")`
 
-## Capability / readiness
+## Capability and backend constraints
 
-現在の capability matrix は次を返します。
+Current capability matrix fields are:
 
 - `parse_ready`
 - `explicit_ready`
@@ -214,26 +211,30 @@ property は「Rust の型」ではなく、「到達可能状態に対する意
 - `testgen_ready`
 - `reasons`
 
-意味:
+Interpretation:
 
-- `ir_ready=true` でも `solver_ready=false` はあり得る
-- 文字列/regex モデルはその代表例
+- `ir_ready = true` does not imply `solver_ready = true`
+- string- and regex-heavy models are the common example
+- `readiness` and `lint` are the authority for degraded capability reasons
 
-## graph
+Current explicit-first text constraints:
 
-`graph` には 2 つの view があります。
+- string helpers evaluate on the current explicit backend
+- current SAT/SMT paths are not solver-ready for these string helpers
+- `readiness` / `lint` can return:
+  - `string_fields_require_explicit_backend`
+  - `string_ops_require_explicit_backend`
+  - `regex_match_requires_explicit_backend`
 
-- default `overview`
-  - 設計レビュー向け
-- `--view=logic`
-  - guard / update の論理を深く見るための表示
+## Unsupported and non-goals
 
-## 現在の非目標
+This spec does not currently target:
 
-この仕様は次をまだ目標にしていません。
+- general `Vec`, `HashMap`, `HashSet`
+- infinite string theory
+- general regex-theory solver encoding
+- higher-order logic
+- general-purpose program proofs
 
-- 一般の `Vec`, `HashMap`, `HashSet`
-- 無限文字列理論
-- 一般正規表現理論の solver encoding
-- 高階ロジック
-- 汎用プログラム証明
+Anything outside this supported surface should be treated as unsupported until
+the implementation and this spec are both updated.

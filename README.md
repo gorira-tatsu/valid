@@ -16,7 +16,8 @@ the primary one.
 User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
-[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md).
+[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
@@ -149,8 +150,19 @@ cargo run --features verification-runtime --bin valid -- explain tests/fixtures/
 `valid-mcp` exposes `valid` over MCP stdio so Claude Code, Claude Desktop, and
 other MCP clients can call it as tools.
 
+Recommended AI flow:
+
+1. call `valid_docs_index`
+2. read `ai-authoring-guide` through `valid_docs_get`
+3. read one curated example through `valid_example_get`
+4. move to `valid_inspect`, `valid_lint`, and `valid_check`
+
 Available tools:
 
+- `valid_docs_index`
+- `valid_docs_get`
+- `valid_examples_list`
+- `valid_example_get`
 - `valid_inspect`
 - `valid_check`
 - `valid_explain`

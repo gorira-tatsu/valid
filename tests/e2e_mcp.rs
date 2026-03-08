@@ -191,6 +191,10 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .filter_map(|tool| tool.get("name").and_then(Value::as_str))
         .collect::<Vec<_>>();
     for expected in [
+        "valid_docs_index",
+        "valid_docs_get",
+        "valid_examples_list",
+        "valid_example_get",
         "valid_inspect",
         "valid_check",
         "valid_explain",
@@ -205,6 +209,42 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     ] {
         assert!(tool_names.contains(&expected), "missing tool {expected}");
     }
+
+    let docs_index = structured_content(client.call_tool("valid_docs_index", json!({})));
+    assert_eq!(docs_index["canonical_entry"], "ai-authoring-guide");
+    assert!(docs_index["docs"]
+        .as_array()
+        .expect("docs should be present")
+        .iter()
+        .any(|item| item["doc_id"] == "language-spec"));
+
+    let authoring_guide = structured_content(
+        client.call_tool("valid_docs_get", json!({ "doc_id": "ai-authoring-guide" })),
+    );
+    assert_eq!(authoring_guide["doc_id"], "ai-authoring-guide");
+    assert_eq!(authoring_guide["kind"], "guide");
+    assert!(authoring_guide["body_markdown"]
+        .as_str()
+        .expect("body markdown should be text")
+        .contains("declarative `transitions { ... }`"));
+
+    let examples = structured_content(client.call_tool("valid_examples_list", json!({})));
+    assert!(examples["examples"]
+        .as_array()
+        .expect("examples should be present")
+        .iter()
+        .any(|item| item["example_id"] == "registry-counter-basics"));
+
+    let counter_example = structured_content(client.call_tool(
+        "valid_example_get",
+        json!({ "example_id": "registry-counter-basics" }),
+    ));
+    assert_eq!(counter_example["example_id"], "registry-counter-basics");
+    assert_eq!(counter_example["recommended_order"], 1);
+    assert!(counter_example["source_text"]
+        .as_str()
+        .expect("source text should be present")
+        .contains("valid_step_model!"));
 
     let model_file = fixture("failing_counter.valid");
     let model_file_str = model_file.to_string_lossy().to_string();
@@ -415,4 +455,30 @@ fn valid_mcp_supports_registry_mode_with_default_binary() {
     ));
     assert_eq!(drift["status"], "changed");
     assert_eq!(drift["contract_id"], "mock-broken");
+}
+
+#[cfg(unix)]
+#[test]
+fn valid_mcp_allows_explicit_dsl_calls_when_default_registry_is_configured() {
+    let temp = TempDir::new("mcp-dsl-overrides-registry");
+    let registry = make_mock_registry(&temp);
+    let registry_str = registry.to_string_lossy().to_string();
+    let mut client = McpClient::spawn(&["--registry-binary", &registry_str], temp.path());
+    client.initialize();
+
+    let inspect = structured_content(client.call_tool(
+        "valid_inspect",
+        json!({
+            "source": "model Counter\nstate:\n  count: u8[0..2]\ninit:\n  count = 0\naction Inc:\n  pre: count <= 1\n  post:\n    count = count + 1\nproperty P_OK:\n  invariant: count <= 2\n"
+        }),
+    ));
+    assert_eq!(inspect["model_id"], "Counter");
+
+    let bundled =
+        structured_content(client.call_tool("valid_list_models", json!({ "registry_binary": "" })));
+    assert!(bundled["models"]
+        .as_array()
+        .expect("bundled models should be present")
+        .iter()
+        .any(|item| item == "counter"));
 }
