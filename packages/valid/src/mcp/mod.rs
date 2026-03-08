@@ -798,9 +798,10 @@ fn input_schema_with_backend_and_property() -> Value {
 fn input_schema_with_testgen() -> Value {
     let mut properties = common_target_properties();
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
+    properties.insert("focus_action_id".to_string(), json!({ "type": "string" }));
     properties.insert("strategy".to_string(), json!({
         "type": "string",
-        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random", "deadlock"]
+        "enum": ["counterexample", "transition", "witness", "guard", "boundary", "path", "random", "deadlock", "enablement"]
     }));
     properties.insert(
         "backend".to_string(),
@@ -1199,6 +1200,7 @@ struct TestgenArgs {
     #[serde(flatten)]
     target: TargetArgs,
     property_id: Option<String>,
+    focus_action_id: Option<String>,
     strategy: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
@@ -2214,6 +2216,7 @@ fn testgen_tool(config: &ServerConfig, args: &TestgenArgs) -> Result<ToolResult,
                 source_name,
                 source,
                 property_id: args.property_id.clone(),
+                focus_action_id: args.focus_action_id.clone(),
                 strategy: args
                     .strategy
                     .clone()
@@ -2234,7 +2237,10 @@ fn testgen_tool(config: &ServerConfig, args: &TestgenArgs) -> Result<ToolResult,
                         "strictness": vector.strictness,
                         "derivation": vector.derivation,
                         "source_kind": vector.source_kind,
-                        "strategy": vector.strategy
+                        "strategy": vector.strategy,
+                        "focus_action_id": vector.focus_action_id,
+                        "expected_guard_enabled": vector.expected_guard_enabled,
+                        "notes": vector.notes
                     })).collect::<Vec<_>>(),
                     "generated_files": response.generated_files
                 }))),
@@ -2251,6 +2257,9 @@ fn testgen_tool(config: &ServerConfig, args: &TestgenArgs) -> Result<ToolResult,
             let mut command = registry_testgen_command_args(&model_name, args);
             if let Some(strategy) = &args.strategy {
                 command.push(format!("--strategy={strategy}"));
+            }
+            if let Some(focus_action_id) = &args.focus_action_id {
+                command.push(format!("--focus-action={focus_action_id}"));
             }
             Ok(registry_tool_result(
                 run_registry_json(&registry_binary, &command),

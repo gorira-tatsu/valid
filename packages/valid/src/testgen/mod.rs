@@ -87,6 +87,7 @@ fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'stat
         ("deadlock", "deadlock") => ("strict", "deadlock_trace"),
         ("witness", "transition_coverage") => ("strict", "witness_trace"),
         ("witness", _) => ("strict", "witness_trace"),
+        (_, "enablement") => ("heuristic", "enablement_search"),
         (_, "transition") => ("heuristic", "transition_search"),
         (_, "guard") => ("heuristic", "guard_search"),
         (_, "boundary") => ("heuristic", "boundary_search"),
@@ -336,9 +337,11 @@ pub fn build_model_test_vectors_for_strategy(
     model: &ModelIr,
     property_id: &str,
     strategy: &str,
+    focus_action_id: Option<&str>,
 ) -> Result<Vec<TestVector>, String> {
     match strategy {
         "deadlock" => build_model_deadlock_vectors(model, property_id),
+        "enablement" => build_model_enablement_vectors(model, property_id, focus_action_id),
         "transition" | "witness" => {
             let vectors = build_synthetic_witness_vectors(model, property_id);
             if vectors.is_empty() {
@@ -353,6 +356,77 @@ pub fn build_model_test_vectors_for_strategy(
         "random" => build_model_random_vectors(model, property_id, 5),
         _ => Ok(Vec::new()),
     }
+}
+
+fn build_model_enablement_vectors(
+    model: &ModelIr,
+    property_id: &str,
+    focus_action_id: Option<&str>,
+) -> Result<Vec<TestVector>, String> {
+    let target_action_id =
+        focus_action_id.ok_or_else(|| "enablement strategy requires --focus-action".to_string())?;
+    let exploration = explore_model(model)?;
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.action_id == target_action_id)
+        .ok_or_else(|| format!("unknown action `{target_action_id}` for enablement strategy"))?;
+    let mut notes = vec![
+        format!("enablement_target:{target_action_id}"),
+        format!("guard:{:?}", action.guard),
+    ];
+    if !action.reads.is_empty() {
+        notes.push(format!("blocker_reads:{}", action.reads.join(",")));
+    }
+    notes.extend(
+        action
+            .decision_path()
+            .legacy_path_tags()
+            .into_iter()
+            .map(|tag| format!("path_tag:{tag}")),
+    );
+
+    if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
+        apply_action_transition(model, &node.state, action)
+            .ok()
+            .flatten()
+            .is_some()
+    }) {
+        let mut reached_notes = notes.clone();
+        reached_notes.push("enablement_reached".to_string());
+        return Ok(build_model_vector_for_node(
+            model,
+            &exploration.nodes,
+            node_index,
+            property_id,
+            "enablement",
+            "enablement",
+            Some(target_action_id.to_string()),
+            None,
+            Some(true),
+            action.decision_path(),
+            reached_notes,
+        )
+        .into_iter()
+        .collect());
+    }
+
+    notes.push("enablement_unreachable".to_string());
+    Ok(build_model_vector_for_node(
+        model,
+        &exploration.nodes,
+        0,
+        property_id,
+        "enablement",
+        "enablement",
+        Some(target_action_id.to_string()),
+        None,
+        Some(false),
+        action.decision_path_for_guard(false),
+        notes,
+    )
+    .into_iter()
+    .collect())
 }
 
 fn build_model_deadlock_vectors(

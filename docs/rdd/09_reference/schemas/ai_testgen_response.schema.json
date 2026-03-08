@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.testgen.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "vector_ids", "generated_files"],
+  "required": ["schema_version", "request_id", "status", "vector_ids", "vectors", "generated_files"],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string", "minLength": 1 },
@@ -10,6 +10,28 @@
     "vector_ids": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "vectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["vector_id", "run_id", "strictness", "derivation", "source_kind", "strategy", "notes"],
+        "properties": {
+          "vector_id": { "type": "string", "minLength": 1 },
+          "run_id": { "type": "string", "minLength": 1 },
+          "strictness": { "type": "string", "minLength": 1 },
+          "derivation": { "type": "string", "minLength": 1 },
+          "source_kind": { "type": "string", "minLength": 1 },
+          "strategy": { "type": "string", "minLength": 1 },
+          "focus_action_id": { "type": ["string", "null"] },
+          "expected_guard_enabled": { "type": ["boolean", "null"] },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "generated_files": {
       "type": "array",

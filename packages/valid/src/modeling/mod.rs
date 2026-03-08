@@ -2790,6 +2790,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
 pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
     property_id: Option<&str>,
     strategy: &str,
+    focus_action_id: Option<&str>,
 ) -> Vec<TestVector> {
     let property_id = property_id.unwrap_or_else(|| primary_property::<M>().property_id);
     match strategy {
@@ -2816,12 +2817,86 @@ pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
             .filter(|vector| vector.strategy == "counterexample")
             .collect(),
         "transition" | "witness" => build_transition_witness_vectors::<M>(property_id),
+        "enablement" => build_enablement_vectors::<M>(property_id, focus_action_id),
         "path" => build_path_tag_vectors::<M>(property_id),
         "guard" => build_guard_coverage_vectors::<M>(property_id),
         "boundary" => build_boundary_focus_vectors::<M>(property_id),
         "random" => build_randomized_vectors::<M>(property_id, 5),
         _ => build_machine_test_vectors_for_property::<M>(property_id),
     }
+}
+
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+fn build_enablement_vectors<M: VerifiedMachine>(
+    property_id: &str,
+    focus_action_id: Option<&str>,
+) -> Vec<TestVector> {
+    let Some(target_action_id) = focus_action_id else {
+        return Vec::new();
+    };
+    let property = find_property::<M>(property_id);
+    let exploration = explore_machine::<M>(property.holds);
+    let transition_ir = machine_transition_ir::<M>();
+    let Some(descriptor) = transition_ir
+        .iter()
+        .find(|transition| transition.action_id == target_action_id)
+    else {
+        return Vec::new();
+    };
+    let actions = M::Action::all()
+        .into_iter()
+        .map(|action| (action.action_id(), action))
+        .collect::<BTreeMap<_, _>>();
+    let Some(action) = actions.get(target_action_id) else {
+        return Vec::new();
+    };
+    let mut notes = vec![
+        format!("enablement_target:{target_action_id}"),
+        format!("guard: {}", descriptor.guard.unwrap_or("unknown")),
+    ];
+    notes.extend(
+        machine_transition_tags_for_action::<M>(target_action_id)
+            .into_iter()
+            .map(|tag| format!("path_tag:{tag}")),
+    );
+
+    if let Some((node_index, _)) = exploration
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| !M::step(&node.state, action).is_empty())
+    {
+        let mut reached_notes = notes.clone();
+        reached_notes.push("enablement_reached".to_string());
+        return build_machine_vector_for_node::<M>(
+            &exploration.nodes,
+            node_index,
+            property.property_id,
+            "enablement",
+            "enablement",
+            Some(target_action_id.to_string()),
+            None,
+            Some(true),
+            reached_notes,
+        )
+        .into_iter()
+        .collect();
+    }
+
+    notes.push("enablement_unreachable".to_string());
+    build_machine_vector_for_node::<M>(
+        &exploration.nodes,
+        0,
+        property.property_id,
+        "enablement",
+        "enablement",
+        Some(target_action_id.to_string()),
+        None,
+        Some(false),
+        notes,
+    )
+    .into_iter()
+    .collect()
 }
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]

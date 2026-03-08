@@ -236,24 +236,29 @@ pub fn coverage_bundled_model(model_ref: &str) -> Result<CoverageReport, String>
 }
 
 pub fn testgen_bundled_vectors(model_ref: &str, strategy: &str) -> Result<Vec<TestVector>, String> {
-    testgen_bundled_vectors_for_property(model_ref, None, strategy)
+    testgen_bundled_vectors_for_property(model_ref, None, strategy, None)
 }
 
 pub fn testgen_bundled_vectors_for_property(
     model_ref: &str,
     property_id: Option<&str>,
     strategy: &str,
+    focus_action_id: Option<&str>,
 ) -> Result<Vec<TestVector>, String> {
     let vectors = match parse_model_ref(model_ref) {
-        Some(BundledModel::Counter) => {
-            build_machine_test_vectors_for_strategy::<CounterModel>(property_id, strategy)
-        }
-        Some(BundledModel::FailingCounter) => {
-            build_machine_test_vectors_for_strategy::<FailingCounterModel>(property_id, strategy)
-        }
-        Some(BundledModel::IamAccess) => {
-            build_machine_test_vectors_for_strategy::<IamAccessModel>(property_id, strategy)
-        }
+        Some(BundledModel::Counter) => build_machine_test_vectors_for_strategy::<CounterModel>(
+            property_id,
+            strategy,
+            focus_action_id,
+        ),
+        Some(BundledModel::FailingCounter) => build_machine_test_vectors_for_strategy::<
+            FailingCounterModel,
+        >(property_id, strategy, focus_action_id),
+        Some(BundledModel::IamAccess) => build_machine_test_vectors_for_strategy::<IamAccessModel>(
+            property_id,
+            strategy,
+            focus_action_id,
+        ),
         None => return Err(format!("unknown bundled rust model `{model_ref}`")),
     };
     Ok(vectors)
@@ -264,6 +269,7 @@ pub fn testgen_bundled_model(
     model_ref: &str,
     property_id: Option<&str>,
     strategy: &str,
+    focus_action_id: Option<&str>,
     seed: Option<u64>,
     adapter: Option<&AdapterConfig>,
 ) -> Result<TestgenResponse, String> {
@@ -277,10 +283,10 @@ pub fn testgen_bundled_model(
                 adapter,
             )?
         } else {
-            testgen_bundled_vectors_for_property(model_ref, property_id, strategy)?
+            testgen_bundled_vectors_for_property(model_ref, property_id, strategy, focus_action_id)?
         }
     } else {
-        testgen_bundled_vectors_for_property(model_ref, property_id, strategy)?
+        testgen_bundled_vectors_for_property(model_ref, property_id, strategy, focus_action_id)?
     };
     annotate_bundled_replay_targets(model_ref, property_id, &mut vectors);
     let generated_files = write_generated_test_files(&vectors)?;
@@ -301,6 +307,9 @@ pub fn testgen_bundled_model(
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
+                focus_action_id: vector.focus_action_id.clone(),
+                expected_guard_enabled: vector.expected_guard_enabled,
+                notes: vector.notes.clone(),
             })
             .collect(),
         generated_files,
