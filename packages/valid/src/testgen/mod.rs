@@ -566,6 +566,7 @@ fn build_model_deadlock_vector(
             ],
             None => vec!["deadlock_reached".to_string()],
         },
+        grouping: VectorGrouping::default(),
         replay_target: None,
     }
 }
