@@ -20,6 +20,8 @@ pub mod doc;
 pub mod engine;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod evidence;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+pub mod external_registry;
 pub mod frontend;
 pub mod ir;
 pub mod kernel;

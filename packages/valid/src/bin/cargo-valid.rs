@@ -33,10 +33,13 @@ use valid::{
         render_doc_json, render_doc_text, write_doc,
     },
     evidence::{render_outcome_json, render_outcome_text},
-    project::{
-        load_project_config, render_project_config_template, render_registry_source_template,
-        ProjectConfig,
+    external_registry::{
+        discover_external_project as discover_external_registry_project,
+        project_root as external_project_root,
+        resolve_external_target as resolve_external_registry_target, ExternalTarget,
+        ExternalTargetKind, ExternalTargetOptions,
     },
+    project::{render_project_config_template, render_registry_source_template, ProjectConfig},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
@@ -362,7 +365,7 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     if let Some(manifest_path) = target.manifest_path {
         command.arg("--manifest-path").arg(manifest_path);
     }
-    command.arg(target.kind).arg(target.name);
+    command.arg(target.kind.cargo_flag()).arg(target.name);
     if let Some(manifest_path) = &parsed.manifest_path {
         command.env("VALID_REGISTRY_MANIFEST_PATH", manifest_path);
     }
@@ -513,7 +516,11 @@ fn command_supports_check_flag(command: &str) -> bool {
 
 fn external_target_requires_runtime_feature(parsed: &CliArgs, target: &ExternalTarget) -> bool {
     let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    project_root(parsed) == built_in_manifest_dir && matches!(target.kind, "--example" | "--bin")
+    external_project_root(parsed.manifest_path.as_deref()) == built_in_manifest_dir
+        && matches!(
+            target.kind,
+            ExternalTargetKind::Example | ExternalTargetKind::Bin
+        )
 }
 
 fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
@@ -1402,12 +1409,6 @@ fn normalized_model_ref(model: &str) -> String {
     }
 }
 
-struct ExternalTarget {
-    manifest_path: Option<String>,
-    kind: &'static str,
-    name: String,
-}
-
 fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
     if matches!(
         parsed.command.as_str(),
@@ -1415,86 +1416,76 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
     ) {
         return parsed;
     }
-    let current_dir = project_root(&parsed);
-    let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let cargo_toml = current_dir.join("Cargo.toml");
-    match load_project_config(&current_dir) {
-        Ok(Some(config)) => {
-            apply_project_runtime_config(&config);
-            let explicit_registry_target =
-                parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some();
-            if parsed.backend.is_none() {
-                parsed.backend = config.default_backend.clone();
-            }
-            if parsed.property_id.is_none() {
-                parsed.property_id = config
-                    .default_property
-                    .clone()
-                    .filter(|value| !value.trim().is_empty());
-            }
-            if parsed.solver_executable.is_none() {
-                parsed.solver_executable = config
-                    .default_solver_executable
-                    .clone()
-                    .filter(|value| !value.trim().is_empty());
-            }
-            if parsed.solver_args.is_empty() && !config.default_solver_args.is_empty() {
-                parsed.solver_args = config.default_solver_args.clone();
-            }
-            if parsed.suite_models.is_empty() && !explicit_registry_target {
-                parsed.suite_models = config.suite_models.clone();
-            }
-            if parsed.command == "benchmark"
-                && parsed.benchmark_models.is_empty()
-                && !explicit_registry_target
-            {
-                parsed.benchmark_models = if config.benchmark_models.is_empty() {
-                    config.suite_models.clone()
-                } else {
-                    config.benchmark_models.clone()
-                };
-            }
-            if parsed.command == "benchmark" && parsed.repeat == 0 {
-                parsed.repeat = config.benchmark_repeats.unwrap_or(3);
-            }
-            if parsed.command == "benchmark" && parsed.threshold_percent.is_none() {
-                parsed.threshold_percent = config.benchmark_regression_threshold_percent;
-            }
-            if parsed.command == "benchmark" && parsed.baseline_mode.is_none() {
-                parsed.baseline_mode = Some("compare".to_string());
-            }
-            if !explicit_registry_target {
-                if let Some(registry) = config.registry.clone() {
-                    parsed.file = Some(current_dir.join(registry).to_string_lossy().to_string());
+    let target_options = ExternalTargetOptions {
+        manifest_path: parsed.manifest_path.clone(),
+        file: parsed.file.clone(),
+        example: parsed.example.clone(),
+        bin: parsed.bin.clone(),
+    };
+    match discover_external_registry_project(&target_options) {
+        Ok(discovered) => {
+            if let Some(config) = discovered.config {
+                let explicit_registry_target =
+                    parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some();
+                apply_project_runtime_config(&config);
+                if parsed.backend.is_none() {
+                    parsed.backend = config.default_backend.clone();
+                }
+                if parsed.property_id.is_none() {
+                    parsed.property_id = config
+                        .default_property
+                        .clone()
+                        .filter(|value| !value.trim().is_empty());
+                }
+                if parsed.solver_executable.is_none() {
+                    parsed.solver_executable = config
+                        .default_solver_executable
+                        .clone()
+                        .filter(|value| !value.trim().is_empty());
+                }
+                if parsed.solver_args.is_empty() && !config.default_solver_args.is_empty() {
+                    parsed.solver_args = config.default_solver_args.clone();
+                }
+                if parsed.suite_models.is_empty() && !explicit_registry_target {
+                    parsed.suite_models = config.suite_models.clone();
+                }
+                if parsed.command == "benchmark"
+                    && parsed.benchmark_models.is_empty()
+                    && !explicit_registry_target
+                {
+                    parsed.benchmark_models = if config.benchmark_models.is_empty() {
+                        config.suite_models.clone()
+                    } else {
+                        config.benchmark_models.clone()
+                    };
+                }
+                if parsed.command == "benchmark" && parsed.repeat == 0 {
+                    parsed.repeat = config.benchmark_repeats.unwrap_or(3);
+                }
+                if parsed.command == "benchmark" && parsed.threshold_percent.is_none() {
+                    parsed.threshold_percent = config.benchmark_regression_threshold_percent;
+                }
+                if parsed.command == "benchmark" && parsed.baseline_mode.is_none() {
+                    parsed.baseline_mode = Some("compare".to_string());
+                }
+                if !explicit_registry_target {
+                    parsed.file = discovered.options.file.clone();
                 }
             }
-            if parsed.manifest_path.is_none() && cargo_toml.exists() {
-                parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
+            parsed.manifest_path = discovered.options.manifest_path.clone();
+            if parsed.file.is_none() {
+                parsed.file = discovered.options.file.clone();
+            }
+            if parsed.example.is_none() {
+                parsed.example = discovered.options.example.clone();
+            }
+            if parsed.bin.is_none() {
+                parsed.bin = discovered.options.bin.clone();
             }
         }
-        Ok(None) => {}
         Err(message) => {
             message_exit("cargo-valid", parsed.json, &message, None);
         }
-    }
-    if parsed.file.is_some() || parsed.example.is_some() || parsed.bin.is_some() {
-        return parsed;
-    }
-    if current_dir == built_in_manifest_dir {
-        return parsed;
-    }
-    if !cargo_toml.exists() {
-        return parsed;
-    }
-    let candidates = [
-        current_dir.join("examples").join("valid_models.rs"),
-        current_dir.join("src").join("bin").join("valid_models.rs"),
-    ];
-    if let Some(file) = candidates.into_iter().find(|path| path.exists()) {
-        if parsed.manifest_path.is_none() {
-            parsed.manifest_path = Some(cargo_toml.to_string_lossy().to_string());
-        }
-        parsed.file = Some(file.to_string_lossy().to_string());
     }
     if parsed.command == "benchmark" && parsed.repeat == 0 {
         parsed.repeat = 3;
@@ -1505,71 +1496,14 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
     parsed
 }
 
-fn project_root(parsed: &CliArgs) -> PathBuf {
-    if let Some(manifest_path) = &parsed.manifest_path {
-        let path = PathBuf::from(manifest_path);
-        return path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-    }
-    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
 fn resolve_external_target(parsed: &CliArgs) -> ExternalTarget {
-    if let Some(file) = &parsed.file {
-        return target_from_file(parsed.manifest_path.clone(), file);
-    }
-    if let Some(example) = &parsed.example {
-        return ExternalTarget {
-            manifest_path: parsed.manifest_path.clone(),
-            kind: "--example",
-            name: example.clone(),
-        };
-    }
-    if let Some(bin) = &parsed.bin {
-        return ExternalTarget {
-            manifest_path: parsed.manifest_path.clone(),
-            kind: "--bin",
-            name: bin.clone(),
-        };
-    }
-    ExternalTarget {
+    resolve_external_registry_target(&ExternalTargetOptions {
         manifest_path: parsed.manifest_path.clone(),
-        kind: "--example",
-        name: "valid_models".to_string(),
-    }
-}
-
-fn target_from_file(manifest_path: Option<String>, file: &str) -> ExternalTarget {
-    let path = Path::new(file);
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_else(|| usage_exit("expected a Rust source file path for --file"));
-    let normalized = file.replace('\\', "/");
-    let kind = if normalized.ends_with(&format!("/examples/{stem}.rs"))
-        || normalized == format!("examples/{stem}.rs")
-    {
-        "--example"
-    } else if normalized.ends_with(&format!("/benchmarks/registries/{stem}.rs"))
-        || normalized == format!("benchmarks/registries/{stem}.rs")
-    {
-        "--example"
-    } else if normalized.ends_with(&format!("/src/bin/{stem}.rs"))
-        || normalized == format!("src/bin/{stem}.rs")
-    {
-        "--bin"
-    } else {
-        usage_exit(
-            "`--file` currently supports files under `examples/`, `benchmarks/registries/`, or `src/bin/`",
-        );
-    };
-    ExternalTarget {
-        manifest_path,
-        kind,
-        name: stem.to_string(),
-    }
+        file: parsed.file.clone(),
+        example: parsed.example.clone(),
+        bin: parsed.bin.clone(),
+    })
+    .unwrap_or_else(|message| usage_exit(&message))
 }
 
 fn parse_models_json(stdout: &str) -> Vec<String> {
@@ -1791,13 +1725,13 @@ fn cmd_batch(parsed: &CliArgs) -> ! {
 }
 
 fn clean_root(parsed: &CliArgs) -> PathBuf {
-    project_root(parsed)
+    external_project_root(parsed.manifest_path.as_deref())
 }
 
 fn cmd_init(parsed: &CliArgs) -> ! {
     let progress = ProgressReporter::new("init", parsed.progress_json);
     progress.start(None);
-    let root = project_root(parsed);
+    let root = external_project_root(parsed.manifest_path.as_deref());
     let cargo_toml = root.join("Cargo.toml");
     if !cargo_toml.exists() {
         message_exit(

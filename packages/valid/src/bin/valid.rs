@@ -36,7 +36,12 @@ use valid::{
     },
     engine::CheckOutcome,
     evidence::{render_outcome_json, render_outcome_text, write_outcome_artifacts},
+    external_registry::{
+        build_registry_binary, discover_external_project, resolve_external_target,
+        ExternalTargetOptions,
+    },
     frontend::compile_model,
+    mcp::{serve_stdio, ServerConfig},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
@@ -75,6 +80,7 @@ enum ValidCommand {
     Conformance(ConformanceArgs),
     Clean(CleanArgs),
     Selfcheck(JsonProgressArgs),
+    Mcp(McpArgs),
     Commands(JsonOnlyArgs),
     Schema(SchemaArgs),
     Batch(JsonProgressArgs),
@@ -239,6 +245,22 @@ struct SchemaArgs {
     command: String,
 }
 
+#[derive(Args, Debug, Clone)]
+struct McpArgs {
+    #[arg(long = "manifest-path")]
+    manifest_path: Option<String>,
+    #[arg(long = "registry", alias = "file")]
+    registry: Option<String>,
+    #[arg(long)]
+    example: Option<String>,
+    #[arg(long)]
+    bin: Option<String>,
+    #[arg(long = "model-file")]
+    model_file: Option<String>,
+    #[arg(long)]
+    name: Option<String>,
+}
+
 fn main() {
     let raw_args = env::args().collect::<Vec<_>>();
     let json = detect_json_flag(&raw_args);
@@ -272,6 +294,7 @@ fn main() {
         }
         Some(ValidCommand::Clean(args)) => cmd_clean_from_parsed(args),
         Some(ValidCommand::Selfcheck(args)) => cmd_selfcheck_from_parsed(args),
+        Some(ValidCommand::Mcp(args)) => cmd_mcp_from_parsed(args),
         Some(ValidCommand::Commands(args)) => cmd_commands_from_parsed(args),
         Some(ValidCommand::Schema(args)) => cmd_schema_from_parsed(args),
         Some(ValidCommand::Batch(args)) => cmd_batch_from_parsed(args),
@@ -279,7 +302,7 @@ fn main() {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|clean|selfcheck|commands|schema|batch> ...",
+                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|clean|selfcheck|mcp|commands|schema|batch> ...",
             );
         }
     }
@@ -468,6 +491,42 @@ fn cmd_schema_from_parsed(args: SchemaArgs) {
 }
 fn cmd_batch_from_parsed(args: JsonProgressArgs) {
     cmd_batch(flags_to_args(args));
+}
+
+fn cmd_mcp_from_parsed(args: McpArgs) {
+    let mut config = ServerConfig::default();
+    if let Some(name) = args.name {
+        config.server_name = name;
+    }
+    if let Some(model_file) = args.model_file {
+        if args.registry.is_some() || args.example.is_some() || args.bin.is_some() {
+            message_exit(
+                "mcp",
+                false,
+                "use either --model-file for DSL mode or --registry/--example/--bin for registry mode",
+                None,
+            );
+        }
+        config.default_model_file = Some(model_file);
+    } else {
+        let discovered = discover_external_project(&ExternalTargetOptions {
+            manifest_path: args.manifest_path,
+            file: args.registry,
+            example: args.example,
+            bin: args.bin,
+        })
+        .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
+        let target = resolve_external_target(&discovered.options)
+            .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
+        let registry_binary = build_registry_binary(&target, &[])
+            .unwrap_or_else(|message| message_exit("mcp", false, &message, None));
+        config.default_registry_binary = Some(registry_binary);
+    }
+    if let Err(message) = serve_stdio(config) {
+        eprintln!("{message}");
+        process::exit(1);
+    }
+    process::exit(0);
 }
 fn cmd_clean_from_parsed(args: CleanArgs) {
     let mut values = flags_to_args(args.json_progress);

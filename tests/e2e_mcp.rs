@@ -436,6 +436,31 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .any(|item| item == "counter"));
 }
 
+#[test]
+fn valid_mcp_accepts_older_protocol_versions() {
+    let temp = TempDir::new("mcp-older-protocol");
+    let mut client = McpClient::spawn(&[], temp.path());
+
+    let result = client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-11-05",
+            "capabilities": {},
+            "clientInfo": { "name": "valid-test", "version": "0.1.0" }
+        }),
+    );
+    client.notify("notifications/initialized", json!({}));
+
+    assert_eq!(
+        result
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .expect("protocol version should be present"),
+        "2025-11-05"
+    );
+    assert!(result["capabilities"]["tools"].is_object());
+}
+
 #[cfg(unix)]
 fn make_mock_registry(temp: &TempDir) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;

@@ -147,8 +147,8 @@ cargo run --features verification-runtime --bin valid -- explain tests/fixtures/
 
 ## MCP Server
 
-`valid-mcp` exposes `valid` over MCP stdio so Claude Code, Claude Desktop, and
-other MCP clients can call it as tools.
+`valid mcp` exposes `valid` over MCP stdio so Codex, Claude Code, Claude
+Desktop, and other MCP clients can call it as tools.
 
 Recommended AI flow:
 
@@ -175,11 +175,9 @@ Available tools:
 - `valid_graph`
 - `valid_lint`
 
-Build or install it:
+Install it:
 
 ```sh
-cargo build --bin valid-mcp
-# or
 cargo install --path . --features varisat-backend
 ```
 
@@ -188,7 +186,7 @@ cargo install --path . --features varisat-backend
 Use this when the source of truth is a `.valid` file.
 
 ```sh
-claude mcp add valid-dsl -- /absolute/path/to/valid-mcp --model-file /absolute/path/to/model.valid
+claude mcp add valid-dsl -- valid mcp --model-file /absolute/path/to/model.valid
 ```
 
 If you do not pin `--model-file` at startup, pass `model_file` or `source` in
@@ -196,15 +194,27 @@ each tool call.
 
 ### Registry Mode
 
-Use this when the source of truth is a Rust registry binary.
+Use this when the source of truth is a Rust registry project. `valid mcp`
+reuses the same project-first discovery rules as `cargo valid`, so MCP clients
+can point at a project root instead of a `target/debug/...` executable.
 
 ```sh
-cargo build --example valid_models
-claude mcp add valid-registry -- /absolute/path/to/valid-mcp --registry-binary /absolute/path/to/target/debug/examples/valid_models
+claude mcp add valid-registry -- valid mcp --manifest-path /absolute/path/to/project/Cargo.toml
 ```
 
-When `--registry-binary` is configured at startup, tool calls only need
-`model_name`. Without it, pass `registry_binary` and `model_name` per call.
+If the project uses `valid.toml`, `valid mcp` will honor its `registry`
+setting. Without `valid.toml`, it falls back to `examples/valid_models.rs` or
+`src/bin/valid_models.rs`. You can also pin a target explicitly:
+
+```sh
+valid mcp --manifest-path /absolute/path/to/project/Cargo.toml --example valid_models
+valid mcp --manifest-path /absolute/path/to/project/Cargo.toml --bin my_registry
+valid mcp --manifest-path /absolute/path/to/project/Cargo.toml --registry examples/custom_registry.rs
+```
+
+When registry mode is configured at startup, tool calls only need `model_name`.
+Without startup configuration, pass `registry_binary` and `model_name` per
+call.
 
 `valid_contract_snapshot` and `valid_contract_check` can operate on one
 registry model when `model_name` is provided, or on the full registry when it
@@ -212,8 +222,13 @@ is omitted.
 
 Configuration templates live at:
 
-- [docs/mcp/claude_desktop_config.json](/Users/tatsuhiko/.codex/worktrees/eb0d/valid/docs/mcp/claude_desktop_config.json)
-- [docs/mcp/claude_code.mcp.json](/Users/tatsuhiko/.codex/worktrees/eb0d/valid/docs/mcp/claude_code.mcp.json)
+- [docs/mcp/claude_desktop_config.json](docs/mcp/claude_desktop_config.json)
+- [docs/mcp/claude_code.mcp.json](docs/mcp/claude_code.mcp.json)
+- [docs/mcp/codex_config.toml](docs/mcp/codex_config.toml)
+
+`valid-mcp` remains available as a low-level compatibility binary for clients
+that want to pass `--registry-binary` or `--model-file` directly, but `valid
+mcp` is the recommended setup path.
 
 ## Mental Model
 
@@ -588,31 +603,31 @@ cargo valid --registry examples/valid_models.rs replay failing-counter --propert
 
 Rust-first examples:
 
-- [valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs)
-- [fizzbuzz.rs](/Users/tatsuhiko/code/valid/examples/fizzbuzz.rs)
-- [saas_multi_tenant_registry.rs](/Users/tatsuhiko/code/valid/examples/saas_multi_tenant_registry.rs)
-- [iam_transition_registry.rs](/Users/tatsuhiko/code/valid/examples/iam_transition_registry.rs)
-- [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
+- [valid_models.rs](examples/valid_models.rs)
+- [fizzbuzz.rs](examples/fizzbuzz.rs)
+- [saas_multi_tenant_registry.rs](examples/saas_multi_tenant_registry.rs)
+- [iam_transition_registry.rs](examples/iam_transition_registry.rs)
+- [examples/README.md](examples/README.md)
 
 Benchmark and stress registries:
 
-- [practical_use_cases_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/practical_use_cases_registry.rs)
-- [enterprise_scale_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/enterprise_scale_registry.rs)
-- [iam_enterprise_registry.rs](/Users/tatsuhiko/code/valid/benchmarks/registries/iam_enterprise_registry.rs)
+- [practical_use_cases_registry.rs](benchmarks/registries/practical_use_cases_registry.rs)
+- [enterprise_scale_registry.rs](benchmarks/registries/enterprise_scale_registry.rs)
+- [iam_enterprise_registry.rs](benchmarks/registries/iam_enterprise_registry.rs)
 
 Compatibility fixtures:
 
-- [safe_counter.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/safe_counter.valid)
-- [failing_counter.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/failing_counter.valid)
-- [multi_property.valid](/Users/tatsuhiko/code/valid/tests/fixtures/models/multi_property.valid)
+- [safe_counter.valid](tests/fixtures/models/safe_counter.valid)
+- [failing_counter.valid](tests/fixtures/models/failing_counter.valid)
+- [multi_property.valid](tests/fixtures/models/multi_property.valid)
 
 ## Core Examples
 
 The default project registry is
-[valid_models.rs](/Users/tatsuhiko/code/valid/examples/valid_models.rs). It is
+[valid_models.rs](examples/valid_models.rs). It is
 intentionally tiny and easy to debug.
 
-Use [saas_multi_tenant_registry.rs](/Users/tatsuhiko/code/valid/examples/saas_multi_tenant_registry.rs)
+Use [saas_multi_tenant_registry.rs](examples/saas_multi_tenant_registry.rs)
 when you want a still-readable service-oriented example with:
 
 - tenant onboarding growth limits
@@ -741,6 +756,6 @@ For large specifications such as IAM-like authorization:
 
 ## Where To Read Next
 
-- [examples/README.md](/Users/tatsuhiko/code/valid/examples/README.md)
-- [rust_native_modeling_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/rust_native_modeling_specs.md)
-- [testgen_contract_coverage_specs.md](/Users/tatsuhiko/code/valid/docs/rdd/08_specs/testgen_contract_coverage_specs.md)
+- [examples/README.md](examples/README.md)
+- [rust_native_modeling_specs.md](docs/rdd/08_specs/rust_native_modeling_specs.md)
+- [testgen_contract_coverage_specs.md](docs/rdd/08_specs/testgen_contract_coverage_specs.md)

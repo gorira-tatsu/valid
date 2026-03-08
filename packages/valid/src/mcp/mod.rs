@@ -33,7 +33,13 @@ use crate::{
     testgen::render_replay_json,
 };
 
-const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25"];
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
+    "2025-11-25",
+    "2025-11-05",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+];
 const JSON_SCHEMA_DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 const PAGE_SIZE: usize = 64;
 
@@ -1016,12 +1022,16 @@ struct ToolCallParams {
 #[serde(default, deny_unknown_fields)]
 struct PaginatedParams {
     cursor: Option<String>,
+    #[serde(default, rename = "_meta")]
+    _meta: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ReadResourceParams {
     uri: String,
+    #[serde(default, rename = "_meta")]
+    _meta: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1030,12 +1040,16 @@ struct GetPromptParams {
     name: String,
     #[serde(default)]
     arguments: Map<String, Value>,
+    #[serde(default, rename = "_meta")]
+    _meta: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct SetLevelParams {
     level: String,
+    #[serde(default, rename = "_meta")]
+    _meta: Option<Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -1,0 +1,7 @@
+[mcp_servers.valid_dsl]
+command = "valid"
+args = ["mcp", "--model-file", "/absolute/path/to/model.valid"]
+
+[mcp_servers.valid_registry]
+command = "valid"
+args = ["mcp", "--manifest-path", "/absolute/path/to/project/Cargo.toml"]

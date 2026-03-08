@@ -541,6 +541,26 @@ const BIN_ARG: ArgSpec = ArgSpec {
     description: "Cargo binary name to execute.",
     values: &[],
 };
+const MODEL_FILE_OPTION_ARG: ArgSpec = ArgSpec {
+    name: "model_file",
+    syntax: "--model-file <path>",
+    value_type: "string",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "DSL model file to pin at MCP startup.",
+    values: &[],
+};
+const NAME_ARG: ArgSpec = ArgSpec {
+    name: "name",
+    syntax: "--name <server-name>",
+    value_type: "string",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Override the MCP server name.",
+    values: &[],
+};
 const CLEAN_SCOPE_ARG: ArgSpec = ArgSpec {
     name: "scope",
     syntax: "[generated|artifacts|all]",
@@ -659,6 +679,15 @@ const CLEAN_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
 const SCHEMA_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const COMMANDS_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const BATCH_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
+const MCP_OPTIONS: &[ArgSpec] = &[
+    MANIFEST_ARG,
+    REGISTRY_ARG,
+    FILE_ARG,
+    EXAMPLE_ARG,
+    BIN_ARG,
+    MODEL_FILE_OPTION_ARG,
+    NAME_ARG,
+];
 const BENCHMARK_OPTIONS: &[ArgSpec] = &[
     JSON_ARG,
     PROGRESS_ARG,
@@ -874,6 +903,18 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         request_schema: None,
         response_schema: Some(SchemaRef { id: "schema.cli.commands_response", builder: commands_response_schema }),
         supports_json: true,
+        supports_progress: false,
+    },
+    CommandSpec {
+        name: "mcp",
+        aliases: &[],
+        description: "Start the MCP server with project-first target discovery.",
+        usage: "valid mcp [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] [--model-file <path>] [--name <server-name>]",
+        positional: &[],
+        options: MCP_OPTIONS,
+        request_schema: None,
+        response_schema: None,
+        supports_json: false,
         supports_progress: false,
     },
     CommandSpec {

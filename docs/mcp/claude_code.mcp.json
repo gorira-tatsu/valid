@@ -1,17 +1,19 @@
 {
   "mcpServers": {
     "valid-dsl": {
-      "command": "${VALID_MCP_BIN}",
+      "command": "valid",
       "args": [
+        "mcp",
         "--model-file",
         "${VALID_MODEL_FILE}"
       ]
     },
     "valid-registry": {
-      "command": "${VALID_MCP_BIN}",
+      "command": "valid",
       "args": [
-        "--registry-binary",
-        "${VALID_REGISTRY_BIN}"
+        "mcp",
+        "--manifest-path",
+        "${VALID_PROJECT_MANIFEST}"
       ]
     }
   }

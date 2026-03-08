@@ -525,6 +525,7 @@ fn cli_commands_and_schema_are_machine_readable() {
     let commands_stdout = String::from_utf8_lossy(&commands.stdout);
     assert!(commands_stdout.contains("\"surface\":\"valid\""));
     assert!(commands_stdout.contains("\"name\":\"check\""));
+    assert!(commands_stdout.contains("\"name\":\"mcp\""));
     assert!(commands_stdout.contains("\"response\":\"schema.run_result\""));
 
     let schema = Command::new(binary_path())

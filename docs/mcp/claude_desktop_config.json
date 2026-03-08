@@ -1,18 +1,20 @@
 {
   "mcpServers": {
     "valid-dsl": {
-      "command": "/absolute/path/to/valid-mcp",
+      "command": "valid",
       "args": [
+        "mcp",
         "--model-file",
         "/absolute/path/to/model.valid"
       ],
       "env": {}
     },
     "valid-registry": {
-      "command": "/absolute/path/to/valid-mcp",
+      "command": "valid",
       "args": [
-        "--registry-binary",
-        "/absolute/path/to/target/debug/examples/valid_models"
+        "mcp",
+        "--manifest-path",
+        "/absolute/path/to/project/Cargo.toml"
       ],
       "env": {}
     }
