@@ -39,8 +39,29 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
                 action.line,
             ));
         }
+        for choice in &action.choices {
+            for value in &choice.values {
+                if !(value == "true" || value == "false" || value.parse::<u32>().is_ok()) {
+                    errors.push(type_error(
+                        format!(
+                            "bounded choice `{}` only supports bool and unsigned integer literals in v1",
+                            choice.name
+                        ),
+                        choice.line,
+                    ));
+                    break;
+                }
+            }
+        }
         if let Some(pre) = &action.pre {
-            if pre.contains(" + ") {
+            if pre.contains(" + ")
+                && !pre.contains("<=")
+                && !pre.contains(">=")
+                && !pre.contains("==")
+                && !pre.contains("!=")
+                && !pre.contains('<')
+                && !pre.contains('>')
+            {
                 errors.push(type_error(
                     "guard expression must be boolean".to_string(),
                     action.line,

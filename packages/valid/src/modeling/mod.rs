@@ -2796,6 +2796,24 @@ pub fn build_machine_test_vectors_for_strategy<M: VerifiedMachine>(
 ) -> Vec<TestVector> {
     let property_id = property_id.unwrap_or_else(|| primary_property::<M>().property_id);
     match strategy {
+        "deadlock" => {
+            let property = find_property::<M>(property_id);
+            if property.property_kind != crate::ir::PropertyKind::DeadlockFreedom {
+                Vec::new()
+            } else {
+                build_machine_test_vectors_for_property::<M>(property_id)
+                    .into_iter()
+                    .filter(|vector| vector.strategy == "counterexample")
+                    .map(|mut vector| {
+                        vector.source_kind = "deadlock".to_string();
+                        vector.derivation = "deadlock_trace".to_string();
+                        vector.strategy = "deadlock".to_string();
+                        vector.notes.push("deadlock_reached".to_string());
+                        vector
+                    })
+                    .collect()
+            }
+        }
         "counterexample" => build_machine_test_vectors_for_property::<M>(property_id)
             .into_iter()
             .filter(|vector| vector.strategy == "counterexample")

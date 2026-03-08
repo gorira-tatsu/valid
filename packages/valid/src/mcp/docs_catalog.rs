@@ -61,6 +61,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &[
             "ai-authoring-guide",
             "ai-curriculum",
+            "ai-candidate-comparison-workflow",
             "ai-requirement-refinement-workflow",
             "dsl-guide",
             "install-guide",
@@ -170,6 +171,39 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         source_path: "docs/ai/requirement-refinement-workflow.md",
         body_markdown: include_str!("../../../../docs/ai/requirement-refinement-workflow.md"),
+    },
+    DocEntry {
+        id: "ai-candidate-comparison-workflow",
+        title: "Candidate Comparison Workflow",
+        kind: "workflow",
+        audience: "llm-agents",
+        recommended_for: &["candidate-comparison", "distinguish", "review"],
+        canonical_entry: false,
+        summary: "Task-oriented guide for comparing two plausible candidate models and turning the first divergence into a product-facing decision.",
+        key_points: &[
+            "Explains how to move from shared requirement brief to shortest distinguishing trace",
+            "Separates model-level divergence from product-level decision wording",
+        ],
+        canonical_rules: &[
+            "Name the shared requirement brief before comparing the candidates",
+            "Record the differing assumption in product language, not only model language",
+        ],
+        supported_features: &[
+            "Candidate-model comparison workflow",
+            "Distinguishing-trace review order",
+            "Exit criteria for requirement decisions",
+        ],
+        unsupported_features: &[
+            "Normative syntax definition",
+        ],
+        related_docs: &[
+            "ai-authoring-guide",
+            "ai-review-workflow",
+            "ai-requirement-refinement-workflow",
+            "ai-curriculum",
+        ],
+        source_path: "docs/ai/candidate-comparison-workflow.md",
+        body_markdown: include_str!("../../../../docs/ai/candidate-comparison-workflow.md"),
     },
     DocEntry {
         id: "ai-conformance-workflow",

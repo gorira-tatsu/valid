@@ -26,6 +26,7 @@ pub enum EvidenceKind {
     Trace,
     Counterexample,
     Witness,
+    Deadlock,
     Certificate,
 }
 
@@ -1124,6 +1125,7 @@ fn evidence_kind_label(kind: &EvidenceKind) -> &'static str {
         EvidenceKind::Trace => "trace",
         EvidenceKind::Counterexample => "counterexample",
         EvidenceKind::Witness => "witness",
+        EvidenceKind::Deadlock => "deadlock",
         EvidenceKind::Certificate => "certificate",
     }
 }

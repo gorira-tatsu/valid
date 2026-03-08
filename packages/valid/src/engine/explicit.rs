@@ -804,7 +804,7 @@ fn deadlock_result(
             &evidence_id,
             &plan.manifest.run_id,
             &property.property_id,
-            EvidenceKind::Trace,
+            EvidenceKind::Deadlock,
             nodes,
             deadlock_index,
             Some("deadlock detected".to_string()),
@@ -1470,6 +1470,7 @@ mod tests {
             Some("DEADLOCK_REACHED")
         );
         let trace = result.trace.expect("deadlock trace");
+        assert_eq!(trace.evidence_kind, EvidenceKind::Deadlock);
         assert_eq!(trace.steps.len(), 1);
         assert_eq!(trace.steps[0].action_id.as_deref(), Some("OnlyOnce"));
         assert_eq!(trace.steps[0].note.as_deref(), Some("deadlock detected"));

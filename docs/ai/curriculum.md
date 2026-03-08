@@ -24,10 +24,13 @@ authoring guide.
    Read this after the first draft so you can catch common mistakes quickly.
 6. [Review Workflow](./review-workflow.md)
    Switch here when the task becomes "review and explain" instead of "write".
-7. [Migration Guide](./migration-guide.md)
+7. [Candidate Comparison Workflow](./candidate-comparison-workflow.md)
+   Use this when two candidate models both look plausible and you need a
+   shortest distinguishing trace before choosing one.
+8. [Migration Guide](./migration-guide.md)
    Use this when moving from `step` to declarative `transitions`, or when
    reducing readiness/lint findings.
-8. [Conformance Workflow](./conformance-workflow.md)
+9. [Conformance Workflow](./conformance-workflow.md)
    Use this when you need to connect model evidence to a real implementation.
 
 ### Refine an ambiguous requirement
@@ -57,12 +60,22 @@ authoring guide.
 
 1. [Review Workflow](./review-workflow.md)
 2. [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
-3. [Common Pitfalls](./common-pitfalls.md)
-4. [Modeling Checklist](./modeling-checklist.md)
+3. [Candidate Comparison Workflow](./candidate-comparison-workflow.md)
+4. [Common Pitfalls](./common-pitfalls.md)
+5. [Modeling Checklist](./modeling-checklist.md)
 5. Current MCP prompts:
    - `refine_requirement_from_evidence`
    - `review_model`
    - `explain_readiness_failure`
+
+### Compare competing model candidates
+
+1. [Candidate Comparison Workflow](./candidate-comparison-workflow.md)
+2. [Review Workflow](./review-workflow.md)
+3. [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
+4. Current MCP prompts:
+   - `compare_candidate_models`
+   - `refine_requirement_from_evidence`
 
 ### Migrate a model
 
@@ -105,6 +118,7 @@ the client invent a flow ad hoc.
 
 - [AI Authoring Guide](./authoring-guide.md)
 - [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
+- [Candidate Comparison Workflow](./candidate-comparison-workflow.md)
 - [Review Workflow](./review-workflow.md)
 - [Migration Guide](./migration-guide.md)
 - [Conformance Workflow](./conformance-workflow.md)

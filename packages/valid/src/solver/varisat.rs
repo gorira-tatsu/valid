@@ -41,7 +41,7 @@ pub fn run_bounded_invariant_check_varisat(
     _target_property_ids: &[String],
     _horizon: usize,
 ) -> Result<VarisatSolveStatus, String> {
-    Err("backend=sat-varisat requires the `varisat-backend` Cargo feature".to_string())
+    Err("backend=sat-varisat requires the `varisat-backend` Cargo feature; reinstall or rebuild `valid` with `--features varisat-backend`, or use `cargo valid --backend=sat-varisat` so the feature is added automatically".to_string())
 }
 
 #[cfg(feature = "varisat-backend")]

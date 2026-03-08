@@ -29,8 +29,16 @@ pub struct ParsedAssignment {
 pub struct ParsedAction {
     pub name: String,
     pub role: String,
+    pub choices: Vec<ParsedChoice>,
     pub pre: Option<String>,
     pub posts: Vec<ParsedAssignment>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedChoice {
+    pub name: String,
+    pub values: Vec<String>,
     pub line: usize,
 }
 
@@ -122,6 +130,7 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             current_action = Some(ParsedAction {
                 name,
                 role: "business".to_string(),
+                choices: Vec::new(),
                 pre: None,
                 posts: Vec::new(),
                 line: line_no,
@@ -218,6 +227,29 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
                     if let Some(rest) = trimmed.strip_prefix("pre:") {
                         action.pre = Some(rest.trim().to_string());
                         section = Section::ActionHeader;
+                    } else if let Some(rest) = trimmed.strip_prefix("choose ") {
+                        if let Some((name, values)) = split_once(rest, ':') {
+                            let parsed_values = values
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>();
+                            if parsed_values.is_empty() {
+                                errors.push(parse_error(
+                                    "bounded choice requires at least one value",
+                                    line_no,
+                                ));
+                            } else {
+                                action.choices.push(ParsedChoice {
+                                    name: name.trim().to_string(),
+                                    values: parsed_values,
+                                    line: line_no,
+                                });
+                            }
+                        } else {
+                            errors.push(parse_error("invalid bounded choice declaration", line_no));
+                        }
                     } else if let Some(rest) = trimmed.strip_prefix("role:") {
                         action.role = rest.trim().to_string();
                         section = Section::ActionHeader;
@@ -462,5 +494,27 @@ assume ENV_PRECONDITION:
             Some("prev.visible == true")
         );
         assert_eq!(parsed.properties[1].layer, "assume");
+    }
+
+    #[test]
+    fn parses_bounded_action_choices() {
+        let source = r#"
+model Counter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Add:
+  choose delta: 1, 2
+  pre: x + {{delta}} <= 2
+  post:
+    x = x + {{delta}}
+"#;
+
+        let parsed = parse_model(source).expect("parse");
+        assert_eq!(parsed.actions.len(), 1);
+        assert_eq!(parsed.actions[0].choices.len(), 1);
+        assert_eq!(parsed.actions[0].choices[0].name, "delta");
+        assert_eq!(parsed.actions[0].choices[0].values, vec!["1", "2"]);
     }
 }

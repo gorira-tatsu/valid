@@ -52,6 +52,11 @@ If you want the smallest CLI build and only need explicit exploration:
 cargo install --path . --features verification-runtime
 ```
 
+That smaller build does not compile in `sat-varisat`.
+`valid capabilities --backend=sat-varisat` will report `available=false`, and
+`valid mcp` will omit `sat-varisat` from advertised backend enums unless the
+binary was built with `--features varisat-backend`.
+
 ### 3. Docker
 
 For CI or isolated execution:

@@ -33,7 +33,7 @@ use crate::{
         schema::{require_len_match, require_non_empty, require_schema_version},
     },
     testgen::{
-        build_counterexample_vector, build_model_test_vectors_for_strategy,
+        build_counterexample_vector, build_deadlock_vector, build_model_test_vectors_for_strategy,
         build_synthetic_witness_vectors, build_witness_vector, minimize_counterexample_vector,
         write_generated_test_files, MinimizeResult, ReplayTarget,
     },
@@ -2233,6 +2233,17 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         .property_id
         .as_deref()
         .or_else(|| {
+            if request.strategy == "deadlock" {
+                model
+                    .properties
+                    .iter()
+                    .find(|property| property.kind == PropertyKind::DeadlockFreedom)
+                    .map(|property| property.property_id.as_str())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
             model
                 .properties
                 .first()
@@ -2244,6 +2255,27 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .filter_map(|trace| build_counterexample_vector(trace).ok())
             .collect::<Vec<_>>()
+    } else if request.strategy == "deadlock" {
+        let trace_vectors = traces
+            .iter()
+            .filter(|trace| trace.evidence_kind == crate::evidence::EvidenceKind::Deadlock)
+            .filter_map(|trace| build_deadlock_vector(trace).ok())
+            .collect::<Vec<_>>();
+        if trace_vectors.is_empty() {
+            build_model_test_vectors_for_strategy(&model, target_property_id, &request.strategy)
+                .map_err(|message| CheckErrorEnvelope {
+                    manifest: result.manifest.clone(),
+                    status: crate::engine::ErrorStatus::Error,
+                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                    diagnostics: vec![Diagnostic::new(
+                        crate::support::diagnostics::ErrorCode::SearchError,
+                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                        message,
+                    )],
+                })?
+        } else {
+            trace_vectors
+        }
     } else if request.strategy == "witness" {
         let trace_vectors = traces
             .iter()
@@ -5342,6 +5374,12 @@ pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result
         &response.capabilities.backend_name,
         "capabilities.backend_name",
     )?;
+    if let Some(reason) = &response.capabilities.availability_reason {
+        require_non_empty(reason, "capabilities.availability_reason")?;
+    }
+    if let Some(remediation) = &response.capabilities.remediation {
+        require_non_empty(remediation, "capabilities.remediation")?;
+    }
     require_non_empty(
         &response.capabilities.temporal.status,
         "capabilities.temporal.status",
@@ -5361,9 +5399,9 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
     }
     match request.strategy.as_str() {
         "counterexample" | "transition" | "witness" | "guard" | "boundary" | "path"
-        | "random" => Ok(()),
+        | "random" | "deadlock" => Ok(()),
         other => Err(format!(
-            "strategy must be one of counterexample, transition, witness, guard, boundary, path, random, got `{other}`"
+            "strategy must be one of counterexample, transition, witness, guard, boundary, path, random, deadlock, got `{other}`"
         )),
     }
 }
@@ -6293,6 +6331,28 @@ property P_RECOVERY_VISIBLE:
     }
 
     #[test]
+    fn deadlock_testgen_uses_deadlock_trace_when_available() {
+        let source = "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n";
+        let response = testgen_source(&TestgenRequest {
+            request_id: "req-deadlock-testgen".to_string(),
+            source_name: "deadlock.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_LIVE".to_string()),
+            strategy: "deadlock".to_string(),
+            seed: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        assert_eq!(response.vector_ids.len(), 1);
+        assert_eq!(response.vectors[0].strategy, "deadlock");
+        assert_eq!(response.vectors[0].source_kind, "deadlock");
+        validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
+    }
+
+    #[test]
     fn guard_testgen_can_emit_vectors() {
         let source = "model A\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Inc:\n  pre: x <= 1\n  post:\n    x = x + 1\nproperty P_SAFE:\n  invariant: x <= 2\n";
         let response = testgen_source(&TestgenRequest {
@@ -6347,6 +6407,41 @@ property P_RECOVERY_VISIBLE:
         assert!(response.capabilities.supports_bmc);
         assert!(response.capabilities.supports_witness);
         assert_eq!(response.capabilities.temporal.status, "unavailable");
+    }
+
+    #[test]
+    fn capabilities_report_compiled_sat_backend_availability() {
+        let request = CapabilitiesRequest {
+            request_id: "req-cap-varisat".to_string(),
+            backend: Some("sat-varisat".to_string()),
+            solver_executable: None,
+            solver_args: vec![],
+        };
+        validate_capabilities_request(&request).unwrap();
+        let response = capabilities_response(&request).unwrap();
+        validate_capabilities_response(&response).unwrap();
+        assert_eq!(response.backend, "sat-varisat");
+        assert_eq!(
+            response.capabilities.compiled_in,
+            crate::solver::sat_varisat_compiled_in()
+        );
+        assert_eq!(
+            response.capabilities.available,
+            crate::solver::sat_varisat_compiled_in()
+        );
+        #[cfg(not(feature = "varisat-backend"))]
+        {
+            assert_eq!(
+                response.capabilities.availability_reason.as_deref(),
+                Some("this binary was built without the varisat-backend feature")
+            );
+            assert!(response
+                .capabilities
+                .remediation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("varisat-backend"));
+        }
     }
 
     #[test]

@@ -1430,6 +1430,15 @@ fn cmd_capabilities(args: Vec<String>) {
                 print_capabilities_json(&response);
             } else {
                 println!("backend: {}", response.backend);
+                println!("builtin: {}", response.capabilities.builtin);
+                println!("compiled_in: {}", response.capabilities.compiled_in);
+                println!("available: {}", response.capabilities.available);
+                if let Some(reason) = &response.capabilities.availability_reason {
+                    println!("availability_reason: {reason}");
+                }
+                if let Some(remediation) = &response.capabilities.remediation {
+                    println!("remediation: {remediation}");
+                }
                 println!(
                     "supports_explicit: {}",
                     response.capabilities.supports_explicit
@@ -2421,11 +2430,16 @@ fn resolve_project_dir(
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {
     println!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
         response.schema_version,
         response.request_id,
         response.backend,
         response.capabilities.backend_name,
+        response.capabilities.builtin,
+        response.capabilities.compiled_in,
+        response.capabilities.available,
+        render_optional_string(response.capabilities.availability_reason.as_deref()),
+        render_optional_string(response.capabilities.remediation.as_deref()),
         response.capabilities.supports_explicit,
         response.capabilities.supports_bmc,
         response.capabilities.supports_certificate,
@@ -2439,6 +2453,13 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         render_string_array(&response.capabilities.temporal.unsupported_operators),
         render_string_array(&response.capabilities.temporal.notes),
     );
+}
+
+fn render_optional_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
+    }
 }
 
 fn render_string_array(values: &[String]) -> String {

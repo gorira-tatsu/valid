@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema.cli.completed",
+  "type": "object",
+  "required": [
+    "kind",
+    "model_id",
+    "manifest",
+    "status",
+    "assurance_level",
+    "property_result",
+    "trace",
+    "traceback",
+    "ci",
+    "review_summary"
+  ],
+  "properties": {
+    "kind": { "type": "string", "enum": ["completed"] },
+    "model_id": { "type": "string" },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "run_id",
+        "schema_version",
+        "source_hash",
+        "contract_hash",
+        "engine_version",
+        "backend_name",
+        "backend_version",
+        "seed"
+      ],
+      "properties": {
+        "request_id": { "type": "string" },
+        "run_id": { "type": "string" },
+        "schema_version": { "type": "string" },
+        "source_hash": { "type": "string" },
+        "contract_hash": { "type": "string" },
+        "engine_version": { "type": "string" },
+        "backend_name": { "type": "string" },
+        "backend_version": { "type": "string" },
+        "seed": { "type": ["integer", "null"] }
+      }
+    },
+    "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "assurance_level": { "type": "string" },
+    "explored_states": { "type": "integer", "minimum": 0 },
+    "explored_transitions": { "type": "integer", "minimum": 0 },
+    "property_result": {
+      "type": "object",
+      "required": [
+        "property_id",
+        "property_kind",
+        "status",
+        "assurance_level",
+        "reason_code",
+        "unknown_reason",
+        "terminal_state_id",
+        "evidence_id",
+        "scenario_id",
+        "vacuous",
+        "summary"
+      ],
+      "properties": {
+        "property_id": { "type": "string" },
+        "property_kind": { "type": "string" },
+        "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+        "assurance_level": { "type": "string" },
+        "reason_code": { "type": ["string", "null"] },
+        "unknown_reason": { "type": ["string", "null"] },
+        "terminal_state_id": { "type": ["string", "null"] },
+        "evidence_id": { "type": ["string", "null"] },
+        "scenario_id": { "type": ["string", "null"] },
+        "vacuous": { "type": "boolean" },
+        "summary": { "type": "string" }
+      }
+    },
+    "trace": { "type": ["object", "null"] },
+    "traceback": {
+      "type": ["object", "null"],
+      "properties": {
+        "steps": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "required": ["exit_code", "status", "backend"],
+      "properties": {
+        "exit_code": { "type": "integer", "enum": [0, 1, 2] },
+        "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+        "backend": { "type": "string" }
+      }
+    },
+    "review_summary": {
+      "type": "object",
+      "required": ["headline", "trace_steps", "failing_action_id", "action_sequence", "next_steps"],
+      "properties": {
+        "headline": { "type": "string" },
+        "trace_steps": { "type": "integer", "minimum": 0 },
+        "failing_action_id": { "type": ["string", "null"] },
+        "action_sequence": { "type": "array", "items": { "type": "string" } },
+        "next_steps": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
