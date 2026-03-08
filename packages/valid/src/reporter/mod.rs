@@ -7,6 +7,8 @@ pub enum GraphView {
     Overview,
     Logic,
     Failure,
+    Deadlock,
+    Scc,
 }
 
 impl GraphView {
@@ -14,6 +16,8 @@ impl GraphView {
         match input {
             Some("logic") | Some("detailed") | Some("full") => Self::Logic,
             Some("failure") | Some("focused") => Self::Failure,
+            Some("deadlock") | Some("terminal") => Self::Deadlock,
+            Some("scc") | Some("condensation") | Some("condensed") => Self::Scc,
             _ => Self::Overview,
         }
     }
@@ -30,6 +34,29 @@ pub struct FailureGraphSlice {
     pub focused_path_tags: Vec<String>,
     pub focused_transition_indexes: Vec<usize>,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionGraphNode {
+    action_id: String,
+    reads: Vec<String>,
+    writes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionGraphScc {
+    index: usize,
+    members: Vec<String>,
+    outgoing: Vec<usize>,
+    incoming: Vec<usize>,
+    has_self_loop: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActionGraphSummary {
+    nodes: Vec<ActionGraphNode>,
+    edges: Vec<(usize, usize)>,
+    sccs: Vec<ActionGraphScc>,
 }
 
 pub fn build_failure_graph_slice(
@@ -188,6 +215,8 @@ pub fn render_model_mermaid_with_view(response: &InspectResponse, view: GraphVie
         GraphView::Overview => render_model_mermaid_overview(response),
         GraphView::Logic => render_model_mermaid_logic(response),
         GraphView::Failure => render_model_mermaid_overview(response),
+        GraphView::Deadlock => render_model_mermaid_deadlock(response),
+        GraphView::Scc => render_model_mermaid_scc(response),
     }
 }
 
@@ -291,6 +320,8 @@ pub fn render_model_dot_with_view(response: &InspectResponse, view: GraphView) -
         GraphView::Overview => render_model_dot_overview(response),
         GraphView::Logic => render_model_dot_logic(response),
         GraphView::Failure => render_model_dot_overview(response),
+        GraphView::Deadlock => render_model_dot_deadlock(response),
+        GraphView::Scc => render_model_dot_scc(response),
     }
 }
 
@@ -398,6 +429,8 @@ pub fn render_model_svg_with_view(response: &InspectResponse, view: GraphView) -
         GraphView::Overview => render_model_svg_overview(response),
         GraphView::Logic => render_model_svg_logic(response),
         GraphView::Failure => render_model_svg_overview(response),
+        GraphView::Deadlock => render_model_svg_deadlock(response),
+        GraphView::Scc => render_model_svg_scc(response),
     }
 }
 
@@ -639,6 +672,229 @@ pub fn render_model_text_failure(response: &InspectResponse, slice: &FailureGrap
             "path_tags: {}\n",
             slice.focused_path_tags.join(", ")
         ));
+    }
+    out
+}
+
+pub fn render_model_text_with_view(response: &InspectResponse, view: GraphView) -> String {
+    match view {
+        GraphView::Overview => render_model_text_overview(response),
+        GraphView::Logic => render_model_text_logic(response),
+        GraphView::Failure => render_model_text_overview(response),
+        GraphView::Deadlock => render_model_text_deadlock(response),
+        GraphView::Scc => render_model_text_scc(response),
+    }
+}
+
+fn render_model_mermaid_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = String::from("flowchart LR\n");
+    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
+    out.push_str(&format!(
+        "  {root}[\"{}\"]\n",
+        mermaid_label(&[
+            format!("deadlock view: {}", response.model_id),
+            format!("sink components: {}", sink_sccs.len())
+        ])
+    ));
+    for scc in &sink_sccs {
+        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node}[\"{}\"]\n",
+            mermaid_label(&deadlock_scc_lines(scc))
+        ));
+        out.push_str(&format!("  {root} --> {node}\n"));
+        for incoming in &scc.incoming {
+            let from = sanitize_id(&format!("scc_{}", incoming));
+            out.push_str(&format!(
+                "  {from}[\"{}\"]\n",
+                mermaid_label(&scc_label_lines(&summary.sccs[*incoming]))
+            ));
+            out.push_str(&format!("  {from} --> {node}\n"));
+        }
+    }
+    if sink_sccs.is_empty() {
+        out.push_str(&format!(
+            "  {}[\"{}\"]\n",
+            sanitize_id(&format!("sink_empty_{}", response.model_id)),
+            mermaid_label(&["no sink SCCs detected from action dependencies".to_string()])
+        ));
+    }
+    append_deadlock_property_notes_mermaid(response, &root, &mut out);
+    out
+}
+
+fn render_model_mermaid_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = String::from("flowchart LR\n");
+    for scc in &summary.sccs {
+        let node = sanitize_id(&format!("scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node}[\"{}\"]\n",
+            mermaid_label(&scc_label_lines(scc))
+        ));
+    }
+    for scc in &summary.sccs {
+        let from = sanitize_id(&format!("scc_{}", scc.index));
+        for outgoing in &scc.outgoing {
+            let to = sanitize_id(&format!("scc_{}", outgoing));
+            out.push_str(&format!("  {from} --> {to}\n"));
+        }
+    }
+    if summary.sccs.is_empty() {
+        out.push_str("  EmptyScc[\"no action SCCs\"]\n");
+    }
+    out
+}
+
+fn render_model_dot_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = String::from(
+        "digraph deadlock_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
+    );
+    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
+    out.push_str(&format!(
+        "  {root} [label=\"{}\", shape=note];\n",
+        dot_label(&[
+            format!("deadlock view: {}", response.model_id),
+            format!("sink components: {}", sink_sccs.len())
+        ])
+    ));
+    for scc in &sink_sccs {
+        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node} [label=\"{}\"];\n",
+            dot_label(&deadlock_scc_lines(scc))
+        ));
+        out.push_str(&format!("  {root} -> {node};\n"));
+        for incoming in &scc.incoming {
+            let from = sanitize_id(&format!("scc_{}", incoming));
+            out.push_str(&format!(
+                "  {from} [label=\"{}\"];\n",
+                dot_label(&scc_label_lines(&summary.sccs[*incoming]))
+            ));
+            out.push_str(&format!("  {from} -> {node};\n"));
+        }
+    }
+    append_deadlock_property_notes_dot(response, &mut out);
+    out.push_str("}\n");
+    out
+}
+
+fn render_model_dot_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = String::from(
+        "digraph scc_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
+    );
+    for scc in &summary.sccs {
+        let node = sanitize_id(&format!("scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node} [label=\"{}\"];\n",
+            dot_label(&scc_label_lines(scc))
+        ));
+    }
+    for scc in &summary.sccs {
+        let from = sanitize_id(&format!("scc_{}", scc.index));
+        for outgoing in &scc.outgoing {
+            let to = sanitize_id(&format!("scc_{}", outgoing));
+            out.push_str(&format!("  {from} -> {to};\n"));
+        }
+    }
+    if summary.sccs.is_empty() {
+        out.push_str("  empty [label=\"no action SCCs\", shape=note];\n");
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn render_model_svg_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut sections = vec![(
+        "Deadlock Sinks".to_string(),
+        if sink_sccs.is_empty() {
+            vec!["no sink SCCs detected from action dependencies".to_string()]
+        } else {
+            sink_sccs
+                .iter()
+                .flat_map(|scc| deadlock_scc_lines(scc))
+                .collect::<Vec<_>>()
+        },
+    )];
+    let deadlock_properties = deadlock_property_ids(response);
+    if !deadlock_properties.is_empty() {
+        sections.push((
+            "Deadlock Properties".to_string(),
+            deadlock_properties
+                .into_iter()
+                .map(|property| format!("{property} | kind: deadlock_freedom"))
+                .collect(),
+        ));
+    }
+    render_svg_sections(response, "deadlock view", sections)
+}
+
+fn render_model_svg_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut lines = summary
+        .sccs
+        .iter()
+        .flat_map(scc_label_lines)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines.push("no action SCCs".to_string());
+    }
+    render_svg_sections(response, "scc view", vec![("SCCs".to_string(), lines)])
+}
+
+fn render_model_text_overview(response: &InspectResponse) -> String {
+    format!(
+        "graph_view: overview\nmodel_id: {}\nactions: {}\nproperties: {}\n",
+        response.model_id,
+        response.action_details.len(),
+        response.property_details.len()
+    )
+}
+
+fn render_model_text_logic(response: &InspectResponse) -> String {
+    let mut out = format!("graph_view: logic\nmodel_id: {}\n", response.model_id);
+    for transition in &response.transition_details {
+        out.push_str(&format!(
+            "transition: {}\n",
+            transition_label_lines(transition).join(" | ")
+        ));
+    }
+    out
+}
+
+fn render_model_text_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = format!(
+        "graph_view: deadlock\nmodel_id: {}\nsink_sccs: {}\n",
+        response.model_id,
+        sink_sccs.len()
+    );
+    for scc in &sink_sccs {
+        out.push_str(&format!("{}\n", deadlock_scc_lines(scc).join(" | ")));
+    }
+    for property_id in deadlock_property_ids(response) {
+        out.push_str(&format!("deadlock_property: {property_id}\n"));
+    }
+    out
+}
+
+fn render_model_text_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = format!(
+        "graph_view: scc\nmodel_id: {}\nsccs: {}\n",
+        response.model_id,
+        summary.sccs.len()
+    );
+    for scc in &summary.sccs {
+        out.push_str(&format!("{}\n", scc_label_lines(scc).join(" | ")));
     }
     out
 }
@@ -1085,6 +1341,267 @@ fn visible_path_tags(tags: &[String]) -> Vec<String> {
     }
 }
 
+fn build_action_graph_summary(response: &InspectResponse) -> ActionGraphSummary {
+    let mut nodes = response
+        .action_details
+        .iter()
+        .map(|action| ActionGraphNode {
+            action_id: action.action_id.clone(),
+            reads: action.reads.clone(),
+            writes: action.writes.clone(),
+        })
+        .collect::<Vec<_>>();
+    if nodes.is_empty() {
+        let mut action_ids = response
+            .transition_details
+            .iter()
+            .map(|transition| transition.action_id.clone())
+            .collect::<Vec<_>>();
+        action_ids.sort();
+        action_ids.dedup();
+        nodes.extend(action_ids.into_iter().map(|action_id| ActionGraphNode {
+            action_id,
+            reads: Vec::new(),
+            writes: Vec::new(),
+        }));
+    }
+
+    let mut edges = Vec::new();
+    for (left_index, left) in nodes.iter().enumerate() {
+        for (right_index, right) in nodes.iter().enumerate() {
+            let dependency = left_index == right_index
+                || intersects(&left.writes, &right.reads)
+                || intersects(&left.writes, &right.writes)
+                || intersects(&left.reads, &right.writes);
+            if dependency {
+                edges.push((left_index, right_index));
+            }
+        }
+    }
+    edges.sort();
+    edges.dedup();
+
+    let scc_members = strongly_connected_components(nodes.len(), &edges);
+    let mut node_to_scc = vec![0usize; nodes.len()];
+    for (scc_index, members) in scc_members.iter().enumerate() {
+        for member in members {
+            node_to_scc[*member] = scc_index;
+        }
+    }
+
+    let mut sccs = scc_members
+        .iter()
+        .enumerate()
+        .map(|(scc_index, members)| {
+            let mut outgoing = Vec::new();
+            let mut incoming = Vec::new();
+            let has_self_loop = members
+                .iter()
+                .any(|member| edges.contains(&(*member, *member)));
+            for (from, to) in &edges {
+                let from_scc = node_to_scc[*from];
+                let to_scc = node_to_scc[*to];
+                if from_scc == scc_index && to_scc != scc_index {
+                    outgoing.push(to_scc);
+                }
+                if to_scc == scc_index && from_scc != scc_index {
+                    incoming.push(from_scc);
+                }
+            }
+            outgoing.sort();
+            outgoing.dedup();
+            incoming.sort();
+            incoming.dedup();
+            let mut member_names = members
+                .iter()
+                .map(|member| nodes[*member].action_id.clone())
+                .collect::<Vec<_>>();
+            member_names.sort();
+            ActionGraphScc {
+                index: scc_index,
+                members: member_names,
+                outgoing,
+                incoming,
+                has_self_loop,
+            }
+        })
+        .collect::<Vec<_>>();
+    sccs.sort_by_key(|scc| scc.index);
+
+    ActionGraphSummary { nodes, edges, sccs }
+}
+
+fn strongly_connected_components(node_count: usize, edges: &[(usize, usize)]) -> Vec<Vec<usize>> {
+    struct Tarjan {
+        index: usize,
+        stack: Vec<usize>,
+        on_stack: Vec<bool>,
+        indices: Vec<Option<usize>>,
+        lowlinks: Vec<usize>,
+        components: Vec<Vec<usize>>,
+    }
+
+    impl Tarjan {
+        fn strong_connect(&mut self, v: usize, adjacency: &[Vec<usize>]) {
+            self.indices[v] = Some(self.index);
+            self.lowlinks[v] = self.index;
+            self.index += 1;
+            self.stack.push(v);
+            self.on_stack[v] = true;
+
+            for &w in &adjacency[v] {
+                if self.indices[w].is_none() {
+                    self.strong_connect(w, adjacency);
+                    self.lowlinks[v] = self.lowlinks[v].min(self.lowlinks[w]);
+                } else if self.on_stack[w] {
+                    self.lowlinks[v] = self.lowlinks[v].min(self.indices[w].unwrap_or(0));
+                }
+            }
+
+            if self.lowlinks[v] == self.indices[v].unwrap_or(0) {
+                let mut component = Vec::new();
+                loop {
+                    let w = self.stack.pop().expect("stack item");
+                    self.on_stack[w] = false;
+                    component.push(w);
+                    if w == v {
+                        break;
+                    }
+                }
+                component.sort();
+                self.components.push(component);
+            }
+        }
+    }
+
+    let mut adjacency = vec![Vec::new(); node_count];
+    for (from, to) in edges {
+        adjacency[*from].push(*to);
+    }
+
+    let mut tarjan = Tarjan {
+        index: 0,
+        stack: Vec::new(),
+        on_stack: vec![false; node_count],
+        indices: vec![None; node_count],
+        lowlinks: vec![0; node_count],
+        components: Vec::new(),
+    };
+    for node in 0..node_count {
+        if tarjan.indices[node].is_none() {
+            tarjan.strong_connect(node, &adjacency);
+        }
+    }
+    tarjan.components.sort_by_key(|component| component[0]);
+    tarjan.components
+}
+
+fn intersects(left: &[String], right: &[String]) -> bool {
+    left.iter().any(|candidate| right.contains(candidate))
+}
+
+fn sink_sccs(summary: &ActionGraphSummary) -> Vec<&ActionGraphScc> {
+    summary
+        .sccs
+        .iter()
+        .filter(|scc| scc.outgoing.is_empty())
+        .collect()
+}
+
+fn deadlock_property_ids(response: &InspectResponse) -> Vec<String> {
+    response
+        .property_details
+        .iter()
+        .filter(|property| property.kind == "deadlock_freedom")
+        .map(|property| property.property_id.clone())
+        .collect()
+}
+
+fn scc_label_lines(scc: &ActionGraphScc) -> Vec<String> {
+    let mut lines = vec![
+        format!("SCC {}", scc.index),
+        format!("members: {}", scc.members.join(", ")),
+    ];
+    if scc.has_self_loop || scc.members.len() > 1 {
+        lines.push("cycle: yes".to_string());
+    }
+    if !scc.outgoing.is_empty() {
+        lines.push(format!(
+            "outgoing: {}",
+            scc.outgoing
+                .iter()
+                .map(|index| format!("SCC {index}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    lines
+}
+
+fn deadlock_scc_lines(scc: &ActionGraphScc) -> Vec<String> {
+    let mut lines = scc_label_lines(scc);
+    lines.push("deadlock risk: sink SCC".to_string());
+    if !scc.incoming.is_empty() {
+        lines.push(format!(
+            "incoming: {}",
+            scc.incoming
+                .iter()
+                .map(|index| format!("SCC {index}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    lines
+}
+
+fn append_deadlock_property_notes_mermaid(
+    response: &InspectResponse,
+    root_node: &str,
+    out: &mut String,
+) {
+    for property_id in deadlock_property_ids(response) {
+        let node = sanitize_id(&format!("deadlock_property_{property_id}"));
+        out.push_str(&format!(
+            "  {node}[\"{}\"]\n",
+            mermaid_label(&[property_id.clone(), "kind: deadlock_freedom".to_string()])
+        ));
+        out.push_str(&format!("  {root_node} -. property .-> {node}\n"));
+    }
+}
+
+fn append_deadlock_property_notes_dot(response: &InspectResponse, out: &mut String) {
+    for property_id in deadlock_property_ids(response) {
+        let node = sanitize_id(&format!("deadlock_property_{property_id}"));
+        out.push_str(&format!(
+            "  {node} [label=\"{}\", shape=note];\n",
+            dot_label(&[property_id.clone(), "kind: deadlock_freedom".to_string()])
+        ));
+    }
+}
+
+fn render_svg_sections(
+    response: &InspectResponse,
+    view_name: &str,
+    sections: Vec<(String, Vec<String>)>,
+) -> String {
+    let width = 1200;
+    let section_width = 1160;
+    let mut y = 90i32;
+    let mut body = String::new();
+    for (title, lines) in sections {
+        let line_count = usize::max(lines.len(), 1);
+        let height = 44 + (line_count as i32 * 22) + 12;
+        body.push_str(&svg_section(20, y, section_width, height, &title, &lines));
+        y += height + 18;
+    }
+    let total_height = y + 20;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{total_height}\" viewBox=\"0 0 {width} {total_height}\" role=\"img\" aria-label=\"Model graph for {title}\"><style>text{{font-family:Helvetica,Arial,sans-serif;fill:#1f2937}} .title{{font-size:28px;font-weight:700}} .section-title{{font-size:18px;font-weight:700}} .line{{font-size:14px}} .section{{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.5}} .accent{{fill:#dbeafe;stroke:#93c5fd;stroke-width:1.5}}</style><rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/><rect x=\"20\" y=\"20\" width=\"1160\" height=\"48\" rx=\"10\" class=\"accent\"/><text x=\"40\" y=\"50\" class=\"title\">{title}</text>{body}</svg>",
+        title = escape_xml(&format!("{view_name}: {}", response.model_id)),
+        body = body,
+    )
+}
+
 fn action_overview_lines(
     action: &crate::api::InspectAction,
     response: &InspectResponse,
@@ -1203,7 +1720,8 @@ mod tests {
         build_failure_graph_slice, render_model_dot, render_model_dot_failure,
         render_model_dot_with_view, render_model_mermaid, render_model_mermaid_failure,
         render_model_mermaid_with_view, render_model_svg, render_model_svg_failure,
-        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
+        render_model_svg_with_view, render_model_text_with_view, render_trace_mermaid,
+        render_trace_sequence_mermaid, GraphView,
     };
 
     #[test]
@@ -1583,5 +2101,86 @@ mod tests {
 
         let svg = render_model_svg_failure(&inspect, &slice);
         assert!(svg.contains("failure slice: CounterModel"));
+    }
+
+    #[test]
+    fn renders_deadlock_and_scc_views() {
+        let inspect = InspectResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req-1".to_string(),
+            status: "ok".to_string(),
+            model_id: "WorkflowModel".to_string(),
+            machine_ir_ready: true,
+            machine_ir_error: None,
+            capabilities: InspectCapabilities::fully_ready(),
+            state_fields: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            actions: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
+            properties: vec!["P_NO_DEADLOCK".to_string()],
+            state_field_details: vec![
+                InspectStateField {
+                    name: "x".to_string(),
+                    rust_type: "u8".to_string(),
+                    range: Some("0..=3".to_string()),
+                    variants: Vec::new(),
+                    is_set: false,
+                },
+                InspectStateField {
+                    name: "y".to_string(),
+                    rust_type: "u8".to_string(),
+                    range: Some("0..=3".to_string()),
+                    variants: Vec::new(),
+                    is_set: false,
+                },
+                InspectStateField {
+                    name: "z".to_string(),
+                    rust_type: "u8".to_string(),
+                    range: Some("0..=3".to_string()),
+                    variants: Vec::new(),
+                    is_set: false,
+                },
+            ],
+            action_details: vec![
+                InspectAction {
+                    action_id: "A".to_string(),
+                    role: "business".to_string(),
+                    reads: vec!["y".to_string()],
+                    writes: vec!["x".to_string()],
+                },
+                InspectAction {
+                    action_id: "B".to_string(),
+                    role: "business".to_string(),
+                    reads: vec!["x".to_string()],
+                    writes: vec!["y".to_string()],
+                },
+                InspectAction {
+                    action_id: "C".to_string(),
+                    role: "business".to_string(),
+                    reads: vec!["z".to_string()],
+                    writes: Vec::new(),
+                },
+            ],
+            predicate_details: vec![],
+            scenario_details: vec![],
+            transition_details: vec![],
+            property_details: vec![InspectProperty {
+                property_id: "P_NO_DEADLOCK".to_string(),
+                kind: "deadlock_freedom".to_string(),
+                expr: None,
+                scope_expr: None,
+                action_filter: None,
+            }],
+        };
+        let deadlock = render_model_text_with_view(&inspect, GraphView::Deadlock);
+        assert!(deadlock.contains("graph_view: deadlock"));
+        assert!(deadlock.contains("deadlock_property: P_NO_DEADLOCK"));
+        let scc = render_model_mermaid_with_view(&inspect, GraphView::Scc);
+        assert!(scc.contains("SCC 0"));
+        assert!(scc.contains("members: A, B"));
+        let dot = render_model_dot_with_view(&inspect, GraphView::Scc);
+        assert!(dot.contains("digraph scc_view"));
+        let svg = render_model_svg_with_view(&inspect, GraphView::Deadlock);
+        assert!(svg.contains("deadlock view: WorkflowModel"));
     }
 }

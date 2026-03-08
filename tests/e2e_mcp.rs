@@ -430,6 +430,16 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("summary should exist")
         .contains("P_FAIL"));
 
+    let deadlock_graph = structured_content(client.call_tool(
+        "valid_graph",
+        json!({ "model_file": model_file_str, "format": "text", "view": "deadlock" }),
+    ));
+    assert_eq!(deadlock_graph["format"], "text");
+    assert!(deadlock_graph["graph"]
+        .as_str()
+        .expect("graph should be text")
+        .contains("graph_view: deadlock"));
+
     let lint =
         structured_content(client.call_tool("valid_lint", json!({ "model_file": model_file_str })));
     assert_eq!(lint["status"], "ok");

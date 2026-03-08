@@ -48,7 +48,8 @@ use valid::{
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
-        render_model_svg_with_view, render_model_text_failure, GraphView,
+        render_model_svg_with_view, render_model_text_failure, render_model_text_with_view,
+        GraphView,
     },
     support::{
         artifact::{benchmark_baseline_path, benchmark_report_path},
@@ -166,7 +167,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -1019,7 +1020,7 @@ fn cmd_graph(parsed: ParsedArgs) {
     progress.start(None);
     let model = parsed.model.clone().unwrap_or_else(|| {
         usage_exit(
-            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>]",
+            "usage: cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure|deadlock|scc] [--property=<id>]",
         )
     });
     let request = InspectRequest {
@@ -1057,7 +1058,7 @@ fn render_cargo_graph_output(
     if view != GraphView::Failure {
         return Ok(match render_format {
             "json" => format!("{}\n", render_inspect_json(response)),
-            "text" => render_inspect_text(response),
+            "text" => render_model_text_with_view(response, view),
             "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
             "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
             _ => format!("{}\n", render_model_mermaid_with_view(response, view)),
