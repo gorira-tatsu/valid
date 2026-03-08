@@ -278,6 +278,53 @@ fn cli_conformance_compares_runner_output_to_spec() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"status\":\"PASS\""));
     assert!(stdout.contains("\"mismatch_count\":0"));
+    assert!(stdout.contains("\"mismatch_categories\":[]"));
+}
+
+#[test]
+fn cli_conformance_reports_structured_mismatch_categories() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("conformance")
+        .arg(&safe)
+        .arg("--property=P_SAFE")
+        .arg("--actions=Inc")
+        .arg("--runner=/bin/sh")
+        .arg("--runner-arg")
+        .arg("-c")
+        .arg("--runner-arg")
+        .arg("cat >/dev/null; printf '%s' '{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"observations\":[],\"property_holds\":false}'")
+        .arg("--json")
+        .output()
+        .expect("conformance should run");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"FAIL\""));
+    assert!(stdout.contains("\"mismatch_categories\":[\"output\",\"property\"]"));
+    assert!(stdout.contains("\"kind\":\"output\""));
+    assert!(stdout.contains("\"kind\":\"property\""));
+}
+
+#[test]
+fn cli_conformance_text_output_names_mismatch_categories() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let output = Command::new(binary_path())
+        .arg("conformance")
+        .arg(&safe)
+        .arg("--property=P_SAFE")
+        .arg("--actions=Inc")
+        .arg("--runner=/bin/sh")
+        .arg("--runner-arg")
+        .arg("-c")
+        .arg("--runner-arg")
+        .arg("cat >/dev/null; printf '%s' '{\"schema_version\":\"1.0.0\",\"status\":\"ok\",\"observations\":[],\"property_holds\":false}'")
+        .output()
+        .expect("conformance should run");
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("mismatch_categories: output,property"));
+    assert!(stdout.contains("mismatch output fix_surface=implementation_output step=0"));
+    assert!(stdout.contains("mismatch property fix_surface=implementation_or_model"));
 }
 
 #[test]

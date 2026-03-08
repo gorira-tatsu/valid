@@ -1508,6 +1508,24 @@ fn cmd_conformance(args: Vec<String>) {
         println!("runner: {}", report.runner);
         println!("status: {}", report.status);
         println!("mismatch_count: {}", report.mismatch_count);
+        if !report.mismatch_categories.is_empty() {
+            println!(
+                "mismatch_categories: {}",
+                report.mismatch_categories.join(",")
+            );
+        }
+        for mismatch in &report.mismatches {
+            println!(
+                "mismatch {} fix_surface={}{}",
+                mismatch.kind.as_str(),
+                mismatch.likely_fix_surface,
+                mismatch
+                    .index
+                    .map(|index| format!(" step={index}"))
+                    .unwrap_or_default()
+            );
+            println!("  {}", mismatch.summary);
+        }
         for mismatch in &report.observation_mismatches {
             println!(
                 "step {} expected {:?} actual {:?}",
