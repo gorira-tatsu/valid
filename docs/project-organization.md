@@ -187,6 +187,40 @@ Keep them separate from standalone models when possible:
 If an integration model starts owning all the business logic, it is usually a
 sign that the underlying standalone models are too weak or too fragmented.
 
+### Integration model pattern
+
+Treat an integration model as a thin shared-state review surface, not as an
+early compose system.
+
+Author it with this shape:
+
+- keep standalone models responsible for local transitions and local
+  invariants
+- add a dedicated integration model when a requirement depends on fields from
+  more than one bounded context
+- reuse shared enums, relation/map keys, and helper predicates from
+  `src/domain/` instead of duplicating them inside the integration model
+- make the shared-state slice explicit in the top comment: which fields came
+  from which subdomain, which assumptions are frozen here, and which
+  cross-domain properties are critical
+- keep the integration model focused on the shared-state contract, not on every
+  internal transition from each standalone model
+
+Pick the smallest review surface that answers the real question:
+
+- standalone model:
+  one domain, one workflow, one local invariant family
+- integration model:
+  shared-state checks across domains such as membership plus plan, review plus
+  entitlement, or approval plus fulfillment
+- contract-only check:
+  interface or implementation conformance where the model itself is not the
+  main uncertainty
+
+This pattern is intentionally usable before full compose semantics exist. The
+integration model is allowed to restate the minimum shared state and the
+cross-domain transitions needed for the review.
+
 ## What Goes Where
 
 Use these repository areas intentionally:
@@ -229,6 +263,8 @@ Split into an integration model when:
 - one user journey crosses multiple bounded contexts
 - the standalone models are each useful, but a cross-model invariant also
   matters
+- the review can stay small by restating a shared-state contract instead of
+  merging every standalone transition into one file
 
 ## Templates and Examples
 

@@ -1618,6 +1618,7 @@ fn property_overview_lines(property: &crate::api::InspectProperty) -> Vec<String
     let mut lines = vec![
         property.property_id.clone(),
         format!("kind: {}", property.kind),
+        format!("layer: {}", property.layer),
     ];
     if let Some(expr) = &property.expr {
         lines.push(format!("rule: {}", compact_inline(expr)));
@@ -1800,6 +1801,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: None,
                 scope_expr: None,
                 action_filter: None,
@@ -1861,6 +1863,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: None,
                 scope_expr: None,
                 action_filter: None,
@@ -1922,6 +1925,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: None,
                 scope_expr: None,
                 action_filter: None,
@@ -2000,6 +2004,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: None,
                 scope_expr: None,
                 action_filter: None,
@@ -2061,6 +2066,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_RANGE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: Some("state.x <= 1".to_string()),
                 scope_expr: None,
                 action_filter: None,
@@ -2167,6 +2173,7 @@ mod tests {
             property_details: vec![InspectProperty {
                 property_id: "P_NO_DEADLOCK".to_string(),
                 kind: "deadlock_freedom".to_string(),
+                layer: "assert".to_string(),
                 expr: None,
                 scope_expr: None,
                 action_filter: None,

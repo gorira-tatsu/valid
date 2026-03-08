@@ -9,6 +9,7 @@ what not to do, and which commands/tools to reach for next.
 Related documents:
 
 - [AI Docs Curriculum](./curriculum.md)
+- [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Common Pitfalls](./common-pitfalls.md)
@@ -19,6 +20,7 @@ Related documents:
 - [Project Organization Guide](../project-organization.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
+- [Parameterized Action Roadmap](../dsl/parameterized-action-roadmap.md)
 
 ## What `valid` is
 
@@ -41,6 +43,8 @@ When generating new models:
 - treat `step |state, action| { ... }` as explicit-first or migration-oriented
 - always write `model Name<State, Action>;`
 - prefer small finite domains with explicit metadata
+- use `assume` for environment constraints and `assert` for guarantees you want
+  the system to preserve
 
 Why:
 
@@ -48,6 +52,8 @@ Why:
 - it gives better `inspect`, `graph`, `readiness`, `explain`, `coverage`, and
   `testgen`
 - `step` is still supported, but carries weaker structural information
+- assumption-vs-guarantee layering makes `inspect` and `explain` easier to act
+  on during review
 
 ## Minimal registry model skeleton
 
@@ -153,6 +159,9 @@ Useful expressions:
   capability reasons, plus advisory maintainability findings such as missing
   model intent comments, repeated conditions, oversized models, and setup-heavy
   structure
+- for cross-domain reviews, use lint guidance to decide whether a big model
+  should stay standalone, split into smaller standalone models, or move the
+  shared-state question into a dedicated integration model
 - declarative models with unsupported expressions will be flagged by readiness
   and may fail solver-backed verification
 
@@ -182,10 +191,12 @@ For MCP-driven authoring:
 
 If your MCP client supports prompts, prefer this sequence:
 
-1. `clarify_requirement` when the requirement is still ambiguous
-2. `author_model` for new work or `review_model` for existing models
-3. `migrate_step_to_transitions` for step-heavy models
-4. `explain_readiness_failure` or `triage_conformance_failure` when a run
+1. `refine_requirement` when the requirement is still ambiguous
+2. `refine_requirement_from_evidence` when a counterexample, dead action,
+   vacuity clue, or mismatch shows the brief is incomplete
+3. `author_model` for new work or `review_model` for existing models
+4. `migrate_step_to_transitions` for step-heavy models
+5. `explain_readiness_failure` or `triage_conformance_failure` when a run
    already failed
 
 ## Rules to follow
@@ -194,6 +205,10 @@ If your MCP client supports prompts, prefer this sequence:
 - Use `.valid` mode only for compatibility fixtures or frontend tests.
 - Always give bounded integer ranges.
 - Add `reads` and `writes` metadata to every action variant when possible.
+- Do not teach or generate action explosion for business inputs. If the
+  conceptual action is "one action plus a bounded choice", document that intent
+  and keep any duplicated variants limited to tiny teaching fixtures until
+  bounded parameterized actions exist.
 - Keep a short source-adjacent comment above each long-lived model explaining
   summary, scope, assumptions, critical properties, and scenario intent.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
@@ -206,6 +221,9 @@ If your MCP client supports prompts, prefer this sequence:
   local and inspect output stays readable.
 - Start each long-lived model with a short intent comment, then keep the model
   vocabulary explicit with named predicates, scenarios, and clear action ids.
+- For integration models, document the participating subdomains, the shared
+  state being restated, and the cross-domain properties that justify the extra
+  model. This works today without full compose syntax.
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.
@@ -230,6 +248,7 @@ If your MCP client supports prompts, prefer this sequence:
 ## Next read
 
 - If you need the learning path or task map: [AI Docs Curriculum](./curriculum.md)
+- If you need a clarification-first loop: [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - If you need source-adjacent comment guidance: [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)

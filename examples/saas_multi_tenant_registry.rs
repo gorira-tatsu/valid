@@ -2,8 +2,14 @@
 SaaS マルチテナント隔離例
 
 目的:
-  - テナント隔離、shared service、entitlement 付与を grouped transitions で書く
+  - テナント隔離、shared service、entitlement 付与を grouped transitions の integration model で書く
   - SaaS / multi-tenant サービス保証の最小読解例にする
+  - compose 構文なしでも shared-state cross-domain check を書ける形を示す
+
+統合する関心:
+  - isolation review サブドメイン
+  - entitlement サブドメイン
+  - shared service access サブドメイン
 
 含まれるモデル:
   - tenant-isolation-safe
@@ -59,6 +65,12 @@ valid_actions! {
 }
 
 valid_model! {
+    /// Model: TenantIsolationSafeModel
+    /// Summary: Shared-state integration model for tenant isolation, review state, and enterprise entitlement checks.
+    /// In scope: the contract between isolation review, shared search enablement, and enterprise-only export entitlement.
+    /// Out of scope: full onboarding, billing, and moderation workflows beyond the shared-state slice under review.
+    /// Assumptions: local subdomain rules still own their internal transitions; this model restates only the shared fields needed for cross-domain checks.
+    /// Critical properties: P_SHARED_SEARCH_REQUIRES_REVIEW, P_EXPORT_API_REQUIRES_ENTERPRISE, P_NO_CROSS_TENANT_ACCESS.
     model TenantIsolationSafeModel<TenantState, TenantAction>;
     init [TenantState {
         tenant_count: 1,
@@ -141,6 +153,12 @@ valid_model! {
 }
 
 valid_model! {
+    /// Model: TenantIsolationRegressionModel
+    /// Summary: Regression-oriented integration model showing how an enterprise exception path can bypass isolation review.
+    /// In scope: the cross-domain failure path between entitlement state, review state, and shared-search access.
+    /// Out of scope: the full standalone workflows that would exist inside separate review or tenant-lifecycle models.
+    /// Assumptions: the example stays intentionally thin so the shared-state contract remains reviewable before full compose syntax exists.
+    /// Critical properties: P_SHARED_SEARCH_REQUIRES_REVIEW, P_NO_CROSS_TENANT_ACCESS.
     model TenantIsolationRegressionModel<TenantState, TenantAction>;
     init [TenantState {
         tenant_count: 2,

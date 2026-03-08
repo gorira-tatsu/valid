@@ -69,6 +69,18 @@ The current field metadata is:
 Actions are finite enums. Each variant must have an `action_id`, and should
 declare `reads` and `writes` metadata when possible.
 
+Current boundary:
+
+- bounded parameterized actions are not implemented yet
+- richer payload actions are not implemented yet
+- examples that use multiple variants for bounded choices should be treated as
+  teaching or regression fixtures, not as the recommended shape for open-ended
+  business inputs
+
+See [Parameterized Action Roadmap](./parameterized-action-roadmap.md) for the
+planned split between near-term bounded support and later richer payload
+support.
+
 Declarative transitions can also declare:
 
 - `role = business` (default)
@@ -193,6 +205,19 @@ properties {
 - `prev.<field>`
 - `next.<field>`
 - `on: <ActionId>`
+
+### Assumptions vs guarantees
+
+Property declarations may also carry a layer:
+
+- `assert`
+- `assume`
+
+`assert` is the default and represents a system guarantee. `assume` represents
+an environment contract, setup boundary, or modeling precondition. The current
+execution model evaluates both with the same backend semantics, but
+`inspect`/`explain`/result diagnostics preserve the layer so reviewers can tell
+whether a failure points at a violated assumption or a violated guarantee.
 - optional `when: <expr>` scope
 
 `Cover` checks whether a state predicate is reachable in the explored state

@@ -218,7 +218,35 @@ There is no current plan to remove `step`, but its role should remain clear.
   - solver-visible
   - canonical input for `graph`, `coverage`, `testgen`, and `explain`
 
-## Candidate 9: IDE and diagnostics
+## Candidate 9: bounded parameterized actions
+
+The next action-shape evolution should not jump directly from enum-only actions
+to arbitrary payloads.
+
+The preferred sequence is:
+
+1. bounded parameterized actions over explicit finite domains
+2. only later, richer payload forms with their own capability and lowering
+   policy
+
+The main reason is to avoid user-authored action explosion while keeping the
+IR flat and finite.
+
+Examples of the target conceptual shape:
+
+- `SetPlan(plan: Plan)`
+- `ApproveWithReason(reason: ReviewReason)`
+
+Non-goals for the first stage:
+
+- arbitrary strings as action payloads
+- backend-specific payload semantics
+- forcing CLI/MCP/JSON consumers to break their current flat action handling
+
+The active roadmap and compatibility expectations live in
+[Parameterized Action Roadmap](./parameterized-action-roadmap.md).
+
+## Candidate 10: IDE and diagnostics
 
 Areas to strengthen:
 
@@ -227,7 +255,7 @@ Areas to strengthen:
 - fewer `rust-analyzer` false diagnostics
 - more precise `cargo valid readiness` / `cargo valid migrate` suggestions
 
-## Candidate 10: packaging
+## Candidate 11: packaging
 
 Goals:
 

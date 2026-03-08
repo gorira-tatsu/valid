@@ -5,6 +5,7 @@ Use this checklist before returning a generated model or reviewing one.
 Related documents:
 
 - [AI Authoring Guide](./authoring-guide.md)
+- [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Examples Curriculum](./examples-curriculum.md)
@@ -33,6 +34,8 @@ Related documents:
 - Every action variant has `reads`
 - Every action variant has `writes`
 - Action names and `action_id`s match intent
+- Do not split one conceptual action into many variants unless the bounded
+  choice is deliberate and example-sized
 
 ## Model header and init
 
@@ -67,6 +70,12 @@ Related documents:
   explicit-first constraints
 - Run `cargo valid readiness <model>` or `valid_lint`
 - Review maintainability findings, not just capability blockers
+- For integration models, use `lint` / `readiness` findings to check that the
+  model still has one explicit shared-state purpose instead of silently
+  absorbing whole standalone workflows
+- If the cross-domain requirement can be explained by a small shared-state
+  contract, keep it as an integration model; if the issue is only interface or
+  implementation conformance, prefer a contract-only check
 - Do not claim solver-ready unless readiness supports it
 
 ## Final review
@@ -75,10 +84,36 @@ Related documents:
 - The finite domains are small enough to inspect mentally
 - Repeated guards or property expressions have been extracted into predicates
 - The CLI/MCP commands suggested to the user match the chosen mode
+<<<<<<< HEAD
+- For shared-state cross-domain checks, the model comment names the
+  participating subdomains, the restated shared fields, and the critical
+  cross-domain properties
+- For shared-state cross-domain checks, review one of these examples if the
+  boundary still feels fuzzy:
+  `examples/tenant_relation_registry.rs`,
+  `examples/saas_multi_tenant_registry.rs`
+- If the requirement is still fuzzy, go back to the requirement refinement
+  workflow and use `refine_requirement` or `refine_requirement_from_evidence`
+  before editing the model further. `clarify_requirement` remains available as
+  a compatibility alias for older clients.
+||||||| 5d4ca8a
 - If the requirement is still fuzzy, start again with the `clarify_requirement`
   MCP prompt before editing the model further
+=======
+- For shared-state cross-domain checks, the model comment names the
+  participating subdomains, the restated shared fields, and the critical
+  cross-domain properties
+- For shared-state cross-domain checks, review one of these examples if the
+  boundary still feels fuzzy:
+  `examples/tenant_relation_registry.rs`,
+  `examples/saas_multi_tenant_registry.rs`
+- If the requirement is still fuzzy, start again with the `clarify_requirement`
+  MCP prompt before editing the model further
+
+>>>>>>> origin/main
 ## Task-specific follow-up
 
+- For requirement refinement: [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - For review: [Review Workflow](./review-workflow.md)
 - For migration: [Migration Guide](./migration-guide.md)
 - For implementation handoff: [Conformance Workflow](./conformance-workflow.md)

@@ -96,7 +96,27 @@ Models may still run, but `inspect`, `graph`, `explain`, `coverage`, and
 `valid` properties express semantic constraints over reachable states. They are
 not ordinary Rust type-level guarantees or runtime assertions.
 
-## 9. Reading docs in the wrong order
+## 9. Encoding every input as a separate action variant
+
+Common mistake:
+
+- `SetPlanFree`, `SetPlanPro`, `SetPlanEnterprise`
+- `ApproveForFraud`, `ApproveForChargeback`, `ApproveForManualReview`
+- `SetStrongPassword`, `SetWeakPassword`, `SetPasswordMissingDigit`
+
+That may be acceptable in a tiny teaching or regression example, but it should
+not be presented as the general modeling strategy for business inputs.
+
+Prefer:
+
+- one conceptual action per business event
+- bounded state or scenario setup when you only need fixtures today
+- explicit documentation that a duplicated-variant example is pedagogical
+
+See [Parameterized Action Roadmap](../dsl/parameterized-action-roadmap.md) for
+the staged plan toward bounded parameterized actions.
+
+## 10. Reading docs in the wrong order
 
 Common mistake:
 

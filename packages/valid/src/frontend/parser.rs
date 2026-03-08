@@ -37,6 +37,7 @@ pub struct ParsedAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedProperty {
     pub name: String,
+    pub layer: String,
     pub kind: String,
     pub expr: String,
     pub scope_expr: Option<String>,
@@ -130,41 +131,44 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
         }
 
         if let Some(rest) = trimmed.strip_prefix("property ") {
-            flush_action(&mut actions, &mut current_action);
-            if let Some((name, inline_definition)) = split_once(rest, ':') {
-                let name = name.trim().to_string();
-                if inline_definition.trim().is_empty() {
-                    properties.push(ParsedProperty {
-                        name,
-                        kind: String::new(),
-                        expr: String::new(),
-                        scope_expr: None,
-                        action_filter: None,
-                        line: line_no,
-                    });
-                    section = Section::PropertyHeader;
-                } else if let Err(error) =
-                    parse_property_definition(&name, inline_definition, line_no)
-                {
-                    errors.push(error);
-                    section = Section::None;
-                } else {
-                    let (kind, expr) =
-                        property_kind_and_expr(inline_definition).expect("property parsed");
-                    properties.push(ParsedProperty {
-                        name,
-                        kind,
-                        expr,
-                        scope_expr: None,
-                        action_filter: None,
-                        line: line_no,
-                    });
-                    section = Section::None;
-                }
-            } else {
-                errors.push(parse_error("invalid property declaration", line_no));
-                section = Section::None;
-            }
+            start_property_declaration(
+                &mut actions,
+                &mut current_action,
+                &mut properties,
+                &mut errors,
+                rest,
+                "assert",
+                line_no,
+                &mut section,
+            );
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("assume ") {
+            start_property_declaration(
+                &mut actions,
+                &mut current_action,
+                &mut properties,
+                &mut errors,
+                rest,
+                "assume",
+                line_no,
+                &mut section,
+            );
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("assert ") {
+            start_property_declaration(
+                &mut actions,
+                &mut current_action,
+                &mut properties,
+                &mut errors,
+                rest,
+                "assert",
+                line_no,
+                &mut section,
+            );
             continue;
         }
 
@@ -274,6 +278,52 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
 fn flush_action(actions: &mut Vec<ParsedAction>, current_action: &mut Option<ParsedAction>) {
     if let Some(action) = current_action.take() {
         actions.push(action);
+    }
+}
+
+fn start_property_declaration(
+    actions: &mut Vec<ParsedAction>,
+    current_action: &mut Option<ParsedAction>,
+    properties: &mut Vec<ParsedProperty>,
+    errors: &mut Vec<Diagnostic>,
+    rest: &str,
+    layer: &str,
+    line_no: usize,
+    section: &mut Section,
+) {
+    flush_action(actions, current_action);
+    if let Some((name, inline_definition)) = split_once(rest, ':') {
+        let name = name.trim().to_string();
+        if inline_definition.trim().is_empty() {
+            properties.push(ParsedProperty {
+                name,
+                layer: layer.to_string(),
+                kind: String::new(),
+                expr: String::new(),
+                scope_expr: None,
+                action_filter: None,
+                line: line_no,
+            });
+            *section = Section::PropertyHeader;
+        } else if let Err(error) = parse_property_definition(&name, inline_definition, line_no) {
+            errors.push(error);
+            *section = Section::None;
+        } else {
+            let (kind, expr) = property_kind_and_expr(inline_definition).expect("property parsed");
+            properties.push(ParsedProperty {
+                name,
+                layer: layer.to_string(),
+                kind,
+                expr,
+                scope_expr: None,
+                action_filter: None,
+                line: line_no,
+            });
+            *section = Section::None;
+        }
+    } else {
+        errors.push(parse_error("invalid property declaration", line_no));
+        *section = Section::None;
     }
 }
 
@@ -391,10 +441,12 @@ action Delete:
   post:
     visible = false
     deleted = true
-property P_DELETE_TRANSITION:
+        property P_DELETE_TRANSITION:
   transition: next.deleted == true && prev.visible == true
   on: Delete
   when: prev.visible == true
+assume ENV_PRECONDITION:
+  invariant: visible == true || deleted == false
 "#;
 
         let parsed = parse_model(source).expect("should parse");
@@ -409,5 +461,6 @@ property P_DELETE_TRANSITION:
             parsed.properties[0].scope_expr.as_deref(),
             Some("prev.visible == true")
         );
+        assert_eq!(parsed.properties[1].layer, "assume");
     }
 }

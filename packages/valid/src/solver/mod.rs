@@ -40,6 +40,8 @@ pub struct CapabilityMatrix {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemporalCapabilityMatrix {
     pub status: String,
+    pub semantics: String,
+    pub assurance_levels: Vec<String>,
     pub supported_operators: Vec<String>,
     pub unsupported_operators: Vec<String>,
     pub notes: Vec<String>,
@@ -153,13 +155,16 @@ pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
 pub fn validate_capability_matrix(matrix: &CapabilityMatrix) -> Result<(), String> {
     require_non_empty(&matrix.backend_name, "backend_name")?;
     require_non_empty(&matrix.temporal.status, "temporal.status")?;
+    require_non_empty(&matrix.temporal.semantics, "temporal.semantics")?;
     Ok(())
 }
 
 fn render_temporal_capability_json(temporal: &TemporalCapabilityMatrix) -> String {
     format!(
-        "{{\"status\":\"{}\",\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
+        "{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
         temporal.status,
+        temporal.semantics,
+        render_string_array(&temporal.assurance_levels),
         render_string_array(&temporal.supported_operators),
         render_string_array(&temporal.unsupported_operators),
         render_string_array(&temporal.notes),
@@ -187,6 +192,8 @@ fn all_temporal_operators() -> Vec<String> {
 fn complete_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "complete".to_string(),
+        semantics: "reachable_graph_fixpoint".to_string(),
+        assurance_levels: vec!["complete".to_string(), "bounded".to_string()],
         supported_operators: all_temporal_operators(),
         unsupported_operators: Vec::new(),
         notes,
@@ -196,6 +203,8 @@ fn complete_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
 fn bounded_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "bounded".to_string(),
+        semantics: "depth_bounded_search".to_string(),
+        assurance_levels: vec!["bounded".to_string()],
         supported_operators: all_temporal_operators(),
         unsupported_operators: Vec::new(),
         notes,
@@ -205,6 +214,8 @@ fn bounded_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
 fn unavailable_temporal_support(note: impl Into<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "unavailable".to_string(),
+        semantics: "unavailable".to_string(),
+        assurance_levels: Vec::new(),
         supported_operators: Vec::new(),
         unsupported_operators: all_temporal_operators(),
         notes: vec![note.into()],
@@ -339,7 +350,8 @@ impl SolverAdapter for ExplicitAdapter {
             supports_witness: true,
             selfcheck_compatible: true,
             temporal: complete_temporal_support(vec![
-                "evaluated over the explored reachable graph".to_string(),
+                "evaluated over the explored reachable graph with fixpoint semantics".to_string(),
+                "when max_depth is configured, the same operators remain available but the assurance level becomes bounded".to_string(),
             ]),
         }
     }
@@ -434,6 +446,7 @@ impl SolverAdapter for MockBmcAdapter {
             temporal: bounded_temporal_support(vec![
                 "temporal properties are checked only within the configured depth bound"
                     .to_string(),
+                "PASS means no counterexample was found within the bounded horizon; it is not a complete liveness proof".to_string(),
             ]),
         }
     }
@@ -529,7 +542,7 @@ impl SolverAdapter for Cvc5Adapter {
             supports_witness: true,
             selfcheck_compatible: false,
             temporal: unavailable_temporal_support(
-                "SMT adapter does not yet lower temporal expressions; use backend=explicit",
+                "SMT adapter does not yet lower temporal expressions; use backend=explicit or mock-bmc for bounded temporal checks",
             ),
         }
     }
@@ -641,7 +654,7 @@ impl SolverAdapter for VarisatAdapter {
             supports_witness: true,
             selfcheck_compatible: true,
             temporal: unavailable_temporal_support(
-                "SAT adapter does not yet lower temporal expressions; use backend=explicit",
+                "SAT adapter does not yet lower temporal expressions; use backend=explicit or mock-bmc for bounded temporal checks",
             ),
         }
     }
@@ -747,7 +760,7 @@ impl SolverAdapter for CommandSolverAdapter {
             supports_witness: true,
             selfcheck_compatible: false,
             temporal: unavailable_temporal_support(
-                "command backends do not declare temporal support in the normalized protocol",
+                "command backends do not declare temporal semantics in the normalized protocol; advertise temporal support explicitly before relying on them",
             ),
         }
     }
@@ -870,6 +883,12 @@ fn normalize_protocol_result(
         .find(|property| property.property_id == property_id)
         .map(|property| property.kind.clone())
         .ok_or_else(|| format!("unknown property `{}`", property_id))?;
+    let property_layer = model
+        .properties
+        .iter()
+        .find(|property| property.property_id == property_id)
+        .map(|property| property.layer)
+        .ok_or_else(|| format!("unknown property `{}`", property_id))?;
     let assurance_level = protocol
         .assurance_level
         .as_deref()
@@ -920,6 +939,7 @@ fn normalize_protocol_result(
             property_result: PropertyResult {
                 property_id: property_id.clone(),
                 property_kind: property_kind.clone(),
+                property_layer,
                 status: RunStatus::Pass,
                 assurance_level,
                 scenario_id: run_plan.scenario_selection.clone(),
@@ -968,6 +988,7 @@ fn normalize_protocol_result(
                 property_result: PropertyResult {
                     property_id: property_id.clone(),
                     property_kind: property_kind.clone(),
+                    property_layer,
                     status: RunStatus::Fail,
                     assurance_level,
                     scenario_id: run_plan.scenario_selection.clone(),
@@ -998,6 +1019,7 @@ fn normalize_protocol_result(
             property_result: PropertyResult {
                 property_id,
                 property_kind,
+                property_layer,
                 status: RunStatus::Unknown,
                 assurance_level,
                 scenario_id: run_plan.scenario_selection.clone(),

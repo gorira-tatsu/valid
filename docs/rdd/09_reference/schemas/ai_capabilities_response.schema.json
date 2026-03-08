@@ -29,11 +29,16 @@
         "selfcheck_compatible": { "type": "boolean" },
         "temporal": {
           "type": "object",
-          "required": ["status", "supported_operators", "unsupported_operators", "notes"],
+          "required": ["status", "semantics", "assurance_levels", "supported_operators", "unsupported_operators", "notes"],
           "properties": {
             "status": {
               "type": "string",
               "enum": ["complete", "bounded", "unavailable"]
+            },
+            "semantics": { "type": "string", "minLength": 1 },
+            "assurance_levels": {
+              "type": "array",
+              "items": { "type": "string" }
             },
             "supported_operators": {
               "type": "array",

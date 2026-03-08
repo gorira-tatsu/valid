@@ -52,18 +52,48 @@
             "support_level",
             "explicit_status",
             "solver_status",
-            "reason"
+            "reason",
+            "backend_statuses"
           ],
           "properties": {
             "property_ids": { "type": "array", "items": { "type": "string" } },
             "operators": { "type": "array", "items": { "type": "string" } },
             "support_level": {
               "type": "string",
-              "enum": ["not_applicable", "explicit_only"]
+              "enum": ["not_applicable", "explicit_only", "backend_specific"]
             },
             "explicit_status": { "type": "string", "minLength": 1 },
             "solver_status": { "type": "string", "minLength": 1 },
-            "reason": { "type": ["string", "null"] }
+            "reason": { "type": ["string", "null"] },
+            "backend_statuses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["backend", "status", "semantics", "assurance_levels", "supported_operators", "unsupported_operators", "notes"],
+                "properties": {
+                  "backend": { "type": "string", "minLength": 1 },
+                  "status": { "type": "string", "minLength": 1 },
+                  "semantics": { "type": "string", "minLength": 1 },
+                  "assurance_levels": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "supported_operators": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "unsupported_operators": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "notes": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
           },
           "additionalProperties": false
         }

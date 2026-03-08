@@ -16,5 +16,5 @@ pub use model::{
     StateField,
 };
 pub use path::{build_path_from_parts, decision_path_tags, infer_decision_path_tags, Path};
-pub use property::{PropertyIr, PropertyKind};
+pub use property::{PropertyIr, PropertyKind, PropertyLayer};
 pub use value::Value;

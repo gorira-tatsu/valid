@@ -820,6 +820,7 @@ pub trait ActionSpec: ModelingAction {
 pub struct ModelProperty<S> {
     pub property_id: &'static str,
     pub property_kind: crate::ir::PropertyKind,
+    pub property_layer: crate::ir::PropertyLayer,
     pub expr: Option<&'static str>,
     pub holds: fn(&S) -> bool,
 }
@@ -834,9 +835,40 @@ impl<S> ModelProperty<S> {
         expr: Option<&'static str>,
         holds: fn(&S) -> bool,
     ) -> Self {
+        Self::assert_invariant_expr(property_id, expr, holds)
+    }
+
+    pub fn assert_invariant(property_id: &'static str, holds: fn(&S) -> bool) -> Self {
+        Self::assert_invariant_expr(property_id, None, holds)
+    }
+
+    pub fn assert_invariant_expr(
+        property_id: &'static str,
+        expr: Option<&'static str>,
+        holds: fn(&S) -> bool,
+    ) -> Self {
         Self {
             property_id,
             property_kind: crate::ir::PropertyKind::Invariant,
+            property_layer: crate::ir::PropertyLayer::Assert,
+            expr,
+            holds,
+        }
+    }
+
+    pub fn assume_invariant(property_id: &'static str, holds: fn(&S) -> bool) -> Self {
+        Self::assume_invariant_expr(property_id, None, holds)
+    }
+
+    pub fn assume_invariant_expr(
+        property_id: &'static str,
+        expr: Option<&'static str>,
+        holds: fn(&S) -> bool,
+    ) -> Self {
+        Self {
+            property_id,
+            property_kind: crate::ir::PropertyKind::Invariant,
+            property_layer: crate::ir::PropertyLayer::Assume,
             expr,
             holds,
         }
@@ -846,6 +878,7 @@ impl<S> ModelProperty<S> {
         Self {
             property_id,
             property_kind: crate::ir::PropertyKind::DeadlockFreedom,
+            property_layer: crate::ir::PropertyLayer::Assert,
             expr: None,
             holds,
         }
@@ -1889,6 +1922,22 @@ macro_rules! valid_model_transition_descriptor {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! valid_model_push_properties {
+    ($properties:ident [$model:ident] [$state_ty:ty]; assume $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::assume_invariant_expr(
+            stringify!($property),
+            Some(stringify!($holds_expr)),
+            |$holds_state: &$state_ty| $holds_expr,
+        ));
+        $crate::valid_model_push_properties!($properties [$model] [$state_ty]; $($rest)*);
+    };
+    ($properties:ident [$model:ident] [$state_ty:ty]; assert $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
+        $properties.push($crate::modeling::ModelProperty::assert_invariant_expr(
+            stringify!($property),
+            Some(stringify!($holds_expr)),
+            |$holds_state: &$state_ty| $holds_expr,
+        ));
+        $crate::valid_model_push_properties!($properties [$model] [$state_ty]; $($rest)*);
+    };
     ($properties:ident [$model:ident] [$state_ty:ty]; invariant $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
         $properties.push($crate::modeling::ModelProperty::invariant_expr(
             stringify!($property),
@@ -2595,6 +2644,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         status: "ok".to_string(),
         evidence_id: trace.evidence_id,
         property_id: trace.property_id,
+        property_layer: "assert".to_string(),
         breakpoint_kind: if failure_step
             .note
             .as_deref()
@@ -2684,6 +2734,11 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 schema_version: "1.0.0".to_string(),
                 vector_id: format!(
                     "vec-{}",
+                    stable_hash_hex(&(M::model_id().to_string() + &first_sequence.join(",")))
+                        .replace("sha256:", "")
+                ),
+                run_id: format!(
+                    "run-transition-{}",
                     stable_hash_hex(&(M::model_id().to_string() + &first_sequence.join(",")))
                         .replace("sha256:", "")
                 ),
@@ -3111,6 +3166,11 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
             )
             .replace("sha256:", "")
         ),
+        run_id: format!(
+            "run-vector-{}",
+            stable_hash_hex(&(M::model_id().to_string() + property_id + &signature))
+                .replace("sha256:", "")
+        ),
         source_kind: source_kind.to_string(),
         strictness: match strategy {
             "guard" | "boundary" | "path" | "random" | "transition" | "witness" => {
@@ -3298,6 +3358,7 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
             Ok(PropertyIr {
                 property_id: property.property_id.to_string(),
                 kind: property.property_kind,
+                layer: property.property_layer,
                 expr,
                 scope: None,
                 action_filter: None,
@@ -4189,6 +4250,7 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
         property_result: PropertyResult {
             property_id: result.property_id.to_string(),
             property_kind,
+            property_layer: crate::ir::PropertyLayer::Assert,
             status,
             assurance_level: AssuranceLevel::Complete,
             scenario_id: None,
