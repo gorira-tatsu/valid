@@ -891,6 +891,67 @@ fn cargo_valid_doc_check_reports_drift() {
 }
 
 #[test]
+fn cargo_valid_handoff_check_reports_drift() {
+    let _guard = cargo_guard();
+    let output_path = std::env::temp_dir().join(format!(
+        "cargo-valid-handoff-check-{}.md",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("handoff")
+        .arg("counter")
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--json")
+        .output()
+        .expect("cargo-valid handoff should run");
+    assert!(first.status.success());
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first_stdout.contains("\"model_id\":\"CounterModel\""));
+    assert!(first_stdout.contains("\"markdown\""));
+
+    let unchanged = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("handoff")
+        .arg("counter")
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid handoff check should run");
+    assert_eq!(unchanged.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&unchanged.stdout).contains("\"status\":\"unchanged\""));
+
+    let mut body = fs::read_to_string(&output_path).expect("handoff body");
+    body.push_str("\nmanual drift\n");
+    fs::write(&output_path, body).expect("drift write");
+
+    let changed = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("handoff")
+        .arg("counter")
+        .arg("--property=P_SAFE")
+        .arg(format!("--write={}", output_path.display()))
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid handoff drift check should run");
+    assert_eq!(changed.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&changed.stdout);
+    assert!(stdout.contains("\"status\":\"changed\""));
+    assert!(stdout.contains("\"drift_sections\""));
+    let _ = fs::remove_file(output_path);
+}
+
+#[test]
 fn cargo_valid_lists_example_models_from_file() {
     let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())

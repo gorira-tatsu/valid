@@ -17,7 +17,7 @@ use crate::{
         check_source, compile_source, distinguish_source, explain_source, inspect_source,
         lint_source, render_distinguish_json, render_explain_json, render_inspect_json,
         render_lint_json, testgen_source, CheckRequest, DistinguishRequest, InspectRequest,
-        TestgenRequest,
+        OrchestrateRequest, TestgenRequest, orchestrate_source,
     },
     bundled_models::list_bundled_models,
     contract::{compare_snapshot, parse_lock_file, snapshot_model},
@@ -25,6 +25,7 @@ use crate::{
     engine::CheckOutcome,
     evidence::{render_diagnostics_json, render_outcome_json},
     frontend::compile_model,
+    handoff::{default_handoff_path, generate_handoff, render_handoff_json, HandoffInputs},
     ir::Path,
     kernel::{eval::eval_expr, replay::replay_actions, transition::apply_action},
     project::{rerun_recommendations, verification_policy, ProjectConfig},
@@ -34,6 +35,7 @@ use crate::{
         render_model_svg_with_view, render_model_text_failure, render_model_text_with_view,
         GraphView,
     },
+    support::hash::stable_hash_hex,
     testgen::render_replay_json,
 };
 
@@ -424,6 +426,13 @@ fn tool_definitions() -> Vec<Value> {
             "Fetch a documentation entry by stable doc id with structured guidance and markdown body.",
             input_schema_with_doc_id(),
             output_schema_docs_get(),
+            true,
+        ),
+        tool(
+            "valid_handoff",
+            "Generate an implementation-oriented handoff brief for a model.",
+            input_schema_with_backend_and_property(),
+            output_schema_any_object(),
             true,
         ),
         tool(
@@ -980,6 +989,13 @@ fn handle_tool_call(config: &ServerConfig, params: &Value) -> ToolResult {
             let args = parse_args::<DocGetArgs>(&arguments);
             match args {
                 Ok(args) => docs_get_tool(&args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
+        }
+        "valid_handoff" => {
+            let args = parse_args::<BackendArgs>(&arguments);
+            match args {
+                Ok(args) => handoff_tool(config, &args),
                 Err(error) => Ok(ToolResult::error_message(error)),
             }
         }
@@ -2029,6 +2045,140 @@ fn coverage_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult
                 &registry_command_args("coverage", &model_name, args),
             ),
             &[0],
+        )),
+    }
+}
+
+fn handoff_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult, String> {
+    match args.target.resolve(config)? {
+        ResolvedTarget::Dsl {
+            source_name,
+            source,
+        } => {
+            let inspect_request = InspectRequest {
+                request_id: "mcp-handoff-inspect".to_string(),
+                source_name: source_name.clone(),
+                source: source.clone(),
+            };
+            let inspect = match inspect_source(&inspect_request) {
+                Ok(response) => response,
+                Err(diagnostics) => {
+                    return Ok(ToolResult::error(parse_embedded_json(
+                        "diagnostics",
+                        &render_diagnostics_json(&diagnostics),
+                    )?));
+                }
+            };
+            let orchestrated = match orchestrate_source(&OrchestrateRequest {
+                request_id: "mcp-handoff-orchestrate".to_string(),
+                source_name: source_name.clone(),
+                source: source.clone(),
+                seed: None,
+                backend: args.backend.clone(),
+                solver_executable: args.solver_executable.clone(),
+                solver_args: args.solver_args.clone(),
+            }) {
+                Ok(response) => response,
+                Err(error) => {
+                    return Ok(ToolResult::error(parse_embedded_json(
+                        "diagnostics",
+                        &render_diagnostics_json(&error.diagnostics),
+                    )?));
+                }
+            };
+            let explanations = inspect
+                .properties
+                .iter()
+                .filter(|property_id| {
+                    args.property_id
+                        .as_deref()
+                        .map(|candidate| candidate == property_id.as_str())
+                        .unwrap_or(true)
+                })
+                .filter_map(|property_id| {
+                    explain_source(&CheckRequest {
+                        request_id: format!("mcp-handoff-explain-{property_id}"),
+                        source_name: source_name.clone(),
+                        source: source.clone(),
+                        property_id: Some(property_id.clone()),
+                        scenario_id: args.scenario_id.clone(),
+                        seed: None,
+                        backend: args.backend.clone(),
+                        solver_executable: args.solver_executable.clone(),
+                        solver_args: args.solver_args.clone(),
+                    })
+                    .ok()
+                })
+                .collect::<Vec<_>>();
+            let coverage = if let Some(report) = orchestrated.aggregate_coverage.clone() {
+                report
+            } else {
+                let model = match compile_source(&source) {
+                    Ok(model) => model,
+                    Err(diagnostics) => {
+                        return Ok(ToolResult::error(parse_embedded_json(
+                            "diagnostics",
+                            &render_diagnostics_json(&diagnostics),
+                        )?));
+                    }
+                };
+                match check_source(&CheckRequest {
+                    request_id: "mcp-handoff-coverage".to_string(),
+                    source_name: source_name.clone(),
+                    source: source.clone(),
+                    property_id: args.property_id.clone(),
+                    scenario_id: args.scenario_id.clone(),
+                    seed: None,
+                    backend: args.backend.clone(),
+                    solver_executable: args.solver_executable.clone(),
+                    solver_args: args.solver_args.clone(),
+                }) {
+                    CheckOutcome::Completed(result) => {
+                        let traces = result.trace.into_iter().collect::<Vec<_>>();
+                        collect_coverage(&model, &traces)
+                    }
+                    CheckOutcome::Errored(error) => {
+                        return Ok(ToolResult::error(parse_embedded_json(
+                            "diagnostics",
+                            &render_diagnostics_json(&error.diagnostics),
+                        )?));
+                    }
+                }
+            };
+            let source_hash = stable_hash_hex(&source);
+            let contract_hash = match compile_model(&source) {
+                Ok(model) => snapshot_model(&model).contract_hash,
+                Err(diagnostics) => {
+                    return Ok(ToolResult::error(parse_embedded_json(
+                        "diagnostics",
+                        &render_diagnostics_json(&diagnostics),
+                    )?));
+                }
+            };
+            let generated = generate_handoff(HandoffInputs {
+                inspect: &inspect,
+                runs: &orchestrated.runs,
+                coverage: &coverage,
+                explanations: &explanations,
+                property_id: args.property_id.as_deref(),
+                source_hash: &source_hash,
+                contract_hash: &contract_hash,
+            });
+            let output_path = default_handoff_path(&generated.model_id);
+            Ok(ToolResult::success(parse_embedded_json(
+                "handoff response",
+                &render_handoff_json(&generated, Some(output_path.as_str())),
+            )?))
+        }
+        ResolvedTarget::Registry {
+            registry_binary,
+            model_name,
+        } => Ok(registry_tool_result(
+            run_registry_json(
+                &registry_binary,
+                &registry_command_args("handoff", &model_name, args),
+            ),
+            &[0, 2],
         )),
     }
 }

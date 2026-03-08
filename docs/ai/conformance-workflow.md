@@ -21,6 +21,7 @@ or runner workflows.
 
 ```sh
 cargo valid inspect <model>
+cargo valid handoff <model> --write
 cargo valid testgen <model>
 cargo valid conformance <model> --runner <runner>
 ```
@@ -28,6 +29,7 @@ cargo valid conformance <model> --runner <runner>
 Useful MCP tools:
 
 - `valid_inspect`
+- `valid_handoff`
 - `valid_testgen`
 - `valid_contract_check`
 - `valid_explain`

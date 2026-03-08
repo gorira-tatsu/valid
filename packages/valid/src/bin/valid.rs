@@ -44,6 +44,11 @@ use valid::{
         ExternalTargetOptions, RegistryBuildOptions,
     },
     frontend::compile_model,
+    handoff::{
+        check_handoff, default_handoff_path, generate_handoff, render_handoff_check_json,
+        render_handoff_check_text, render_handoff_json, render_handoff_text, write_handoff,
+        HandoffInputs,
+    },
     mcp::{serve_stdio, ServerConfig},
     project::{load_project_config, rerun_recommendations},
     reporter::{
@@ -75,6 +80,7 @@ enum ValidCommand {
     #[command(alias = "diagram")]
     Graph(GraphArgs),
     Doc(DocArgs),
+    Handoff(HandoffArgs),
     #[command(alias = "readiness")]
     Lint(ModelPathArgs),
     Capabilities(CapabilitiesArgs),
@@ -154,6 +160,25 @@ struct GraphArgs {
 #[derive(Args, Debug, Clone)]
 struct DocArgs {
     path: String,
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    write: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    check: bool,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct HandoffArgs {
+    path: String,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     write: Option<String>,
     #[arg(long, action = ArgAction::SetTrue)]
@@ -318,6 +343,7 @@ fn main() {
         Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
         Some(ValidCommand::Doc(args)) => cmd_doc_from_parsed(doc_to_parsed(args)),
+        Some(ValidCommand::Handoff(args)) => cmd_handoff_from_parsed(handoff_to_parsed(args)),
         Some(ValidCommand::Lint(args)) => cmd_lint_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Capabilities(args)) => {
             cmd_capabilities_from_parsed(capabilities_to_parsed(args))
@@ -430,6 +456,21 @@ fn doc_to_parsed(args: DocArgs) -> ParsedArgs {
     }
 }
 
+fn handoff_to_parsed(args: HandoffArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        property_id: args.property,
+        write_path: args.write,
+        check: args.check,
+        ..ParsedArgs::default()
+    }
+}
+
 fn capabilities_to_parsed(args: CapabilitiesArgs) -> ParsedArgs {
     ParsedArgs {
         json: args.json_progress.json,
@@ -518,6 +559,10 @@ fn cmd_graph_from_parsed(parsed: ParsedArgs) {
 }
 fn cmd_doc_from_parsed(parsed: ParsedArgs) {
     cmd_doc(args_from_parsed(&parsed));
+}
+
+fn cmd_handoff_from_parsed(parsed: ParsedArgs) {
+    cmd_handoff(args_from_parsed(&parsed));
 }
 fn cmd_lint_from_parsed(parsed: ParsedArgs) {
     cmd_lint(args_from_parsed(&parsed));
@@ -1161,6 +1206,158 @@ fn cmd_doc(args: Vec<String>) {
                 &generated,
                 parsed.write_path.as_ref().map(|_| output_path.as_str())
             )
+        );
+    }
+    progress.finish(ExitCode::Success);
+}
+
+fn cmd_handoff(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid handoff <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--write[=<path>]] [--check]",
+        |_arg, _parsed| false,
+    );
+    let progress = ProgressReporter::new("handoff", parsed.progress_json);
+    progress.start(None);
+    let source = read_source(&parsed.path, "handoff", parsed.json);
+    let request = InspectRequest {
+        request_id: "req-local-handoff".to_string(),
+        source_name: parsed.path.clone(),
+        source: source.clone(),
+    };
+    let inspect = inspect_source(&request).unwrap_or_else(|diagnostics| {
+        diagnostics_exit("handoff", parsed.json, &diagnostics, None);
+    });
+    let orchestrated = orchestrate_source(&OrchestrateRequest {
+        request_id: "req-local-handoff-orchestrate".to_string(),
+        source_name: parsed.path.clone(),
+        source: source.clone(),
+        seed: None,
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+    })
+    .unwrap_or_else(|error| diagnostics_exit("handoff", parsed.json, &error.diagnostics, None));
+    let explanations = inspect
+        .properties
+        .iter()
+        .filter(|property_id| {
+            parsed
+                .property_id
+                .as_deref()
+                .map(|candidate| candidate == property_id.as_str())
+                .unwrap_or(true)
+        })
+        .filter_map(|property_id| {
+            explain_source(&CheckRequest {
+                request_id: format!("req-local-handoff-explain-{property_id}"),
+                source_name: parsed.path.clone(),
+                source: source.clone(),
+                property_id: Some(property_id.clone()),
+                scenario_id: None,
+                seed: None,
+                backend: parsed.backend.clone(),
+                solver_executable: parsed.solver_executable.clone(),
+                solver_args: parsed.solver_args.clone(),
+            })
+            .ok()
+        })
+        .collect::<Vec<_>>();
+    let coverage = if let Some(report) = orchestrated.aggregate_coverage.clone() {
+        report
+    } else if is_bundled_model_ref(&parsed.path) {
+        coverage_bundled_model(&parsed.path)
+            .unwrap_or_else(|message| message_exit("handoff", parsed.json, &message, None))
+    } else {
+        let model = compile_model(&source).unwrap_or_else(|diagnostics| {
+            diagnostics_exit("handoff", parsed.json, &diagnostics, None)
+        });
+        let check = check_source(&CheckRequest {
+            request_id: "req-local-handoff-coverage".to_string(),
+            source_name: parsed.path.clone(),
+            source: source.clone(),
+            property_id: parsed.property_id.clone(),
+            scenario_id: None,
+            seed: None,
+            backend: parsed.backend.clone(),
+            solver_executable: parsed.solver_executable.clone(),
+            solver_args: parsed.solver_args.clone(),
+        });
+        match check {
+            CheckOutcome::Completed(result) => {
+                let traces = result.trace.into_iter().collect::<Vec<_>>();
+                collect_coverage(&model, &traces)
+            }
+            CheckOutcome::Errored(error) => {
+                diagnostics_exit("handoff", parsed.json, &error.diagnostics, None)
+            }
+        }
+    };
+    let source_hash = if source.is_empty() {
+        valid::support::hash::stable_hash_hex(&inspect.model_id)
+    } else {
+        valid::support::hash::stable_hash_hex(&source)
+    };
+    let contract_hash = if source.is_empty() {
+        valid::support::hash::stable_hash_hex(&format!(
+            "{}|{}|{}|{}",
+            inspect.model_id,
+            inspect.state_fields.join(","),
+            inspect.actions.join(","),
+            inspect.properties.join(",")
+        ))
+    } else {
+        match compile_model(&source) {
+            Ok(model) => snapshot_model(&model).contract_hash,
+            Err(diagnostics) => diagnostics_exit("handoff", parsed.json, &diagnostics, None),
+        }
+    };
+    let generated = generate_handoff(HandoffInputs {
+        inspect: &inspect,
+        runs: &orchestrated.runs,
+        coverage: &coverage,
+        explanations: &explanations,
+        property_id: parsed.property_id.as_deref(),
+        source_hash: &source_hash,
+        contract_hash: &contract_hash,
+    });
+    let output_path = parsed
+        .write_path
+        .clone()
+        .filter(|path| !path.is_empty())
+        .unwrap_or_else(|| default_handoff_path(&generated.model_id));
+
+    if parsed.check {
+        let existing = fs::read_to_string(&output_path).ok();
+        let report = check_handoff(output_path.clone(), existing.as_deref(), &generated);
+        let code = if report.status == "unchanged" {
+            ExitCode::Success
+        } else {
+            ExitCode::Unknown
+        };
+        if parsed.json {
+            println!("{}", render_handoff_check_json(&report));
+        } else {
+            print!("{}", render_handoff_check_text(&report));
+        }
+        progress.finish(code);
+        process::exit(code.code());
+    }
+
+    if parsed.write_path.is_some() {
+        if let Err(message) = write_handoff(&output_path, &generated) {
+            message_exit("handoff", parsed.json, &message, None);
+        }
+    }
+    if parsed.json {
+        println!(
+            "{}",
+            render_handoff_json(&generated, Some(output_path.as_str()))
+        );
+    } else {
+        print!(
+            "{}",
+            render_handoff_text(&generated, Some(output_path.as_str()))
         );
     }
     progress.finish(ExitCode::Success);

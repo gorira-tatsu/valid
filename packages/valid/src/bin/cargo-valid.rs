@@ -39,6 +39,11 @@ use valid::{
         resolve_external_target as resolve_external_registry_target, ExternalTarget,
         ExternalTargetKind, ExternalTargetOptions,
     },
+    handoff::{
+        check_handoff, default_handoff_path, generate_handoff, render_handoff_check_json,
+        render_handoff_check_text, render_handoff_json, render_handoff_text, write_handoff,
+        HandoffInputs,
+    },
     project::{
         render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
         render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
@@ -155,6 +160,7 @@ fn main() {
         "inspect" => cmd_inspect(local_args),
         "graph" => cmd_graph(local_args),
         "doc" => cmd_doc(local_args),
+        "handoff" => cmd_handoff(local_args),
         "lint" => cmd_lint(local_args),
         "benchmark" => cmd_benchmark(local_args),
         "migrate" => cmd_migrate(local_args),
@@ -174,7 +180,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -560,11 +566,11 @@ fn command_supports_actions(command: &str) -> bool {
 }
 
 fn command_supports_write_path(command: &str) -> bool {
-    matches!(command, "migrate" | "doc")
+    matches!(command, "migrate" | "doc" | "handoff")
 }
 
 fn command_supports_check_flag(command: &str) -> bool {
-    matches!(command, "migrate" | "doc")
+    matches!(command, "migrate" | "doc" | "handoff")
 }
 
 fn external_target_requires_runtime_feature(parsed: &CliArgs, target: &ExternalTarget) -> bool {
@@ -1200,6 +1206,121 @@ fn cmd_doc(parsed: ParsedArgs) {
             progress.finish(ExitCode::Success);
         }
         Err(diagnostics) => diagnostics_exit("doc", parsed.json, &diagnostics),
+    }
+}
+
+fn cmd_handoff(parsed: ParsedArgs) {
+    let progress = ProgressReporter::new("handoff", parsed.progress_json);
+    progress.start(None);
+    let model = parsed.model.unwrap_or_else(|| {
+        usage_exit(
+            "usage: cargo valid handoff <model> [--json] [--property=<id>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>] [--write[=<path>]] [--check]",
+        )
+    });
+    let source_name = normalized_model_ref(&model);
+    let inspect_request = InspectRequest {
+        request_id: "cargo-valid-handoff".to_string(),
+        source_name: source_name.clone(),
+        source: String::new(),
+    };
+    match inspect_source(&inspect_request) {
+        Ok(response) => {
+            let orchestrated = orchestrate_source(&OrchestrateRequest {
+                request_id: "cargo-valid-handoff-orchestrate".to_string(),
+                source_name: source_name.clone(),
+                source: String::new(),
+                seed: None,
+                backend: parsed.backend.clone(),
+                solver_executable: parsed.solver_executable.clone(),
+                solver_args: parsed.solver_args.clone(),
+            })
+            .unwrap_or_else(|error| diagnostics_exit("handoff", parsed.json, &error.diagnostics));
+            let explanations = response
+                .properties
+                .iter()
+                .filter(|property_id| {
+                    parsed
+                        .property_id
+                        .as_deref()
+                        .map(|candidate| candidate == property_id.as_str())
+                        .unwrap_or(true)
+                })
+                .filter_map(|property_id| {
+                    explain_source(&CheckRequest {
+                        request_id: format!("cargo-valid-handoff-explain-{property_id}"),
+                        source_name: source_name.clone(),
+                        source: String::new(),
+                        property_id: Some(property_id.clone()),
+                        scenario_id: None,
+                        seed: None,
+                        backend: parsed.backend.clone(),
+                        solver_executable: parsed.solver_executable.clone(),
+                        solver_args: parsed.solver_args.clone(),
+                    })
+                    .ok()
+                })
+                .collect::<Vec<_>>();
+            let coverage = orchestrated.aggregate_coverage.clone().unwrap_or_else(|| {
+                coverage_bundled_model(&source_name)
+                    .unwrap_or_else(|message| message_exit("handoff", parsed.json, &message, None))
+            });
+            let source_hash = stable_hash_hex(&model);
+            let contract_hash = stable_hash_hex(&format!(
+                "{}|{}|{}|{}",
+                response.model_id,
+                response.state_fields.join(","),
+                response.actions.join(","),
+                response.properties.join(",")
+            ));
+            let generated = generate_handoff(HandoffInputs {
+                inspect: &response,
+                runs: &orchestrated.runs,
+                coverage: &coverage,
+                explanations: &explanations,
+                property_id: parsed.property_id.as_deref(),
+                source_hash: &source_hash,
+                contract_hash: &contract_hash,
+            });
+            let output_path = parsed
+                .write_path
+                .clone()
+                .filter(|path| !path.is_empty())
+                .unwrap_or_else(|| default_handoff_path(&generated.model_id));
+            if parsed.check {
+                let existing = fs::read_to_string(&output_path).ok();
+                let report = check_handoff(output_path.clone(), existing.as_deref(), &generated);
+                let code = if report.status == "unchanged" {
+                    ExitCode::Success
+                } else {
+                    ExitCode::Unknown
+                };
+                if parsed.json {
+                    println!("{}", render_handoff_check_json(&report));
+                } else {
+                    print!("{}", render_handoff_check_text(&report));
+                }
+                progress.finish(code);
+                process::exit(code.code());
+            }
+            if parsed.write_path.is_some() {
+                if let Err(message) = write_handoff(&output_path, &generated) {
+                    message_exit("handoff", parsed.json, &message, None);
+                }
+            }
+            if parsed.json {
+                println!(
+                    "{}",
+                    render_handoff_json(&generated, Some(output_path.as_str()))
+                );
+            } else {
+                print!(
+                    "{}",
+                    render_handoff_text(&generated, Some(output_path.as_str()))
+                );
+            }
+            progress.finish(ExitCode::Success);
+        }
+        Err(diagnostics) => diagnostics_exit("handoff", parsed.json, &diagnostics),
     }
 }
 

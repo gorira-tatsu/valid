@@ -25,6 +25,8 @@ pub mod evidence;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod external_registry;
 pub mod frontend;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
+pub mod handoff;
 pub mod ir;
 pub mod kernel;
 pub mod mcp;

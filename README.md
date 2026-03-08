@@ -174,6 +174,8 @@ cargo valid lint counter --json
 cargo valid migrate counter
 cargo valid migrate counter --write
 cargo valid migrate counter --check
+cargo valid handoff counter --write
+cargo valid handoff counter --check
 cargo valid verify failing-counter
 cargo valid benchmark
 cargo valid benchmark --baseline=compare
@@ -266,6 +268,7 @@ Available tools:
 - `valid_inspect`
 - `valid_check`
 - `valid_explain`
+- `valid_handoff`
 - `valid_coverage`
 - `valid_testgen`
 - `valid_replay`
