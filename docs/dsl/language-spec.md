@@ -69,6 +69,18 @@ The current field metadata is:
 Actions are finite enums. Each variant must have an `action_id`, and should
 declare `reads` and `writes` metadata when possible.
 
+Current boundary:
+
+- bounded parameterized actions are not implemented yet
+- richer payload actions are not implemented yet
+- examples that use multiple variants for bounded choices should be treated as
+  teaching or regression fixtures, not as the recommended shape for open-ended
+  business inputs
+
+See [Parameterized Action Roadmap](./parameterized-action-roadmap.md) for the
+planned split between near-term bounded support and later richer payload
+support.
+
 Declarative transitions can also declare:
 
 - `role = business` (default)

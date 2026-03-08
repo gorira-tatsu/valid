@@ -14,6 +14,7 @@ Related documents:
 - [Project Organization Guide](../project-organization.md)
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
+- [Parameterized Action Roadmap](./parameterized-action-roadmap.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
 
 ## What the DSL is
@@ -203,6 +204,15 @@ For maintainability, keep model intent visible with named `predicates:`,
 focused `scenarios:`, and descriptive action ids. Use `cargo valid lint` /
 `cargo valid readiness` to catch repeated conditions, oversized model
 structure, and setup-heavy transition sets before they drift.
+
+Treat today's enum-only action surface as the current implementation boundary,
+not as a recommendation to encode every business input as its own action
+variant. If the real-world concept is "one action with a bounded choice", do
+not automatically model it as `DoXForA`, `DoXForB`, `DoXForC`, and so on just
+to fit the current surface. Reserve that duplication for intentionally tiny
+examples or regression fixtures, and use the
+[Parameterized Action Roadmap](./parameterized-action-roadmap.md) as the
+planning reference for the long-term shape.
 
 ## IDE Notes
 
@@ -420,20 +430,24 @@ the repo. It exercises:
 - multiple invariants
 - graph / inspect / verify on a solver-ready registry
 
-`examples/saas_multi_tenant_registry.rs` is the smallest service-oriented grouped
-transition example. It exercises:
+`examples/saas_multi_tenant_registry.rs` is the smallest service-oriented
+integration-model example with grouped transitions. It exercises:
 
 - `on Action { ... }` grouped transitions
 - enterprise entitlement checks with `FiniteEnumSet`
 - multi-tenant isolation properties
+- explicit shared-state review across review, entitlement, and isolation
+  concerns without requiring full compose syntax
 - a safe model and an intentional regression model
 
-`examples/tenant_relation_registry.rs` is the smallest relation/map example. It
-exercises:
+`examples/tenant_relation_registry.rs` is the smallest relation/map
+integration-model example. It exercises:
 
 - `FiniteRelation<Member, Tenant>`
 - `FiniteMap<Tenant, Plan>`
 - combined guards using relation and map membership
+- shared-state checks that cross membership and plan domains in one focused
+  review surface
 - strict counterexample generation for cross-tenant regressions
 
 Run it with:

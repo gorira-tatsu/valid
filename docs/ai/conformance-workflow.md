@@ -32,6 +32,62 @@ Useful MCP tools:
 - `valid_contract_check`
 - `valid_explain`
 
+## Rust-native harnesses
+
+If your SUT already lives in Rust, you do not need to shell out to an external
+runner. `valid::conformance` now exposes a `RustConformanceHarness` trait and
+`run_rust_conformance(...)` helper so you can drive a `TestVector` directly in
+process.
+
+Minimal shape:
+
+```rust
+use std::collections::BTreeMap;
+use valid::{
+    conformance::{run_rust_conformance, RustConformanceHarness},
+    ir::Value,
+};
+
+struct CounterHarness {
+    x: u64,
+}
+
+impl RustConformanceHarness for CounterHarness {
+    fn harness_name(&self) -> &'static str {
+        "counter-harness"
+    }
+
+    fn apply_action(
+        &mut self,
+        step: &valid::testgen::VectorActionStep,
+    ) -> Result<BTreeMap<String, Value>, String> {
+        match step.action_id.as_str() {
+            "Inc" => {
+                self.x += 1;
+                Ok(BTreeMap::from([("x".into(), Value::UInt(self.x))]))
+            }
+            other => Err(format!("unknown action `{other}`")),
+        }
+    }
+
+    fn property_holds(&self, property_id: &str) -> Result<Option<bool>, String> {
+        match property_id {
+            "P_SAFE" => Ok(Some(self.x <= 2)),
+            _ => Ok(None),
+        }
+    }
+}
+
+let report = run_rust_conformance(&vector, &mut CounterHarness { x: 0 });
+assert_eq!(report.status, "PASS");
+```
+
+Use the external `--runner` flow when:
+
+- the SUT is not written in Rust
+- the comparison boundary is a separate process or service
+- you want stdin/stdout compatibility across languages
+
 ## What a good conformance review records
 
 - which model and property set were used

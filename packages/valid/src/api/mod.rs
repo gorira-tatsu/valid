@@ -364,6 +364,7 @@ pub struct TestgenResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestgenVectorSummary {
     pub vector_id: String,
+    pub run_id: String,
     pub strictness: String,
     pub derivation: String,
     pub source_kind: String,
@@ -1647,6 +1648,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .map(|vector| TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
+                run_id: vector.run_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
@@ -2897,7 +2899,7 @@ fn maintainability_findings(inspect: &InspectResponse, source: Option<&str>) -> 
                 oversize_parts.join(", ")
             ),
             Some(
-                "split the model into smaller bounded contexts, move repeated logic into predicates, or separate setup-only behavior from business transitions"
+                "split the model into smaller bounded contexts, move repeated logic into predicates, separate setup-only behavior from business transitions, or move shared-state cross-domain rules into a dedicated integration model"
                     .to_string(),
             ),
             None,
@@ -2921,7 +2923,7 @@ fn maintainability_findings(inspect: &InspectResponse, source: Option<&str>) -> 
                 "setup transitions dominate the model structure ({setup_count} of {transition_count} transitions are marked setup)"
             ),
             Some(
-                "move bootstrap-only paths into scenarios or fixtures so business flow coverage and review stay focused"
+                "move bootstrap-only paths into scenarios or fixtures so business flow coverage stays focused; if the remaining question is cross-domain shared state, keep that review in a small integration model"
                     .to_string(),
             ),
             None,
@@ -2942,7 +2944,7 @@ fn maintainability_findings(inspect: &InspectResponse, source: Option<&str>) -> 
                 condition_summaries.join(", ")
             ),
             Some(
-                "extract the repeated expression into predicates: so guards, scenarios, and properties share one name"
+                "extract the repeated expression into predicates so standalone and integration models can share one reviewable name for the same condition"
                     .to_string(),
             ),
             repeated_conditions.first().map(|(expr, _)| expr.clone()),
@@ -4476,19 +4478,34 @@ mod tests {
             .iter()
             .any(|finding| finding.category == "maintainability"
                 && finding.code == "oversized_model"
-                && finding.severity == "warn"));
+                && finding.severity == "warn"
+                && finding
+                    .suggestion
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("integration model")));
         assert!(lint
             .findings
             .iter()
             .any(|finding| finding.category == "maintainability"
                 && finding.code == "setup_heavy_model"
-                && finding.severity == "warn"));
+                && finding.severity == "warn"
+                && finding
+                    .suggestion
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("integration model")));
         assert!(lint
             .findings
             .iter()
             .any(|finding| finding.category == "maintainability"
                 && finding.code == "repeated_condition_without_predicate"
-                && finding.severity == "info"));
+                && finding.severity == "info"
+                && finding
+                    .suggestion
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("standalone and integration models")));
         let rendered = render_lint_json(&lint);
         assert!(rendered.contains("\"category\":\"capability\""));
         assert!(rendered.contains("\"category\":\"maintainability\""));

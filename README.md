@@ -16,8 +16,10 @@ the primary one.
 User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
-[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). The action
+evolution plan lives in
+[docs/dsl/parameterized-action-roadmap.md](./docs/dsl/parameterized-action-roadmap.md).
+AI-assisted authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
 [docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
 and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
 file-splitting guidance lives in
@@ -25,6 +27,8 @@ file-splitting guidance lives in
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
+Artifact inventory and run-history guidance lives in
+[docs/artifacts.md](./docs/artifacts.md).
 
 The product story is now:
 
@@ -146,9 +150,18 @@ Reusable CI workflow templates for `inspect`, `check`, `generate-tests`,
 [docs/ci/README.md](docs/ci/README.md). The repository validates them against a
 fixture project in
 [`tests/fixtures/projects/ci_template_project/`](tests/fixtures/projects/ci_template_project/).
+For Rust implementations that live in the same process, the library also
+exposes `valid::conformance::RustConformanceHarness` and
+`run_rust_conformance(...)`, so model-derived vectors can be checked without an
+external stdin/stdout runner. The external `valid conformance --runner ...`
+path remains the compatibility path for non-Rust or process-boundary SUTs.
 Keep the registry file thin and move real model logic into `src/models/` or
 another explicit module tree. The recommended project layout is documented in
 [docs/project-organization.md](./docs/project-organization.md).
+That guide now also defines the pre-compose integration-model pattern:
+standalone models for local rules, dedicated integration models for shared-state
+cross-domain checks, and contract-only checks when the uncertainty is in the
+implementation boundary instead of model composition.
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
 

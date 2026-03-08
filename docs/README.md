@@ -18,10 +18,12 @@
   critical properties close to the source.
 - [Project Organization Guide](./project-organization.md)
   Recommended layout for model files, registries, shared types, integration
-  models, and generated artifacts.
+  models, generated artifacts, and the pre-compose integration-model pattern.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
+- [Artifact Inventory and Run History](./artifacts.md)
+  Artifact index layout, run-history files, and CLI listing surfaces.
 - [Rust DSL Guide](./dsl/README.md)
   User-facing documentation for writing and operating models with the `valid`
   Rust DSL.
@@ -29,6 +31,9 @@
   Current implemented surface and semantic subset for the Rust DSL.
 - [DSL Language Evolution](./dsl/language-evolution.md)
   Design notes for proposed and in-flight language features.
+- [Parameterized Action Roadmap](./dsl/parameterized-action-roadmap.md)
+  Incremental plan for moving from enum-only actions to bounded parameterized
+  actions without encouraging action explosion in docs or examples.
 - [ADR-0001: `valid_model!` Frontend Decision](./adr/0001-valid-model-frontend.md)
   Decision record for keeping `valid_model!` on the `macro_rules!` track unless
   A1 fails to recover `rust-analyzer` compatibility.

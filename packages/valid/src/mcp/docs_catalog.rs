@@ -431,6 +431,33 @@ pub(crate) const DOCS: &[DocEntry] = &[
         body_markdown: include_str!("../../../../docs/architecture.md"),
     },
     DocEntry {
+        id: "artifact-inventory-guide",
+        title: "Artifact Inventory and Run History",
+        kind: "operations",
+        audience: "humans-and-agents",
+        recommended_for: &["artifacts", "run-history", "automation"],
+        canonical_entry: false,
+        summary: "Guide to the artifact index, run-history files, and CLI listing surfaces used to correlate valid outputs across runs.",
+        key_points: &[
+            "Documents artifacts/index.json and artifacts/run-history.json",
+            "Explains how valid and cargo valid expose artifact inventory listings",
+        ],
+        canonical_rules: &[
+            "Treat artifact inventory as operational metadata, not normative model semantics",
+        ],
+        supported_features: &[
+            "Artifact index layout",
+            "Run-history conventions",
+            "CLI inventory commands",
+        ],
+        unsupported_features: &[
+            "Modeling syntax reference",
+        ],
+        related_docs: &["docs-index", "install-guide", "architecture-note"],
+        source_path: "docs/artifacts.md",
+        body_markdown: include_str!("../../../../docs/artifacts.md"),
+    },
+    DocEntry {
         id: "dsl-guide",
         title: "Rust DSL Guide",
         kind: "guide",

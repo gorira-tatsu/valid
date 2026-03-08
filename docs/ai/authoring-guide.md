@@ -20,6 +20,7 @@ Related documents:
 - [Project Organization Guide](../project-organization.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
+- [Parameterized Action Roadmap](../dsl/parameterized-action-roadmap.md)
 
 ## What `valid` is
 
@@ -154,6 +155,9 @@ Useful expressions:
   capability reasons, plus advisory maintainability findings such as missing
   model intent comments, repeated conditions, oversized models, and setup-heavy
   structure
+- for cross-domain reviews, use lint guidance to decide whether a big model
+  should stay standalone, split into smaller standalone models, or move the
+  shared-state question into a dedicated integration model
 - declarative models with unsupported expressions will be flagged by readiness
   and may fail solver-backed verification
 
@@ -197,6 +201,10 @@ If your MCP client supports prompts, prefer this sequence:
 - Use `.valid` mode only for compatibility fixtures or frontend tests.
 - Always give bounded integer ranges.
 - Add `reads` and `writes` metadata to every action variant when possible.
+- Do not teach or generate action explosion for business inputs. If the
+  conceptual action is "one action plus a bounded choice", document that intent
+  and keep any duplicated variants limited to tiny teaching fixtures until
+  bounded parameterized actions exist.
 - Keep a short source-adjacent comment above each long-lived model explaining
   summary, scope, assumptions, critical properties, and scenario intent.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
@@ -209,6 +217,9 @@ If your MCP client supports prompts, prefer this sequence:
   local and inspect output stays readable.
 - Start each long-lived model with a short intent comment, then keep the model
   vocabulary explicit with named predicates, scenarios, and clear action ids.
+- For integration models, document the participating subdomains, the shared
+  state being restated, and the cross-domain properties that justify the extra
+  model. This works today without full compose syntax.
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.
