@@ -267,6 +267,83 @@ pub struct ExplainResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewAssumption {
+    pub kind: String,
+    pub message: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewAmbiguity {
+    pub kind: String,
+    pub severity: String,
+    pub message: String,
+    pub property_id: Option<String>,
+    pub evidence_id: Option<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewDeadAction {
+    pub action_id: String,
+    pub evidence_basis: String,
+    pub reason: String,
+    pub observed_trace_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewCandidateDisagreement {
+    pub property_id: String,
+    pub targets: Vec<String>,
+    pub reason: String,
+    pub conflicting_signals: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewPropertyReport {
+    pub property_id: String,
+    pub property_kind: String,
+    pub status: String,
+    pub assurance_level: String,
+    pub summary: String,
+    pub vacuous: bool,
+    pub evidence_id: Option<String>,
+    pub trace_steps: usize,
+    pub failing_action_id: Option<String>,
+    pub action_sequence: Vec<String>,
+    pub ambiguity_flags: Vec<String>,
+    pub candidate_causes: Vec<ExplainCandidateCause>,
+    pub repair_targets: Vec<ExplainRepairTargetHint>,
+    pub next_steps: Vec<String>,
+    pub confidence: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewSummary {
+    pub headline: String,
+    pub property_count: usize,
+    pub failing_properties: Vec<String>,
+    pub unknown_properties: Vec<String>,
+    pub vacuous_properties: Vec<String>,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub status: String,
+    pub model_id: String,
+    pub selected_property_id: Option<String>,
+    pub assumptions: Vec<ReviewAssumption>,
+    pub ambiguities: Vec<ReviewAmbiguity>,
+    pub dead_actions: Vec<ReviewDeadAction>,
+    pub candidate_disagreements: Vec<ReviewCandidateDisagreement>,
+    pub property_reports: Vec<ReviewPropertyReport>,
+    pub review_summary: ReviewSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFinding {
     pub category: String,
     pub severity: String,
@@ -1401,6 +1478,413 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
     }
 }
 
+pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErrorEnvelope> {
+    let verification_source = strip_line_comment_prefixes(&request.source);
+    let inspect_request = InspectRequest {
+        request_id: format!("{}-inspect", request.request_id),
+        source_name: request.source_name.clone(),
+        source: verification_source.clone(),
+    };
+    let inspect = inspect_source(&inspect_request).map_err(|diagnostics| CheckErrorEnvelope {
+        manifest: build_run_manifest(
+            request.request_id.clone(),
+            format!(
+                "run-{}",
+            stable_hash_hex(&request.request_id).replace("sha256:", "")
+            ),
+            stable_hash_hex(&verification_source),
+            "sha256:unknown".to_string(),
+            crate::engine::BackendKind::Explicit,
+            env!("CARGO_PKG_VERSION").to_string(),
+            request.seed,
+        ),
+        status: crate::engine::ErrorStatus::Error,
+        assurance_level: crate::engine::AssuranceLevel::Incomplete,
+        diagnostics,
+    })?;
+    let lint = lint_from_inspect_and_source(&inspect, Some(&request.source));
+    let assumptions = extract_review_assumptions(&request.source);
+    let mut ambiguities = extract_source_ambiguities(&request.source);
+    let property_ids = request
+        .property_id
+        .clone()
+        .map(|property_id| vec![property_id])
+        .unwrap_or_else(|| inspect.properties.clone());
+    let mut property_reports = Vec::new();
+    let mut observed_actions = BTreeSet::new();
+    let mut evidence_ids = Vec::new();
+    let mut trace_count = 0usize;
+
+    for property_id in &property_ids {
+        let property_request = CheckRequest {
+            request_id: format!("{}-{property_id}", request.request_id),
+            source_name: request.source_name.clone(),
+            source: verification_source.clone(),
+            property_id: Some(property_id.clone()),
+            scenario_id: request.scenario_id.clone(),
+            seed: request.seed,
+            backend: request.backend.clone(),
+            solver_executable: request.solver_executable.clone(),
+            solver_args: request.solver_args.clone(),
+        };
+        let outcome = check_source(&property_request);
+        let CheckOutcome::Completed(result) = outcome else {
+            let CheckOutcome::Errored(error) = outcome else {
+                unreachable!();
+            };
+            return Err(error);
+        };
+        let trace_steps = result.trace.as_ref().map(|trace| trace.steps.len()).unwrap_or(0);
+        let mut action_sequence = Vec::new();
+        let mut ambiguity_flags = Vec::new();
+        let mut candidate_causes = Vec::new();
+        let mut repair_targets = Vec::new();
+        let mut next_steps = Vec::new();
+        let mut confidence = None;
+        let failing_action_id = result
+            .trace
+            .as_ref()
+            .and_then(|trace| trace.steps.last())
+            .and_then(|step| step.action_id.clone());
+
+        if let Some(trace) = &result.trace {
+            trace_count += 1;
+            for step in &trace.steps {
+                if let Some(action_id) = &step.action_id {
+                    observed_actions.insert(action_id.clone());
+                    action_sequence.push(action_id.clone());
+                }
+            }
+        }
+        if result.property_result.vacuous {
+            push_unique(&mut ambiguity_flags, "vacuous_property".to_string());
+            ambiguities.push(ReviewAmbiguity {
+                kind: "vacuity".to_string(),
+                severity: "warn".to_string(),
+                message: format!(
+                    "property {} held vacuously; the selected scope or scenario never reached the intended review slice",
+                    result.property_result.property_id
+                ),
+                property_id: Some(result.property_result.property_id.clone()),
+                evidence_id: result.property_result.evidence_id.clone(),
+                source: "verification".to_string(),
+            });
+        }
+        if result.status == crate::engine::RunStatus::Unknown {
+            push_unique(&mut ambiguity_flags, "unknown_result".to_string());
+            ambiguities.push(ReviewAmbiguity {
+                kind: "unknown_result".to_string(),
+                severity: "warn".to_string(),
+                message: result
+                    .property_result
+                    .unknown_reason
+                    .map(|reason| format!(
+                        "property {} remained UNKNOWN because {}",
+                        result.property_result.property_id,
+                        review_unknown_reason_label(reason)
+                    ))
+                    .unwrap_or_else(|| {
+                        format!(
+                            "property {} remained UNKNOWN and needs reviewer follow-up",
+                            result.property_result.property_id
+                        )
+                    }),
+                property_id: Some(result.property_result.property_id.clone()),
+                evidence_id: result.property_result.evidence_id.clone(),
+                source: "verification".to_string(),
+            });
+        }
+        if let Some(evidence_id) = &result.property_result.evidence_id {
+            push_unique(&mut evidence_ids, evidence_id.clone());
+        }
+        if result.status == crate::engine::RunStatus::Fail {
+            let explain = explain_source(&property_request)?;
+            candidate_causes = explain.candidate_causes.clone();
+            repair_targets = explain.repair_targets.clone();
+            next_steps = explain.next_steps.clone();
+            confidence = Some(explain.confidence);
+            if explain.review_context.vacuous {
+                push_unique(&mut ambiguity_flags, "scope_or_scenario_mismatch".to_string());
+            }
+            if explain
+                .repair_targets
+                .iter()
+                .any(|target| target.target == "requirement_fix")
+            {
+                push_unique(&mut ambiguity_flags, "requirement_interpretation".to_string());
+                ambiguities.push(ReviewAmbiguity {
+                    kind: "requirement_interpretation".to_string(),
+                    severity: "info".to_string(),
+                    message: format!(
+                        "property {} has competing requirement-level and implementation/model-level repair candidates",
+                        explain.property_id
+                    ),
+                    property_id: Some(explain.property_id.clone()),
+                    evidence_id: Some(explain.evidence_id.clone()),
+                    source: "explain".to_string(),
+                });
+            }
+        } else {
+            next_steps.push("review the model intent and property wording before expanding the model".to_string());
+            if result.property_result.vacuous {
+                next_steps.push(
+                    "confirm the scenario or property scope matches the intended requirement slice"
+                        .to_string(),
+                );
+            }
+        }
+
+        property_reports.push(ReviewPropertyReport {
+            property_id: result.property_result.property_id.clone(),
+            property_kind: property_kind_label(&result.property_result.property_kind).to_string(),
+            status: review_status_label(result.status).to_string(),
+            assurance_level: review_assurance_label(result.assurance_level).to_string(),
+            summary: result.property_result.summary.clone(),
+            vacuous: result.property_result.vacuous,
+            evidence_id: result.property_result.evidence_id.clone(),
+            trace_steps,
+            failing_action_id,
+            action_sequence,
+            ambiguity_flags,
+            candidate_causes,
+            repair_targets,
+            next_steps,
+            confidence,
+        });
+    }
+
+    for finding in lint.findings {
+        if finding.code == "missing_model_documentation" {
+            ambiguities.push(ReviewAmbiguity {
+                kind: "missing_review_context".to_string(),
+                severity: finding.severity,
+                message: finding.message,
+                property_id: None,
+                evidence_id: None,
+                source: "lint".to_string(),
+            });
+        }
+    }
+
+    let dead_actions = inspect
+        .actions
+        .iter()
+        .filter(|action_id| !observed_actions.contains(*action_id))
+        .map(|action_id| ReviewDeadAction {
+            action_id: action_id.clone(),
+            evidence_basis: "available_trace_evidence".to_string(),
+            reason: if trace_count == 0 {
+                "no trace evidence executed this action in the reviewed run set".to_string()
+            } else {
+                format!(
+                    "action did not appear in any of the {trace_count} collected trace(s)"
+                )
+            },
+            observed_trace_count: trace_count,
+        })
+        .collect::<Vec<_>>();
+    let candidate_disagreements = property_reports
+        .iter()
+        .filter_map(build_candidate_disagreement)
+        .collect::<Vec<_>>();
+    let failing_properties = property_reports
+        .iter()
+        .filter(|report| report.status == "FAIL")
+        .map(|report| report.property_id.clone())
+        .collect::<Vec<_>>();
+    let unknown_properties = property_reports
+        .iter()
+        .filter(|report| report.status == "UNKNOWN")
+        .map(|report| report.property_id.clone())
+        .collect::<Vec<_>>();
+    let vacuous_properties = property_reports
+        .iter()
+        .filter(|report| report.vacuous)
+        .map(|report| report.property_id.clone())
+        .collect::<Vec<_>>();
+    let headline = if !failing_properties.is_empty() {
+        format!(
+            "review flagged {} failing propert{} for {}",
+            failing_properties.len(),
+            if failing_properties.len() == 1 { "y" } else { "ies" },
+            inspect.model_id
+        )
+    } else if !unknown_properties.is_empty() {
+        format!(
+            "review found {} unknown propert{} for {}",
+            unknown_properties.len(),
+            if unknown_properties.len() == 1 { "y" } else { "ies" },
+            inspect.model_id
+        )
+    } else if !vacuous_properties.is_empty() {
+        format!(
+            "review found {} vacuous propert{} for {}",
+            vacuous_properties.len(),
+            if vacuous_properties.len() == 1 { "y" } else { "ies" },
+            inspect.model_id
+        )
+    } else {
+        format!("review found no blocking validity gaps for {}", inspect.model_id)
+    };
+
+    Ok(ReviewResponse {
+        schema_version: "1.0.0".to_string(),
+        request_id: request.request_id.clone(),
+        status: "ok".to_string(),
+        model_id: inspect.model_id,
+        selected_property_id: request.property_id.clone(),
+        assumptions,
+        ambiguities,
+        dead_actions,
+        candidate_disagreements,
+        property_reports,
+        review_summary: ReviewSummary {
+            headline,
+            property_count: property_ids.len(),
+            failing_properties,
+            unknown_properties,
+            vacuous_properties,
+            evidence_ids,
+        },
+    })
+}
+
+fn strip_line_comment_prefixes(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn extract_review_assumptions(source: &str) -> Vec<ReviewAssumption> {
+    extract_comment_lines(source)
+        .into_iter()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("assumption") || lower.starts_with("assume ") {
+                Some(ReviewAssumption {
+                    kind: "source_comment".to_string(),
+                    message: line,
+                    source: "model_source".to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn extract_source_ambiguities(source: &str) -> Vec<ReviewAmbiguity> {
+    extract_comment_lines(source)
+        .into_iter()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("ambigu")
+                || lower.contains("unclear")
+                || lower.contains("todo")
+                || lower.contains("tbd")
+                || lower.contains("question")
+                || line.contains('?')
+            {
+                Some(ReviewAmbiguity {
+                    kind: "source_comment".to_string(),
+                    severity: "info".to_string(),
+                    message: line,
+                    property_id: None,
+                    evidence_id: None,
+                    source: "model_source".to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn extract_comment_lines(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .filter_map(|raw_line| {
+            let trimmed = raw_line.trim();
+            let stripped = trimmed
+                .strip_prefix("//!")
+                .or_else(|| trimmed.strip_prefix("///"))
+                .or_else(|| trimmed.strip_prefix("//"))
+                .or_else(|| trimmed.strip_prefix("# "))?;
+            let comment = stripped.trim();
+            if comment.is_empty() {
+                None
+            } else {
+                Some(comment.to_string())
+            }
+        })
+        .collect()
+}
+
+fn review_unknown_reason_label(reason: crate::engine::UnknownReason) -> &'static str {
+    match reason {
+        crate::engine::UnknownReason::StateLimitReached => "state_limit_reached",
+        crate::engine::UnknownReason::TimeLimitReached => "time_limit_reached",
+        crate::engine::UnknownReason::EngineAborted => "engine_aborted",
+    }
+}
+
+fn review_status_label(status: crate::engine::RunStatus) -> &'static str {
+    match status {
+        crate::engine::RunStatus::Pass => "PASS",
+        crate::engine::RunStatus::Fail => "FAIL",
+        crate::engine::RunStatus::Unknown => "UNKNOWN",
+    }
+}
+
+fn review_assurance_label(level: crate::engine::AssuranceLevel) -> &'static str {
+    match level {
+        crate::engine::AssuranceLevel::Complete => "COMPLETE",
+        crate::engine::AssuranceLevel::Bounded => "BOUNDED",
+        crate::engine::AssuranceLevel::Incomplete => "INCOMPLETE",
+    }
+}
+
+fn build_candidate_disagreement(
+    report: &ReviewPropertyReport,
+) -> Option<ReviewCandidateDisagreement> {
+    let mut targets = report
+        .repair_targets
+        .iter()
+        .map(|target| target.target.clone())
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    if targets.len() < 2
+        && report
+            .ambiguity_flags
+            .iter()
+            .any(|flag| flag == "requirement_interpretation")
+    {
+        push_unique(&mut targets, "requirement_fix".to_string());
+        if !targets.iter().any(|target| target == "model_fix") {
+            push_unique(&mut targets, "model_fix".to_string());
+        }
+    }
+    if targets.len() < 2 {
+        return None;
+    }
+    Some(ReviewCandidateDisagreement {
+        property_id: report.property_id.clone(),
+        reason: format!(
+            "review signals span multiple repair surfaces for property {}",
+            report.property_id
+        ),
+        conflicting_signals: report
+            .repair_targets
+            .iter()
+            .map(|target| format!("{}: {}", target.target, target.reason))
+            .collect(),
+        targets,
+    })
+}
+
 pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, CheckErrorEnvelope> {
     let property_id = request.property_id.clone();
     let compiled =
@@ -2409,6 +2893,227 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
         }
     }
     out.push_str(&format!("confidence: {:.2}\n", response.confidence));
+    out
+}
+
+pub fn render_review_json(response: &ReviewResponse) -> String {
+    format!(
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"selected_property_id\":{},\"assumptions\":[{}],\"ambiguities\":[{}],\"dead_actions\":[{}],\"candidate_disagreements\":[{}],\"property_reports\":[{}],\"review_summary\":{}}}",
+        escape_json(&response.schema_version),
+        escape_json(&response.request_id),
+        escape_json(&response.status),
+        escape_json(&response.model_id),
+        render_optional_string(response.selected_property_id.as_deref()),
+        response
+            .assumptions
+            .iter()
+            .map(|assumption| format!(
+                "{{\"kind\":\"{}\",\"message\":\"{}\",\"source\":\"{}\"}}",
+                escape_json(&assumption.kind),
+                escape_json(&assumption.message),
+                escape_json(&assumption.source)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        response
+            .ambiguities
+            .iter()
+            .map(|ambiguity| format!(
+                "{{\"kind\":\"{}\",\"severity\":\"{}\",\"message\":\"{}\",\"property_id\":{},\"evidence_id\":{},\"source\":\"{}\"}}",
+                escape_json(&ambiguity.kind),
+                escape_json(&ambiguity.severity),
+                escape_json(&ambiguity.message),
+                render_optional_string(ambiguity.property_id.as_deref()),
+                render_optional_string(ambiguity.evidence_id.as_deref()),
+                escape_json(&ambiguity.source)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        response
+            .dead_actions
+            .iter()
+            .map(|dead_action| format!(
+                "{{\"action_id\":\"{}\",\"evidence_basis\":\"{}\",\"reason\":\"{}\",\"observed_trace_count\":{}}}",
+                escape_json(&dead_action.action_id),
+                escape_json(&dead_action.evidence_basis),
+                escape_json(&dead_action.reason),
+                dead_action.observed_trace_count
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        response
+            .candidate_disagreements
+            .iter()
+            .map(|disagreement| format!(
+                "{{\"property_id\":\"{}\",\"targets\":{},\"reason\":\"{}\",\"conflicting_signals\":{}}}",
+                escape_json(&disagreement.property_id),
+                render_string_array(&disagreement.targets),
+                escape_json(&disagreement.reason),
+                render_string_array(&disagreement.conflicting_signals)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        response
+            .property_reports
+            .iter()
+            .map(|report| format!(
+                "{{\"property_id\":\"{}\",\"property_kind\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"summary\":\"{}\",\"vacuous\":{},\"evidence_id\":{},\"trace_steps\":{},\"failing_action_id\":{},\"action_sequence\":{},\"ambiguity_flags\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"next_steps\":{},\"confidence\":{}}}",
+                escape_json(&report.property_id),
+                escape_json(&report.property_kind),
+                escape_json(&report.status),
+                escape_json(&report.assurance_level),
+                escape_json(&report.summary),
+                report.vacuous,
+                render_optional_string(report.evidence_id.as_deref()),
+                report.trace_steps,
+                render_optional_string(report.failing_action_id.as_deref()),
+                render_string_array(&report.action_sequence),
+                render_string_array(&report.ambiguity_flags),
+                report
+                    .candidate_causes
+                    .iter()
+                    .map(|cause| format!(
+                        "{{\"kind\":\"{}\",\"message\":\"{}\"}}",
+                        escape_json(&cause.kind),
+                        escape_json(&cause.message)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                report
+                    .repair_targets
+                    .iter()
+                    .map(|target| format!(
+                        "{{\"target\":\"{}\",\"reason\":\"{}\",\"priority\":\"{}\",\"action_id\":{},\"fields\":{}}}",
+                        escape_json(&target.target),
+                        escape_json(&target.reason),
+                        escape_json(&target.priority),
+                        render_optional_string(target.action_id.as_deref()),
+                        render_string_array(&target.fields)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                render_string_array(&report.next_steps),
+                report
+                    .confidence
+                    .map(|confidence| confidence.to_string())
+                    .unwrap_or_else(|| "null".to_string())
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        render_review_summary_json(&response.review_summary)
+    )
+}
+
+pub fn render_review_text(response: &ReviewResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("model_id: {}\n", response.model_id));
+    out.push_str(&format!("headline: {}\n", response.review_summary.headline));
+    if let Some(property_id) = &response.selected_property_id {
+        out.push_str(&format!("selected_property_id: {}\n", property_id));
+    }
+    if !response.assumptions.is_empty() {
+        out.push_str("assumptions:\n");
+        for assumption in &response.assumptions {
+            out.push_str(&format!(
+                "- [{}:{}] {}\n",
+                assumption.source, assumption.kind, assumption.message
+            ));
+        }
+    }
+    if !response.ambiguities.is_empty() {
+        out.push_str("ambiguities:\n");
+        for ambiguity in &response.ambiguities {
+            out.push_str(&format!(
+                "- [{}:{}] {}",
+                ambiguity.severity, ambiguity.kind, ambiguity.message
+            ));
+            if let Some(property_id) = &ambiguity.property_id {
+                out.push_str(&format!(" (property: {})", property_id));
+            }
+            if let Some(evidence_id) = &ambiguity.evidence_id {
+                out.push_str(&format!(" (evidence: {})", evidence_id));
+            }
+            out.push_str(&format!(" [source: {}]\n", ambiguity.source));
+        }
+    }
+    if !response.dead_actions.is_empty() {
+        out.push_str("dead_actions:\n");
+        for dead_action in &response.dead_actions {
+            out.push_str(&format!(
+                "- {}: {} [{} traces via {}]\n",
+                dead_action.action_id,
+                dead_action.reason,
+                dead_action.observed_trace_count,
+                dead_action.evidence_basis
+            ));
+        }
+    }
+    if !response.candidate_disagreements.is_empty() {
+        out.push_str("candidate_disagreements:\n");
+        for disagreement in &response.candidate_disagreements {
+            out.push_str(&format!(
+                "- {}: {} (targets: {})\n",
+                disagreement.property_id,
+                disagreement.reason,
+                render_csv_or_none(&disagreement.targets)
+            ));
+        }
+    }
+    if !response.property_reports.is_empty() {
+        out.push_str("property_reports:\n");
+        for report in &response.property_reports {
+            out.push_str(&format!(
+                "- {} [{} {}] {}\n",
+                report.property_id, report.status, report.assurance_level, report.summary
+            ));
+            out.push_str(&format!("  vacuous: {}\n", report.vacuous));
+            out.push_str(&format!("  trace_steps: {}\n", report.trace_steps));
+            if let Some(action_id) = &report.failing_action_id {
+                out.push_str(&format!("  failing_action_id: {}\n", action_id));
+            }
+            if !report.ambiguity_flags.is_empty() {
+                out.push_str(&format!(
+                    "  ambiguity_flags: {}\n",
+                    report.ambiguity_flags.join(", ")
+                ));
+            }
+            if !report.next_steps.is_empty() {
+                out.push_str("  next_steps:\n");
+                for step in &report.next_steps {
+                    out.push_str(&format!("    - {}\n", step));
+                }
+            }
+        }
+    }
+    out.push_str("review_summary:\n");
+    out.push_str(&format!(
+        "  property_count: {}\n",
+        response.review_summary.property_count
+    ));
+    if !response.review_summary.failing_properties.is_empty() {
+        out.push_str(&format!(
+            "  failing_properties: {}\n",
+            response.review_summary.failing_properties.join(", ")
+        ));
+    }
+    if !response.review_summary.unknown_properties.is_empty() {
+        out.push_str(&format!(
+            "  unknown_properties: {}\n",
+            response.review_summary.unknown_properties.join(", ")
+        ));
+    }
+    if !response.review_summary.vacuous_properties.is_empty() {
+        out.push_str(&format!(
+            "  vacuous_properties: {}\n",
+            response.review_summary.vacuous_properties.join(", ")
+        ));
+    }
+    if !response.review_summary.evidence_ids.is_empty() {
+        out.push_str(&format!(
+            "  evidence_ids: {}\n",
+            response.review_summary.evidence_ids.join(", ")
+        ));
+    }
     out
 }
 
@@ -3937,6 +4642,79 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
     Ok(())
 }
 
+pub fn validate_review_response(response: &ReviewResponse) -> Result<(), String> {
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
+    require_non_empty(&response.status, "status")?;
+    require_non_empty(&response.model_id, "model_id")?;
+    require_non_empty(&response.review_summary.headline, "review_summary.headline")?;
+    for assumption in &response.assumptions {
+        require_non_empty(&assumption.kind, "assumptions[].kind")?;
+        require_non_empty(&assumption.message, "assumptions[].message")?;
+        require_non_empty(&assumption.source, "assumptions[].source")?;
+    }
+    for ambiguity in &response.ambiguities {
+        require_non_empty(&ambiguity.kind, "ambiguities[].kind")?;
+        require_non_empty(&ambiguity.severity, "ambiguities[].severity")?;
+        require_non_empty(&ambiguity.message, "ambiguities[].message")?;
+        require_non_empty(&ambiguity.source, "ambiguities[].source")?;
+    }
+    for dead_action in &response.dead_actions {
+        require_non_empty(&dead_action.action_id, "dead_actions[].action_id")?;
+        require_non_empty(
+            &dead_action.evidence_basis,
+            "dead_actions[].evidence_basis",
+        )?;
+        require_non_empty(&dead_action.reason, "dead_actions[].reason")?;
+    }
+    for disagreement in &response.candidate_disagreements {
+        require_non_empty(
+            &disagreement.property_id,
+            "candidate_disagreements[].property_id",
+        )?;
+        require_non_empty(
+            &disagreement.reason,
+            "candidate_disagreements[].reason",
+        )?;
+        if disagreement.targets.len() < 2 {
+            return Err(
+                "candidate_disagreements[].targets must contain at least two entries".to_string(),
+            );
+        }
+        for target in &disagreement.targets {
+            require_non_empty(target, "candidate_disagreements[].targets[]")?;
+        }
+    }
+    for report in &response.property_reports {
+        require_non_empty(&report.property_id, "property_reports[].property_id")?;
+        require_non_empty(&report.property_kind, "property_reports[].property_kind")?;
+        require_non_empty(&report.status, "property_reports[].status")?;
+        require_non_empty(
+            &report.assurance_level,
+            "property_reports[].assurance_level",
+        )?;
+        require_non_empty(&report.summary, "property_reports[].summary")?;
+    }
+    Ok(())
+}
+
+fn render_review_summary_json(summary: &ReviewSummary) -> String {
+    format!(
+        "{{\"headline\":\"{}\",\"property_count\":{},\"failing_properties\":{},\"unknown_properties\":{},\"vacuous_properties\":{},\"evidence_ids\":{}}}",
+        escape_json(&summary.headline),
+        summary.property_count,
+        render_string_array(&summary.failing_properties),
+        render_string_array(&summary.unknown_properties),
+        render_string_array(&summary.vacuous_properties),
+        render_string_array(&summary.evidence_ids)
+    )
+}
+
+pub fn validate_review_request(request: &CheckRequest) -> Result<(), String> {
+    validate_check_request(request)
+}
+
+
 fn render_path_json(path: &Path) -> String {
     let mut out = String::from("{\"decisions\":[");
     for (index, decision) in path.decisions.iter().enumerate() {
@@ -4111,14 +4889,15 @@ mod tests {
         capabilities_response, check_source, explain_source, explicit_analysis_warning,
         inspect_source, lint_from_inspect, lint_from_inspect_and_source, lint_source,
         migration_from_inspect, minimize_source, orchestrate_source, render_inspect_json,
-        render_inspect_text, render_lint_json, testgen_source, validate_capabilities_request,
+        render_inspect_text, render_lint_json, render_review_json, render_review_text,
+        review_source, testgen_source, validate_capabilities_request,
         validate_capabilities_response, validate_check_request, validate_explain_request,
         validate_explain_response, validate_inspect_request, validate_inspect_response,
         validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
-        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
-        InspectAction, InspectCapabilities, InspectProperty, InspectRequest, InspectResponse,
-        InspectTransition, InspectTransitionUpdate, MinimizeRequest, OrchestrateRequest,
-        TestgenRequest,
+        validate_review_response, validate_testgen_request, validate_testgen_response,
+        CapabilitiesRequest, CheckRequest, InspectAction, InspectCapabilities, InspectProperty,
+        InspectRequest, InspectResponse, InspectTransition, InspectTransitionUpdate,
+        MinimizeRequest, OrchestrateRequest, TestgenRequest,
     };
 
     fn cleanup_generated_files(paths: &[String]) {
@@ -4309,6 +5088,60 @@ mod tests {
             result.property_result.property_kind,
             crate::ir::PropertyKind::DeadlockFreedom
         );
+    }
+
+    #[test]
+    fn review_reports_ambiguities_dead_actions_and_candidate_disagreements() {
+        let source = r#"model Reviewable
+state:
+  ready: bool
+  recovered: bool
+  detail_visible: bool
+init:
+  ready = false
+  recovered = false
+  detail_visible = false
+action Recover:
+  pre: ready == false
+  post:
+    ready = true
+    recovered = true
+property P_RECOVERY_VISIBLE:
+  invariant: ready == false || detail_visible == true
+"#;
+        let response = review_source(&CheckRequest {
+            request_id: "req-review".to_string(),
+            source_name: "reviewable.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_RECOVERY_VISIBLE".to_string()),
+            scenario_id: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+            seed: None,
+        })
+        .unwrap();
+        assert_eq!(response.model_id, "Reviewable");
+        assert_eq!(response.review_summary.property_count, 1);
+        assert_eq!(
+            response.review_summary.failing_properties,
+            vec!["P_RECOVERY_VISIBLE"]
+        );
+        assert!(response.assumptions.is_empty());
+        assert!(!response.ambiguities.is_empty());
+        assert!(response
+            .dead_actions
+            .iter()
+            .all(|entry| entry.action_id != "Recover"));
+        assert!(response.candidate_disagreements.len() <= 1);
+        assert!(!response.property_reports[0].next_steps.is_empty());
+        let json = render_review_json(&response);
+        assert!(json.contains("\"candidate_disagreements\""));
+        assert!(json.contains("\"review_summary\""));
+        let text = render_review_text(&response);
+        assert!(text.contains("candidate_disagreements:"));
+        assert!(text.contains("property_reports:"));
+        validate_review_response(&response).unwrap();
     }
 
     #[test]
