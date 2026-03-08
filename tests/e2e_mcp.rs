@@ -633,6 +633,30 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     assert_eq!(deadlock_testgen["vectors"][0]["strategy"], "deadlock");
     assert_eq!(deadlock_testgen["vectors"][0]["source_kind"], "deadlock");
 
+    let enablement_model = temp.path().join("enablement.valid");
+    fs::write(
+        &enablement_model,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Enable:\n  pre: x == 0\n  post:\n    x = 1\naction Target:\n  pre: x == 1\n  post:\n    x = 1\nproperty P_SAFE:\n  invariant: x <= 1\n",
+    )
+    .expect("enablement model should be written");
+    let enablement_testgen = structured_content(client.call_tool(
+        "valid_testgen",
+        json!({
+            "model_file": enablement_model.to_string_lossy().to_string(),
+            "strategy": "enablement",
+            "focus_action_id": "Target"
+        }),
+    ));
+    assert_eq!(enablement_testgen["vectors"][0]["strategy"], "enablement");
+    assert_eq!(
+        enablement_testgen["vectors"][0]["focus_action_id"],
+        "Target"
+    );
+    assert_eq!(
+        enablement_testgen["vectors"][0]["expected_guard_enabled"],
+        true
+    );
+
     let distinguish = structured_content(client.call_tool(
         "valid_distinguish",
         json!({

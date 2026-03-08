@@ -236,6 +236,8 @@ struct TestgenArgs {
     property: Option<String>,
     #[arg(long)]
     strategy: Option<String>,
+    #[arg(long = "focus-action")]
+    focus_action: Option<String>,
     #[arg(long)]
     seed: Option<u64>,
     #[arg(long)]
@@ -508,6 +510,7 @@ fn testgen_to_parsed(args: TestgenArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        focus_action_id: args.focus_action,
         extra: args.strategy,
         ..ParsedArgs::default()
     }
@@ -1612,7 +1615,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
@@ -1627,6 +1630,7 @@ fn cmd_testgen(args: Vec<String>) {
         source: source.clone(),
         property_id: parsed.property_id.clone(),
         strategy,
+        focus_action_id: parsed.focus_action_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1656,7 +1660,7 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.strictness,
@@ -1674,7 +1678,10 @@ fn cmd_testgen(args: Vec<String>) {
                                 .iter()
                                 .map(|s| format!("\"{}\"", s))
                                 .collect::<Vec<_>>()
-                                .join(",")
+                                .join(","),
+                            vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
+                            vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                            vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                         ))
                         .collect::<Vec<_>>()
                         .join(","),
@@ -1705,7 +1712,7 @@ fn cmd_testgen(args: Vec<String>) {
                 println!("generated {} vector(s)", response.vector_ids.len());
                 for vector in &response.vectors {
                     println!(
-                        "  {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={}",
+                        "  {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
                         vector.vector_id,
                         vector.run_id,
                         vector.strictness,
@@ -1721,6 +1728,16 @@ fn cmd_testgen(args: Vec<String>) {
                             "-".to_string()
                         } else {
                             vector.risk_clusters.join(",")
+                        },
+                        vector.focus_action_id.as_deref().unwrap_or("-"),
+                        vector
+                            .expected_guard_enabled
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        if vector.notes.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.notes.join(",")
                         }
                     );
                 }
@@ -2271,6 +2288,11 @@ where
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );
+        } else if arg == "--focus-action" {
+            parsed.focus_action_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(
                 iter.next()
@@ -2286,6 +2308,8 @@ where
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );
+        } else if let Some(value) = arg.strip_prefix("--focus-action=") {
+            parsed.focus_action_id = Some(value.to_string());
         } else if extra_handler(&arg, &mut parsed) {
             continue;
         } else if parsed.path.is_empty() {

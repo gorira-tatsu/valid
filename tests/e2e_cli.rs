@@ -107,6 +107,7 @@ fn failing_counter_explains_and_generates_vectors() {
         source,
         property_id: None,
         strategy: "counterexample".to_string(),
+        focus_action_id: None,
         seed: None,
         backend: None,
         solver_executable: None,
@@ -144,6 +145,32 @@ fn cli_testgen_supports_deadlock_strategy() {
     assert!(stdout.contains("\"strategy\":\"deadlock\""));
     assert!(stdout.contains("\"source_kind\":\"deadlock\""));
     assert!(stdout.contains("\"generated_files\":["));
+}
+
+#[test]
+fn cli_testgen_supports_enablement_strategy() {
+    let temp_dir = unique_temp_dir("valid-enablement-testgen");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+    let model_path = temp_dir.join("enablement.valid");
+    fs::write(
+        &model_path,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Enable:\n  pre: x == 0\n  post:\n    x = 1\naction Target:\n  pre: x == 1\n  post:\n    x = 1\nproperty P_SAFE:\n  invariant: x <= 1\n",
+    )
+    .expect("model should be written");
+
+    let output = Command::new(binary_path())
+        .arg("testgen")
+        .arg(&model_path)
+        .arg("--strategy=enablement")
+        .arg("--focus-action=Target")
+        .arg("--json")
+        .output()
+        .expect("enablement testgen should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"strategy\":\"enablement\""));
+    assert!(stdout.contains("\"focus_action_id\":\"Target\""));
+    assert!(stdout.contains("\"expected_guard_enabled\":true"));
 }
 
 #[test]
@@ -558,6 +585,7 @@ fn multi_property_testgen_can_target_specific_property() {
         source,
         property_id: Some("P_STRICT".to_string()),
         strategy: "counterexample".to_string(),
+        focus_action_id: None,
         seed: Some(67),
         backend: None,
         solver_executable: None,

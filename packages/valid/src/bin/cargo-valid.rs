@@ -180,7 +180,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -558,7 +558,7 @@ fn command_supports_view(command: &str) -> bool {
 }
 
 fn command_supports_focus_action(command: &str) -> bool {
-    matches!(command, "replay")
+    matches!(command, "replay" | "testgen" | "generate-tests")
 }
 
 fn command_supports_actions(command: &str) -> bool {
@@ -1648,7 +1648,7 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
 fn cmd_testgen(parsed: ParsedArgs) {
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
-    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>]"));
+    let model = parsed.model.unwrap_or_else(|| usage_exit("usage: cargo valid testgen <model> [--json] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>]"));
     let request = TestgenRequest {
         request_id: "cargo-valid-testgen".to_string(),
         source_name: normalized_model_ref(&model),
@@ -1658,6 +1658,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
             .strategy
             .clone()
             .unwrap_or_else(|| "counterexample".to_string()),
+        focus_action_id: parsed.focus_action_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1676,7 +1677,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.strictness,
@@ -1684,7 +1685,10 @@ fn cmd_testgen(parsed: ParsedArgs) {
                             vector.source_kind,
                             vector.strategy,
                             vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
-                            vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(",")
+                            vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                            vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
+                            vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                            vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                         ))
                         .collect::<Vec<_>>()
                         .join(","),
@@ -1707,7 +1711,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
                     println!("vectors:");
                     for vector in &response.vectors {
                         println!(
-                            "- {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={}",
+                            "- {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
                             vector.vector_id,
                             vector.run_id,
                             vector.strictness,
@@ -1723,6 +1727,16 @@ fn cmd_testgen(parsed: ParsedArgs) {
                                 "-".to_string()
                             } else {
                                 vector.risk_clusters.join(",")
+                            },
+                            vector.focus_action_id.as_deref().unwrap_or("-"),
+                            vector
+                                .expected_guard_enabled
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string()),
+                            if vector.notes.is_empty() {
+                                "-".to_string()
+                            } else {
+                                vector.notes.join(",")
                             }
                         );
                     }

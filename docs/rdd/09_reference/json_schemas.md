@@ -129,6 +129,7 @@
 - ID: `schema.ai.testgen`
 - 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`
 - 本体: [schemas/ai_testgen_request.schema.json](schemas/ai_testgen_request.schema.json), [schemas/ai_testgen_response.schema.json](schemas/ai_testgen_response.schema.json)
+- 補足: `vectors[]` は `focus_action_id`, `expected_guard_enabled`, `notes` を含み、enablement 系の blocked action / blocker guidance を返せる
 
 主要フィールド:
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.testgen.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "vector_ids", "generated_files"],
+  "required": ["schema_version", "request_id", "status", "vector_ids", "vectors", "generated_files"],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string", "minLength": 1 },
@@ -22,6 +22,7 @@
           "derivation",
           "source_kind",
           "strategy",
+          "notes",
           "requirement_clusters",
           "risk_clusters"
         ],
@@ -32,9 +33,16 @@
           "derivation": { "type": "string" },
           "source_kind": { "type": "string" },
           "strategy": { "type": "string" },
+          "focus_action_id": { "type": ["string", "null"] },
+          "expected_guard_enabled": { "type": ["boolean", "null"] },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
           "requirement_clusters": { "type": "array", "items": { "type": "string" } },
           "risk_clusters": { "type": "array", "items": { "type": "string" } }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "vector_groups": {

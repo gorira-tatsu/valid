@@ -503,6 +503,7 @@ pub struct TestgenRequest {
     pub source: String,
     pub property_id: Option<String>,
     pub strategy: String,
+    pub focus_action_id: Option<String>,
     pub seed: Option<u64>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
@@ -542,6 +543,9 @@ pub struct TestgenVectorSummary {
     pub strategy: String,
     pub requirement_clusters: Vec<String>,
     pub risk_clusters: Vec<String>,
+    pub focus_action_id: Option<String>,
+    pub expected_guard_enabled: Option<bool>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2181,6 +2185,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             &request.source_name,
             request.property_id.as_deref(),
             &request.strategy,
+            request.focus_action_id.as_deref(),
             request.seed,
             bundled_adapter.as_ref(),
         )
@@ -2273,17 +2278,22 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .filter_map(|trace| build_deadlock_vector(trace).ok())
             .collect::<Vec<_>>();
         if trace_vectors.is_empty() {
-            build_model_test_vectors_for_strategy(&model, target_property_id, &request.strategy)
-                .map_err(|message| CheckErrorEnvelope {
-                    manifest: result.manifest.clone(),
-                    status: crate::engine::ErrorStatus::Error,
-                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                    diagnostics: vec![Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        message,
-                    )],
-                })?
+            build_model_test_vectors_for_strategy(
+                &model,
+                target_property_id,
+                &request.strategy,
+                request.focus_action_id.as_deref(),
+            )
+            .map_err(|message| CheckErrorEnvelope {
+                manifest: result.manifest.clone(),
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            })?
         } else {
             trace_vectors
         }
@@ -2297,6 +2307,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
                 &model,
                 target_property_id,
                 &request.strategy,
+                request.focus_action_id.as_deref(),
             )
             .map_err(|message| CheckErrorEnvelope {
                 manifest: result.manifest.clone(),
@@ -2316,18 +2327,22 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             trace_vectors
         }
     } else {
-        let mut vectors =
-            build_model_test_vectors_for_strategy(&model, target_property_id, &request.strategy)
-                .map_err(|message| CheckErrorEnvelope {
-                    manifest: result.manifest.clone(),
-                    status: crate::engine::ErrorStatus::Error,
-                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                    diagnostics: vec![Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        message,
-                    )],
-                })?;
+        let mut vectors = build_model_test_vectors_for_strategy(
+            &model,
+            target_property_id,
+            &request.strategy,
+            request.focus_action_id.as_deref(),
+        )
+        .map_err(|message| CheckErrorEnvelope {
+            manifest: result.manifest.clone(),
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        })?;
         if vectors.is_empty() && matches!(request.strategy.as_str(), "transition" | "witness") {
             vectors = build_synthetic_witness_vectors(&model, target_property_id);
         }
@@ -2365,6 +2380,9 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
                 strategy: vector.strategy.clone(),
                 requirement_clusters: vector.grouping.requirement_clusters.clone(),
                 risk_clusters: vector.grouping.risk_clusters.clone(),
+                focus_action_id: vector.focus_action_id.clone(),
+                expected_guard_enabled: vector.expected_guard_enabled,
+                notes: vector.notes.clone(),
             })
             .collect(),
         vector_groups: summarize_testgen_groups(&vectors),
@@ -5302,11 +5320,21 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
     for vector in &response.vectors {
         require_non_empty(&vector.vector_id, "vectors[].vector_id")?;
         require_non_empty(&vector.run_id, "vectors[].run_id")?;
+        require_non_empty(&vector.strictness, "vectors[].strictness")?;
+        require_non_empty(&vector.derivation, "vectors[].derivation")?;
+        require_non_empty(&vector.source_kind, "vectors[].source_kind")?;
+        require_non_empty(&vector.strategy, "vectors[].strategy")?;
+        if let Some(action_id) = &vector.focus_action_id {
+            require_non_empty(action_id, "vectors[].focus_action_id")?;
+        }
         for cluster in &vector.requirement_clusters {
             require_non_empty(cluster, "vectors[].requirement_clusters[]")?;
         }
         for cluster in &vector.risk_clusters {
             require_non_empty(cluster, "vectors[].risk_clusters[]")?;
+        }
+        for note in &vector.notes {
+            require_non_empty(note, "vectors[].notes[]")?;
         }
     }
     for group in &response.vector_groups {
@@ -5410,11 +5438,18 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
     }
     match request.strategy.as_str() {
         "counterexample" | "transition" | "witness" | "guard" | "boundary" | "path"
-        | "random" | "deadlock" => Ok(()),
+        | "random" | "deadlock" | "enablement" => Ok(()),
         other => Err(format!(
-            "strategy must be one of counterexample, transition, witness, guard, boundary, path, random, deadlock, got `{other}`"
+            "strategy must be one of counterexample, transition, witness, guard, boundary, path, random, deadlock, enablement, got `{other}`"
         )),
+    }?;
+    if request.strategy == "enablement" {
+        require_non_empty(
+            request.focus_action_id.as_deref().unwrap_or_default(),
+            "focus_action_id",
+        )?;
     }
+    Ok(())
 }
 
 pub fn validate_orchestrate_request(request: &OrchestrateRequest) -> Result<(), String> {
@@ -6284,6 +6319,7 @@ property P_RECOVERY_VISIBLE:
             source: source.to_string(),
             property_id: None,
             strategy: "counterexample".to_string(),
+            focus_action_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -6304,6 +6340,7 @@ property P_RECOVERY_VISIBLE:
             source: source.to_string(),
             property_id: None,
             strategy: "witness".to_string(),
+            focus_action_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -6328,6 +6365,7 @@ property P_RECOVERY_VISIBLE:
             source: source.to_string(),
             property_id: Some("P_REACH".to_string()),
             strategy: "witness".to_string(),
+            focus_action_id: None,
             backend: None,
             solver_executable: None,
             solver_args: vec![],
@@ -6350,6 +6388,7 @@ property P_RECOVERY_VISIBLE:
             source: source.to_string(),
             property_id: Some("P_LIVE".to_string()),
             strategy: "deadlock".to_string(),
+            focus_action_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -6364,6 +6403,37 @@ property P_RECOVERY_VISIBLE:
     }
 
     #[test]
+    fn enablement_testgen_reports_target_action_and_guard_state() {
+        let source = "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Enable:\n  pre: x == 0\n  post:\n    x = 1\naction Target:\n  pre: x == 1\n  post:\n    x = 1\nproperty P_SAFE:\n  invariant: x <= 1\n";
+        let response = testgen_source(&TestgenRequest {
+            request_id: "req-enablement-testgen".to_string(),
+            source_name: "enablement.valid".to_string(),
+            source: source.to_string(),
+            property_id: Some("P_SAFE".to_string()),
+            strategy: "enablement".to_string(),
+            focus_action_id: Some("Target".to_string()),
+            seed: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: vec![],
+        })
+        .unwrap();
+        assert_eq!(response.vector_ids.len(), 1);
+        assert_eq!(response.vectors[0].source_kind, "enablement");
+        assert_eq!(
+            response.vectors[0].focus_action_id.as_deref(),
+            Some("Target")
+        );
+        assert_eq!(response.vectors[0].expected_guard_enabled, Some(true));
+        assert!(response.vectors[0]
+            .notes
+            .iter()
+            .any(|note| note == "enablement_reached"));
+        validate_testgen_response(&response).unwrap();
+        cleanup_generated_files(&response.generated_files);
+    }
+
+    #[test]
     fn guard_testgen_can_emit_vectors() {
         let source = "model A\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Inc:\n  pre: x <= 1\n  post:\n    x = x + 1\nproperty P_SAFE:\n  invariant: x <= 2\n";
         let response = testgen_source(&TestgenRequest {
@@ -6372,6 +6442,7 @@ property P_RECOVERY_VISIBLE:
             source: source.to_string(),
             property_id: None,
             strategy: "guard".to_string(),
+            focus_action_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
@@ -6507,6 +6578,7 @@ property P_RECOVERY_VISIBLE:
             source: "model A".to_string(),
             property_id: None,
             strategy: "weird".to_string(),
+            focus_action_id: None,
             seed: None,
             backend: None,
             solver_executable: None,
