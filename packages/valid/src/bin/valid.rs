@@ -46,7 +46,8 @@ use valid::{
     project::{load_project_config, rerun_recommendations},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
+        render_model_text_with_view, render_trace_mermaid, render_trace_sequence_mermaid,
+        GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     testgen::{render_replay_json, replay_path_for_model},
@@ -916,7 +917,7 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic] [--json] [--progress=json]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|deadlock|scc] [--json] [--progress=json]",
         |_arg, _parsed| false,
     );
     let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
@@ -942,7 +943,7 @@ fn cmd_graph(args: Vec<String>) {
     match inspect_source(&request) {
         Ok(response) => match render_format {
             "json" => println!("{}", render_inspect_json(&response)),
-            "text" => print!("{}", render_inspect_text(&response)),
+            "text" => print!("{}", render_model_text_with_view(&response, view)),
             "dot" => println!("{}", render_model_dot_with_view(&response, view)),
             "svg" => println!("{}", render_model_svg_with_view(&response, view)),
             _ => println!("{}", render_model_mermaid_with_view(&response, view)),

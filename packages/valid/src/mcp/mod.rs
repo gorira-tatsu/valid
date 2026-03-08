@@ -29,7 +29,7 @@ use crate::{
     project::{rerun_recommendations, ProjectConfig},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        render_model_text_with_view, GraphView,
     },
     testgen::render_replay_json,
 };
@@ -2628,9 +2628,9 @@ fn graph_tool(config: &ServerConfig, args: &GraphArgs) -> Result<ToolResult, Str
                         json!({
                             "format": "text",
                             "view": view_name(view),
-                            "graph": crate::api::render_inspect_text(&response)
+                            "graph": render_model_text_with_view(&response, view)
                         }),
-                        crate::api::render_inspect_text(&response),
+                        render_model_text_with_view(&response, view),
                     )),
                     "dot" => {
                         let graph = render_model_dot_with_view(&response, view);
@@ -2875,5 +2875,7 @@ fn view_name(view: GraphView) -> &'static str {
     match view {
         GraphView::Overview => "overview",
         GraphView::Logic => "logic",
+        GraphView::Deadlock => "deadlock",
+        GraphView::Scc => "scc",
     }
 }

@@ -38,7 +38,7 @@ use crate::{
     project::{load_project_config, rerun_recommendations},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
-        GraphView,
+        render_model_text_with_view, GraphView,
     },
     solver::AdapterConfig,
     support::{artifact::benchmark_baseline_path, hash::stable_hash_hex, io::write_text_file},
@@ -67,10 +67,10 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
-const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic>] [--json] [--progress=json]";
+const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|deadlock|scc>] [--json] [--progress=json]";
 const DOC_USAGE: &str =
     "usage: <registry-bin> doc <model> [--json] [--progress=json] [--write[=<path>]] [--check]";
 const LINT_USAGE: &str = "usage: <registry-bin> lint <model> [--json] [--progress=json]";
@@ -239,7 +239,7 @@ fn cmd_graph(models: &[RegisteredModel], args: Vec<String>) {
     let view = GraphView::parse(parsed.view.as_deref());
     match parsed.format.as_deref().unwrap_or("mermaid") {
         "json" => println!("{}", render_inspect_json(&response)),
-        "text" => print!("{}", render_inspect_text(&response)),
+        "text" => print!("{}", render_model_text_with_view(&response, view)),
         "dot" => println!("{}", render_model_dot_with_view(&response, view)),
         "svg" => println!("{}", render_model_svg_with_view(&response, view)),
         _ => println!("{}", render_model_mermaid_with_view(&response, view)),

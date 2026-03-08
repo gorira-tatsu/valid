@@ -488,6 +488,35 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
 }
 
 #[test]
+fn cargo_valid_graph_supports_deadlock_and_scc_views() {
+    let _guard = cargo_guard();
+    let deadlock_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
+        .arg("graph")
+        .arg("tenant-isolation-safe")
+        .arg("--format=text")
+        .arg("--view=deadlock")
+        .output()
+        .expect("cargo-valid graph deadlock should run");
+    assert!(deadlock_output.status.success());
+    let deadlock = String::from_utf8_lossy(&deadlock_output.stdout);
+    assert!(deadlock.contains("graph_view: deadlock"));
+
+    let scc_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(saas_registry_file())
+        .arg("graph")
+        .arg("tenant-isolation-safe")
+        .arg("--view=scc")
+        .output()
+        .expect("cargo-valid graph scc should run");
+    assert!(scc_output.status.success());
+    let scc = String::from_utf8_lossy(&scc_output.stdout);
+    assert!(scc.contains("SCC 0"));
+}
+
+#[test]
 fn cargo_valid_checks_registered_model() {
     let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())
