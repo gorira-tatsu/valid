@@ -33,6 +33,8 @@ Related documents:
 - Every action variant has `reads`
 - Every action variant has `writes`
 - Action names and `action_id`s match intent
+- Do not split one conceptual action into many variants unless the bounded
+  choice is deliberate and example-sized
 
 ## Model header and init
 

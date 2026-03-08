@@ -26,6 +26,9 @@
   Current implemented surface and semantic subset for the Rust DSL.
 - [DSL Language Evolution](./dsl/language-evolution.md)
   Design notes for proposed and in-flight language features.
+- [Parameterized Action Roadmap](./dsl/parameterized-action-roadmap.md)
+  Incremental plan for moving from enum-only actions to bounded parameterized
+  actions without encouraging action explosion in docs or examples.
 - [ADR-0001: `valid_model!` Frontend Decision](./adr/0001-valid-model-frontend.md)
   Decision record for keeping `valid_model!` on the `macro_rules!` track unless
   A1 fails to recover `rust-analyzer` compatibility.
