@@ -9,6 +9,9 @@ This is not the design spec. For requirements and architecture, see the RDD.
 Related documents:
 
 - [AI Authoring Guide](../ai/authoring-guide.md)
+- [AI Docs Curriculum](../ai/curriculum.md)
+- [Model Authoring Best Practices](../ai/model-authoring-best-practices.md)
+- [Project Organization Guide](../project-organization.md)
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
@@ -47,6 +50,23 @@ There are two ways to describe behavior:
 
 If a model is meant to become part of a long-lived practical verification
 suite, prefer declarative transitions.
+
+## Source-Adjacent Documentation
+
+Long-lived models should explain their intent directly above the model
+definition.
+
+At minimum, record:
+
+- a one-line summary of the business behavior
+- what is in scope
+- what is out of scope
+- key assumptions
+- critical properties or suites
+- scenario/setup intent when it is not obvious
+
+See [Model Authoring Best Practices](../ai/model-authoring-best-practices.md)
+for a concrete template.
 
 ## Building Blocks
 
@@ -171,12 +191,18 @@ The metadata is used by:
 - `inspect`
 - `graph`
 - `readiness`
+- `lint`
 - `explain`
 - `coverage`
 - `generate-tests`
 
 If you omit `reads` or `writes`, the model can still run, but diagnostics and
 generated artifacts become weaker.
+
+For maintainability, keep model intent visible with named `predicates:`,
+focused `scenarios:`, and descriptive action ids. Use `cargo valid lint` /
+`cargo valid readiness` to catch repeated conditions, oversized model
+structure, and setup-heavy transition sets before they drift.
 
 ## IDE Notes
 
@@ -438,6 +464,12 @@ fn main() {
 
 In a project, `valid.toml` points `cargo valid` at the registry file.
 
+For long-lived projects, keep the registry file thin and put real model logic
+under a dedicated module tree such as `src/models/`. See the
+[Project Organization Guide](../project-organization.md) for recommended
+layouts for standalone models, integration models, shared types, and generated
+artifacts.
+
 Project-level verification targeting can also live in `valid.toml`:
 
 ```toml
@@ -498,7 +530,8 @@ cargo valid suite --suite=smoke
 - `explain`
   Summarizes likely failure causes and next steps.
 - `coverage`
-  Reports action, guard, and path-tag coverage.
+  Reports action, guard, path-tag, and requirement-tag coverage, including
+  business/setup splits.
 - `generate-tests`
   Produces regression-oriented Rust tests under `generated-tests/`. JSON output
   reports `strictness` and `derivation` for each vector so review tooling can
