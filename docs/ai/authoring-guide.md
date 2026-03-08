@@ -150,7 +150,9 @@ Useful expressions:
 - `cover`, `transition`, and scenario-scoped checks are explicit-first today
 - a model can be `explicit_ready` but not `solver_ready`
 - `readiness` / `lint` is the authority for migration hints and degraded
-  capability reasons
+  capability reasons, plus advisory maintainability findings such as missing
+  model intent comments, repeated conditions, oversized models, and setup-heavy
+  structure
 - declarative models with unsupported expressions will be flagged by readiness
   and may fail solver-backed verification
 
@@ -163,6 +165,7 @@ For local authoring:
 ```sh
 cargo valid inspect <model>
 cargo valid readiness <model>
+cargo valid lint <model>
 cargo valid verify <model>
 ```
 
@@ -201,6 +204,8 @@ If your MCP client supports prompts, prefer this sequence:
   a focused deleted/error/recovered state slice.
 - Extract repeated guard/property conditions into `predicates:` so drift stays
   local and inspect output stays readable.
+- Start each long-lived model with a short intent comment, then keep the model
+  vocabulary explicit with named predicates, scenarios, and clear action ids.
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.

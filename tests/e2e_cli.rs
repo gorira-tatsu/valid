@@ -284,8 +284,10 @@ fn lint_reports_clean_valid_models() {
         source,
     })
     .expect("lint should succeed");
-    assert_eq!(response.status, "ok");
-    assert!(response.findings.is_empty());
+    assert_eq!(response.status, "warn");
+    assert_eq!(response.findings.len(), 1);
+    assert_eq!(response.findings[0].category, "maintainability");
+    assert_eq!(response.findings[0].code, "missing_model_documentation");
 }
 
 #[test]

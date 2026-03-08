@@ -191,12 +191,18 @@ The metadata is used by:
 - `inspect`
 - `graph`
 - `readiness`
+- `lint`
 - `explain`
 - `coverage`
 - `generate-tests`
 
 If you omit `reads` or `writes`, the model can still run, but diagnostics and
 generated artifacts become weaker.
+
+For maintainability, keep model intent visible with named `predicates:`,
+focused `scenarios:`, and descriptive action ids. Use `cargo valid lint` /
+`cargo valid readiness` to catch repeated conditions, oversized model
+structure, and setup-heavy transition sets before they drift.
 
 ## IDE Notes
 
