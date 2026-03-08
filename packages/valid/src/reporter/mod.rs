@@ -6,6 +6,7 @@ use crate::{api::InspectResponse, evidence::EvidenceTrace};
 pub enum GraphView {
     Overview,
     Logic,
+    Failure,
     Deadlock,
     Scc,
 }
@@ -14,11 +15,25 @@ impl GraphView {
     pub fn parse(input: Option<&str>) -> Self {
         match input {
             Some("logic") | Some("detailed") | Some("full") => Self::Logic,
+            Some("failure") | Some("focused") => Self::Failure,
             Some("deadlock") | Some("terminal") => Self::Deadlock,
             Some("scc") | Some("condensation") | Some("condensed") => Self::Scc,
             _ => Self::Overview,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureGraphSlice {
+    pub property_id: String,
+    pub failing_action_id: Option<String>,
+    pub failing_step_index: usize,
+    pub focused_fields: Vec<String>,
+    pub focused_reads: Vec<String>,
+    pub focused_writes: Vec<String>,
+    pub focused_path_tags: Vec<String>,
+    pub focused_transition_indexes: Vec<usize>,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +57,97 @@ struct ActionGraphSummary {
     nodes: Vec<ActionGraphNode>,
     edges: Vec<(usize, usize)>,
     sccs: Vec<ActionGraphScc>,
+}
+
+pub fn build_failure_graph_slice(
+    response: &InspectResponse,
+    trace: &EvidenceTrace,
+    property_id: &str,
+) -> Result<FailureGraphSlice, String> {
+    let property = response
+        .property_details
+        .iter()
+        .find(|candidate| candidate.property_id == property_id)
+        .ok_or_else(|| format!("unknown property `{property_id}`"))?;
+    let failure_step = trace
+        .steps
+        .last()
+        .ok_or_else(|| "failure graph requires a non-empty evidence trace".to_string())?;
+    let failing_action_id = failure_step.action_id.clone();
+    let focused_transition_indexes = response
+        .transition_details
+        .iter()
+        .enumerate()
+        .filter_map(|(index, transition)| {
+            if Some(transition.action_id.as_str()) == failing_action_id.as_deref() {
+                Some(index)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let focused_transition = focused_transition_indexes
+        .first()
+        .and_then(|index| response.transition_details.get(*index));
+    let focused_reads = focused_transition
+        .map(|transition| transition.reads.clone())
+        .unwrap_or_default();
+    let focused_writes = focused_transition
+        .map(|transition| transition.writes.clone())
+        .unwrap_or_default();
+    let focused_path_tags = if let Some(path) = &failure_step.path {
+        path.legacy_path_tags()
+    } else {
+        focused_transition
+            .map(|transition| visible_path_tags(&transition.path_tags))
+            .unwrap_or_default()
+    };
+
+    let mut focused_fields = failure_step
+        .state_before
+        .iter()
+        .filter_map(|(field, before)| {
+            let after = failure_step.state_after.get(field)?;
+            if before != after {
+                Some(field.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if focused_fields.is_empty() {
+        focused_fields.extend(property_field_refs(property, &response.state_field_details));
+    }
+    if focused_fields.is_empty() {
+        focused_fields.extend(focused_reads.iter().cloned());
+        focused_fields.extend(focused_writes.iter().cloned());
+    }
+    focused_fields.sort();
+    focused_fields.dedup();
+
+    let summary = match &failing_action_id {
+        Some(action_id) => format!(
+            "property {property_id} fails after action {action_id} at step {}",
+            failure_step.index
+        ),
+        None => format!(
+            "property {property_id} fails at terminal step {}",
+            failure_step.index
+        ),
+    };
+
+    Ok(FailureGraphSlice {
+        property_id: property_id.to_string(),
+        failing_action_id,
+        failing_step_index: failure_step.index,
+        focused_fields,
+        focused_reads,
+        focused_writes,
+        focused_path_tags,
+        focused_transition_indexes,
+        summary,
+    })
 }
 
 fn capability_mode_label(response: &InspectResponse) -> String {
@@ -108,6 +214,7 @@ pub fn render_model_mermaid_with_view(response: &InspectResponse, view: GraphVie
     match view {
         GraphView::Overview => render_model_mermaid_overview(response),
         GraphView::Logic => render_model_mermaid_logic(response),
+        GraphView::Failure => render_model_mermaid_overview(response),
         GraphView::Deadlock => render_model_mermaid_deadlock(response),
         GraphView::Scc => render_model_mermaid_scc(response),
     }
@@ -212,6 +319,7 @@ pub fn render_model_dot_with_view(response: &InspectResponse, view: GraphView) -
     match view {
         GraphView::Overview => render_model_dot_overview(response),
         GraphView::Logic => render_model_dot_logic(response),
+        GraphView::Failure => render_model_dot_overview(response),
         GraphView::Deadlock => render_model_dot_deadlock(response),
         GraphView::Scc => render_model_dot_scc(response),
     }
@@ -320,9 +428,475 @@ pub fn render_model_svg_with_view(response: &InspectResponse, view: GraphView) -
     match view {
         GraphView::Overview => render_model_svg_overview(response),
         GraphView::Logic => render_model_svg_logic(response),
+        GraphView::Failure => render_model_svg_overview(response),
         GraphView::Deadlock => render_model_svg_deadlock(response),
         GraphView::Scc => render_model_svg_scc(response),
     }
+}
+
+pub fn render_model_mermaid_failure(
+    response: &InspectResponse,
+    slice: &FailureGraphSlice,
+) -> String {
+    let mut out = String::from("flowchart LR\n");
+    let model_node = sanitize_id(&format!("model_{}", response.model_id));
+    let property_node = sanitize_id(&format!("property_{}", slice.property_id));
+    out.push_str(&format!(
+        "  {model_node}[\"{}\"]\n",
+        mermaid_label(&[
+            format!("model: {}", response.model_id),
+            slice.summary.clone(),
+        ])
+    ));
+    out.push_str("  subgraph failure_slice[\"Failure Slice\"]\n");
+    if let Some(property) = response
+        .property_details
+        .iter()
+        .find(|candidate| candidate.property_id == slice.property_id)
+    {
+        out.push_str(&format!(
+            "    {property_node}[\"{}\"]\n",
+            mermaid_label(&property_overview_lines(property))
+        ));
+        out.push_str(&format!("  {model_node} --> {property_node}\n"));
+    }
+    if let Some(action_id) = &slice.failing_action_id {
+        let action_node = sanitize_id(&format!("action_{action_id}"));
+        let mut lines = vec![format!("action: {action_id}")];
+        if !slice.focused_reads.is_empty() {
+            lines.push(format!("reads: {}", slice.focused_reads.join(", ")));
+        }
+        if !slice.focused_writes.is_empty() {
+            lines.push(format!("writes: {}", slice.focused_writes.join(", ")));
+        }
+        if !slice.focused_path_tags.is_empty() {
+            lines.push(format!("tags: {}", slice.focused_path_tags.join(", ")));
+        }
+        out.push_str(&format!(
+            "    {action_node}[\"{}\"]\n",
+            mermaid_label(&lines)
+        ));
+        out.push_str(&format!("  {model_node} --> {action_node}\n"));
+        out.push_str(&format!("  {property_node} --> {action_node}\n"));
+        for field in &slice.focused_fields {
+            let field_node = sanitize_id(&format!("field_{field}"));
+            out.push_str(&format!("  {action_node} --> {field_node}\n"));
+        }
+    }
+    for field in response
+        .state_field_details
+        .iter()
+        .filter(|field| slice.focused_fields.contains(&field.name))
+    {
+        let field_node = sanitize_id(&format!("field_{}", field.name));
+        out.push_str(&format!(
+            "    {field_node}[\"{}\"]\n",
+            mermaid_label(&field_label_lines(field))
+        ));
+        out.push_str(&format!("  {property_node} -. depends .-> {field_node}\n"));
+    }
+    if response.machine_ir_ready {
+        for index in &slice.focused_transition_indexes {
+            if let Some(transition) = response.transition_details.get(*index) {
+                let transition_node =
+                    sanitize_id(&format!("transition_{}_{}", transition.action_id, index));
+                let action_node = sanitize_id(&format!("action_{}", transition.action_id));
+                out.push_str(&format!(
+                    "    {transition_node}[\"{}\"]\n",
+                    mermaid_label(&transition_label_lines(transition))
+                ));
+                out.push_str(&format!("  {action_node} --> {transition_node}\n"));
+            }
+        }
+    }
+    out.push_str("  end\n");
+    out
+}
+
+pub fn render_model_dot_failure(response: &InspectResponse, slice: &FailureGraphSlice) -> String {
+    let mut out = String::from(
+        "digraph model {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
+    );
+    let model_node = sanitize_id(&format!("model_{}", response.model_id));
+    let property_node = sanitize_id(&format!("property_{}", slice.property_id));
+    out.push_str(&format!(
+        "  {model_node} [label=\"{}\"];\n",
+        dot_label(&[
+            format!("model: {}", response.model_id),
+            slice.summary.clone(),
+        ])
+    ));
+    out.push_str("  subgraph cluster_failure_slice {\n    label=\"Failure Slice\";\n");
+    if let Some(property) = response
+        .property_details
+        .iter()
+        .find(|candidate| candidate.property_id == slice.property_id)
+    {
+        out.push_str(&format!(
+            "    {property_node} [label=\"{}\"];\n",
+            dot_label(&property_overview_lines(property))
+        ));
+        out.push_str(&format!("  {model_node} -> {property_node};\n"));
+    }
+    if let Some(action_id) = &slice.failing_action_id {
+        let action_node = sanitize_id(&format!("action_{action_id}"));
+        let mut lines = vec![format!("action: {action_id}")];
+        if !slice.focused_reads.is_empty() {
+            lines.push(format!("reads: {}", slice.focused_reads.join(", ")));
+        }
+        if !slice.focused_writes.is_empty() {
+            lines.push(format!("writes: {}", slice.focused_writes.join(", ")));
+        }
+        if !slice.focused_path_tags.is_empty() {
+            lines.push(format!("tags: {}", slice.focused_path_tags.join(", ")));
+        }
+        out.push_str(&format!(
+            "    {action_node} [label=\"{}\"];\n",
+            dot_label(&lines)
+        ));
+        out.push_str(&format!("  {model_node} -> {action_node};\n"));
+        out.push_str(&format!("  {property_node} -> {action_node};\n"));
+    }
+    for field in response
+        .state_field_details
+        .iter()
+        .filter(|field| slice.focused_fields.contains(&field.name))
+    {
+        let field_node = sanitize_id(&format!("field_{}", field.name));
+        out.push_str(&format!(
+            "    {field_node} [label=\"{}\"];\n",
+            dot_label(&field_label_lines(field))
+        ));
+        out.push_str(&format!(
+            "  {property_node} -> {field_node} [style=dashed, label=\"depends\"];\n"
+        ));
+    }
+    if response.machine_ir_ready {
+        for index in &slice.focused_transition_indexes {
+            if let Some(transition) = response.transition_details.get(*index) {
+                let transition_node =
+                    sanitize_id(&format!("transition_{}_{}", transition.action_id, index));
+                let action_node = sanitize_id(&format!("action_{}", transition.action_id));
+                out.push_str(&format!(
+                    "    {transition_node} [label=\"{}\"];\n",
+                    dot_label(&transition_label_lines(transition))
+                ));
+                out.push_str(&format!("  {action_node} -> {transition_node};\n"));
+            }
+        }
+    }
+    out.push_str("  }\n}\n");
+    out
+}
+
+pub fn render_model_svg_failure(response: &InspectResponse, slice: &FailureGraphSlice) -> String {
+    let mut sections = Vec::new();
+    sections.push(("Failure Slice".to_string(), vec![slice.summary.clone()]));
+    sections.push((
+        "Focused Fields".to_string(),
+        if slice.focused_fields.is_empty() {
+            vec!["none".to_string()]
+        } else {
+            slice.focused_fields.clone()
+        },
+    ));
+    sections.push((
+        "Focused Action".to_string(),
+        slice
+            .failing_action_id
+            .as_ref()
+            .map(|action_id| {
+                let mut lines = vec![action_id.clone()];
+                if !slice.focused_reads.is_empty() {
+                    lines.push(format!("reads: {}", slice.focused_reads.join(", ")));
+                }
+                if !slice.focused_writes.is_empty() {
+                    lines.push(format!("writes: {}", slice.focused_writes.join(", ")));
+                }
+                lines
+            })
+            .unwrap_or_else(|| vec!["terminal violation".to_string()]),
+    ));
+    sections.push((
+        "Focused Property".to_string(),
+        vec![slice.property_id.clone()],
+    ));
+    if !slice.focused_path_tags.is_empty() {
+        sections.push(("Trace Tags".to_string(), slice.focused_path_tags.clone()));
+    }
+
+    let width = 1200;
+    let section_width = 1160;
+    let mut y = 90i32;
+    let mut body = String::new();
+    for (title, lines) in sections {
+        let line_count = usize::max(lines.len(), 1);
+        let height = 44 + (line_count as i32 * 22) + 12;
+        body.push_str(&svg_section(20, y, section_width, height, &title, &lines));
+        y += height + 18;
+    }
+    let total_height = y + 20;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{total_height}\" viewBox=\"0 0 {width} {total_height}\" role=\"img\" aria-label=\"Failure-focused graph for {title}\"><style>text{{font-family:Helvetica,Arial,sans-serif;fill:#1f2937}} .title{{font-size:28px;font-weight:700}} .section-title{{font-size:18px;font-weight:700}} .line{{font-size:14px}} .section{{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.5}} .accent{{fill:#fee2e2;stroke:#fca5a5;stroke-width:1.5}}</style><rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/><rect x=\"20\" y=\"20\" width=\"1160\" height=\"48\" rx=\"10\" class=\"accent\"/><text x=\"40\" y=\"50\" class=\"title\">{title}</text>{body}</svg>",
+        title = escape_xml(&format!("failure slice: {}", response.model_id)),
+        body = body,
+    )
+}
+
+pub fn render_model_text_failure(response: &InspectResponse, slice: &FailureGraphSlice) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("model: {}\n", response.model_id));
+    out.push_str("graph_view: failure\n");
+    out.push_str(&format!("summary: {}\n", slice.summary));
+    out.push_str(&format!("property_id: {}\n", slice.property_id));
+    if let Some(action_id) = &slice.failing_action_id {
+        out.push_str(&format!("failing_action_id: {}\n", action_id));
+    }
+    out.push_str(&format!(
+        "focused_fields: {}\n",
+        if slice.focused_fields.is_empty() {
+            "none".to_string()
+        } else {
+            slice.focused_fields.join(", ")
+        }
+    ));
+    if !slice.focused_reads.is_empty() || !slice.focused_writes.is_empty() {
+        out.push_str(&format!(
+            "action_io: reads=[{}] writes=[{}]\n",
+            slice.focused_reads.join(", "),
+            slice.focused_writes.join(", ")
+        ));
+    }
+    if !slice.focused_path_tags.is_empty() {
+        out.push_str(&format!(
+            "path_tags: {}\n",
+            slice.focused_path_tags.join(", ")
+        ));
+    }
+    out
+}
+
+pub fn render_model_text_with_view(response: &InspectResponse, view: GraphView) -> String {
+    match view {
+        GraphView::Overview => render_model_text_overview(response),
+        GraphView::Logic => render_model_text_logic(response),
+        GraphView::Failure => render_model_text_overview(response),
+        GraphView::Deadlock => render_model_text_deadlock(response),
+        GraphView::Scc => render_model_text_scc(response),
+    }
+}
+
+fn render_model_mermaid_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = String::from("flowchart LR\n");
+    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
+    out.push_str(&format!(
+        "  {root}[\"{}\"]\n",
+        mermaid_label(&[
+            format!("deadlock view: {}", response.model_id),
+            format!("sink components: {}", sink_sccs.len())
+        ])
+    ));
+    for scc in &sink_sccs {
+        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node}[\"{}\"]\n",
+            mermaid_label(&deadlock_scc_lines(scc))
+        ));
+        out.push_str(&format!("  {root} --> {node}\n"));
+        for incoming in &scc.incoming {
+            let from = sanitize_id(&format!("scc_{}", incoming));
+            out.push_str(&format!(
+                "  {from}[\"{}\"]\n",
+                mermaid_label(&scc_label_lines(&summary.sccs[*incoming]))
+            ));
+            out.push_str(&format!("  {from} --> {node}\n"));
+        }
+    }
+    if sink_sccs.is_empty() {
+        out.push_str(&format!(
+            "  {}[\"{}\"]\n",
+            sanitize_id(&format!("sink_empty_{}", response.model_id)),
+            mermaid_label(&["no sink SCCs detected from action dependencies".to_string()])
+        ));
+    }
+    append_deadlock_property_notes_mermaid(response, &root, &mut out);
+    out
+}
+
+fn render_model_mermaid_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = String::from("flowchart LR\n");
+    for scc in &summary.sccs {
+        let node = sanitize_id(&format!("scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node}[\"{}\"]\n",
+            mermaid_label(&scc_label_lines(scc))
+        ));
+    }
+    for scc in &summary.sccs {
+        let from = sanitize_id(&format!("scc_{}", scc.index));
+        for outgoing in &scc.outgoing {
+            let to = sanitize_id(&format!("scc_{}", outgoing));
+            out.push_str(&format!("  {from} --> {to}\n"));
+        }
+    }
+    if summary.sccs.is_empty() {
+        out.push_str("  EmptyScc[\"no action SCCs\"]\n");
+    }
+    out
+}
+
+fn render_model_dot_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = String::from(
+        "digraph deadlock_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
+    );
+    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
+    out.push_str(&format!(
+        "  {root} [label=\"{}\", shape=note];\n",
+        dot_label(&[
+            format!("deadlock view: {}", response.model_id),
+            format!("sink components: {}", sink_sccs.len())
+        ])
+    ));
+    for scc in &sink_sccs {
+        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node} [label=\"{}\"];\n",
+            dot_label(&deadlock_scc_lines(scc))
+        ));
+        out.push_str(&format!("  {root} -> {node};\n"));
+        for incoming in &scc.incoming {
+            let from = sanitize_id(&format!("scc_{}", incoming));
+            out.push_str(&format!(
+                "  {from} [label=\"{}\"];\n",
+                dot_label(&scc_label_lines(&summary.sccs[*incoming]))
+            ));
+            out.push_str(&format!("  {from} -> {node};\n"));
+        }
+    }
+    append_deadlock_property_notes_dot(response, &mut out);
+    out.push_str("}\n");
+    out
+}
+
+fn render_model_dot_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = String::from(
+        "digraph scc_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
+    );
+    for scc in &summary.sccs {
+        let node = sanitize_id(&format!("scc_{}", scc.index));
+        out.push_str(&format!(
+            "  {node} [label=\"{}\"];\n",
+            dot_label(&scc_label_lines(scc))
+        ));
+    }
+    for scc in &summary.sccs {
+        let from = sanitize_id(&format!("scc_{}", scc.index));
+        for outgoing in &scc.outgoing {
+            let to = sanitize_id(&format!("scc_{}", outgoing));
+            out.push_str(&format!("  {from} -> {to};\n"));
+        }
+    }
+    if summary.sccs.is_empty() {
+        out.push_str("  empty [label=\"no action SCCs\", shape=note];\n");
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn render_model_svg_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut sections = vec![(
+        "Deadlock Sinks".to_string(),
+        if sink_sccs.is_empty() {
+            vec!["no sink SCCs detected from action dependencies".to_string()]
+        } else {
+            sink_sccs
+                .iter()
+                .flat_map(|scc| deadlock_scc_lines(scc))
+                .collect::<Vec<_>>()
+        },
+    )];
+    let deadlock_properties = deadlock_property_ids(response);
+    if !deadlock_properties.is_empty() {
+        sections.push((
+            "Deadlock Properties".to_string(),
+            deadlock_properties
+                .into_iter()
+                .map(|property| format!("{property} | kind: deadlock_freedom"))
+                .collect(),
+        ));
+    }
+    render_svg_sections(response, "deadlock view", sections)
+}
+
+fn render_model_svg_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut lines = summary
+        .sccs
+        .iter()
+        .flat_map(scc_label_lines)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        lines.push("no action SCCs".to_string());
+    }
+    render_svg_sections(response, "scc view", vec![("SCCs".to_string(), lines)])
+}
+
+fn render_model_text_overview(response: &InspectResponse) -> String {
+    format!(
+        "graph_view: overview\nmodel_id: {}\nactions: {}\nproperties: {}\n",
+        response.model_id,
+        response.action_details.len(),
+        response.property_details.len()
+    )
+}
+
+fn render_model_text_logic(response: &InspectResponse) -> String {
+    let mut out = format!("graph_view: logic\nmodel_id: {}\n", response.model_id);
+    for transition in &response.transition_details {
+        out.push_str(&format!(
+            "transition: {}\n",
+            transition_label_lines(transition).join(" | ")
+        ));
+    }
+    out
+}
+
+fn render_model_text_deadlock(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let sink_sccs = sink_sccs(&summary);
+    let mut out = format!(
+        "graph_view: deadlock\nmodel_id: {}\nsink_sccs: {}\n",
+        response.model_id,
+        sink_sccs.len()
+    );
+    for scc in &sink_sccs {
+        out.push_str(&format!("{}\n", deadlock_scc_lines(scc).join(" | ")));
+    }
+    for property_id in deadlock_property_ids(response) {
+        out.push_str(&format!("deadlock_property: {property_id}\n"));
+    }
+    out
+}
+
+fn render_model_text_scc(response: &InspectResponse) -> String {
+    let summary = build_action_graph_summary(response);
+    let mut out = format!(
+        "graph_view: scc\nmodel_id: {}\nsccs: {}\n",
+        response.model_id,
+        summary.sccs.len()
+    );
+    for scc in &summary.sccs {
+        out.push_str(&format!("{}\n", scc_label_lines(scc).join(" | ")));
+    }
+    out
 }
 
 fn render_model_svg_logic(response: &InspectResponse) -> String {
@@ -582,228 +1156,6 @@ fn render_model_svg_overview(response: &InspectResponse) -> String {
         title = escape_xml(&format!("model: {}", response.model_id)),
         body = body,
     )
-}
-
-pub fn render_model_text_with_view(response: &InspectResponse, view: GraphView) -> String {
-    match view {
-        GraphView::Overview => render_model_text_overview(response),
-        GraphView::Logic => render_model_text_logic(response),
-        GraphView::Deadlock => render_model_text_deadlock(response),
-        GraphView::Scc => render_model_text_scc(response),
-    }
-}
-
-fn render_model_mermaid_deadlock(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let sink_sccs = sink_sccs(&summary);
-    let mut out = String::from("flowchart LR\n");
-    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
-    out.push_str(&format!(
-        "  {root}[\"{}\"]\n",
-        mermaid_label(&[
-            format!("deadlock view: {}", response.model_id),
-            format!("sink components: {}", sink_sccs.len())
-        ])
-    ));
-    for scc in &sink_sccs {
-        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
-        out.push_str(&format!(
-            "  {node}[\"{}\"]\n",
-            mermaid_label(&deadlock_scc_lines(scc))
-        ));
-        out.push_str(&format!("  {root} --> {node}\n"));
-        for incoming in &scc.incoming {
-            let from = sanitize_id(&format!("scc_{}", incoming));
-            out.push_str(&format!(
-                "  {from}[\"{}\"]\n",
-                mermaid_label(&scc_label_lines(&summary.sccs[*incoming]))
-            ));
-            out.push_str(&format!("  {from} --> {node}\n"));
-        }
-    }
-    if sink_sccs.is_empty() {
-        out.push_str(&format!(
-            "  {}[\"{}\"]\n",
-            sanitize_id(&format!("sink_empty_{}", response.model_id)),
-            mermaid_label(&["no sink SCCs detected from action dependencies".to_string()])
-        ));
-    }
-    append_deadlock_property_notes_mermaid(response, &root, &mut out);
-    out
-}
-
-fn render_model_mermaid_scc(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let mut out = String::from("flowchart LR\n");
-    for scc in &summary.sccs {
-        let node = sanitize_id(&format!("scc_{}", scc.index));
-        out.push_str(&format!(
-            "  {node}[\"{}\"]\n",
-            mermaid_label(&scc_label_lines(scc))
-        ));
-    }
-    for scc in &summary.sccs {
-        let from = sanitize_id(&format!("scc_{}", scc.index));
-        for outgoing in &scc.outgoing {
-            let to = sanitize_id(&format!("scc_{}", outgoing));
-            out.push_str(&format!("  {from} --> {to}\n"));
-        }
-    }
-    if summary.sccs.is_empty() {
-        out.push_str("  EmptyScc[\"no action SCCs\"]\n");
-    }
-    out
-}
-
-fn render_model_dot_deadlock(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let sink_sccs = sink_sccs(&summary);
-    let mut out = String::from(
-        "digraph deadlock_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
-    );
-    let root = sanitize_id(&format!("deadlock_{}", response.model_id));
-    out.push_str(&format!(
-        "  {root} [label=\"{}\", shape=note];\n",
-        dot_label(&[
-            format!("deadlock view: {}", response.model_id),
-            format!("sink components: {}", sink_sccs.len())
-        ])
-    ));
-    for scc in &sink_sccs {
-        let node = sanitize_id(&format!("sink_scc_{}", scc.index));
-        out.push_str(&format!(
-            "  {node} [label=\"{}\"];\n",
-            dot_label(&deadlock_scc_lines(scc))
-        ));
-        out.push_str(&format!("  {root} -> {node};\n"));
-        for incoming in &scc.incoming {
-            let from = sanitize_id(&format!("scc_{}", incoming));
-            out.push_str(&format!(
-                "  {from} [label=\"{}\"];\n",
-                dot_label(&scc_label_lines(&summary.sccs[*incoming]))
-            ));
-            out.push_str(&format!("  {from} -> {node};\n"));
-        }
-    }
-    append_deadlock_property_notes_dot(response, &mut out);
-    out.push_str("}\n");
-    out
-}
-
-fn render_model_dot_scc(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let mut out = String::from(
-        "digraph scc_view {\n  rankdir=LR;\n  node [shape=box, fontname=\"Helvetica\"];\n",
-    );
-    for scc in &summary.sccs {
-        let node = sanitize_id(&format!("scc_{}", scc.index));
-        out.push_str(&format!(
-            "  {node} [label=\"{}\"];\n",
-            dot_label(&scc_label_lines(scc))
-        ));
-    }
-    for scc in &summary.sccs {
-        let from = sanitize_id(&format!("scc_{}", scc.index));
-        for outgoing in &scc.outgoing {
-            let to = sanitize_id(&format!("scc_{}", outgoing));
-            out.push_str(&format!("  {from} -> {to};\n"));
-        }
-    }
-    if summary.sccs.is_empty() {
-        out.push_str("  empty [label=\"no action SCCs\", shape=note];\n");
-    }
-    out.push_str("}\n");
-    out
-}
-
-fn render_model_svg_deadlock(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let sink_sccs = sink_sccs(&summary);
-    let mut sections = vec![(
-        "Deadlock Sinks".to_string(),
-        if sink_sccs.is_empty() {
-            vec!["no sink SCCs detected from action dependencies".to_string()]
-        } else {
-            sink_sccs
-                .iter()
-                .flat_map(|scc| deadlock_scc_lines(scc))
-                .collect::<Vec<_>>()
-        },
-    )];
-    let deadlock_properties = deadlock_property_ids(response);
-    if !deadlock_properties.is_empty() {
-        sections.push((
-            "Deadlock Properties".to_string(),
-            deadlock_properties
-                .into_iter()
-                .map(|property| format!("{property} | kind: deadlock_freedom"))
-                .collect(),
-        ));
-    }
-    render_svg_sections(response, "deadlock view", sections)
-}
-
-fn render_model_svg_scc(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let mut lines = summary
-        .sccs
-        .iter()
-        .flat_map(scc_label_lines)
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        lines.push("no action SCCs".to_string());
-    }
-    render_svg_sections(response, "scc view", vec![("SCCs".to_string(), lines)])
-}
-
-fn render_model_text_overview(response: &InspectResponse) -> String {
-    format!(
-        "graph_view: overview\nmodel_id: {}\nactions: {}\nproperties: {}\n",
-        response.model_id,
-        response.action_details.len(),
-        response.property_details.len()
-    )
-}
-
-fn render_model_text_logic(response: &InspectResponse) -> String {
-    let mut out = format!("graph_view: logic\nmodel_id: {}\n", response.model_id);
-    for transition in &response.transition_details {
-        out.push_str(&format!(
-            "transition: {}\n",
-            transition_label_lines(transition).join(" | ")
-        ));
-    }
-    out
-}
-
-fn render_model_text_deadlock(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let sink_sccs = sink_sccs(&summary);
-    let mut out = format!(
-        "graph_view: deadlock\nmodel_id: {}\nsink_sccs: {}\n",
-        response.model_id,
-        sink_sccs.len()
-    );
-    for scc in &sink_sccs {
-        out.push_str(&format!("{}\n", deadlock_scc_lines(scc).join(" | ")));
-    }
-    for property_id in deadlock_property_ids(response) {
-        out.push_str(&format!("deadlock_property: {property_id}\n"));
-    }
-    out
-}
-
-fn render_model_text_scc(response: &InspectResponse) -> String {
-    let summary = build_action_graph_summary(response);
-    let mut out = format!(
-        "graph_view: scc\nmodel_id: {}\nsccs: {}\n",
-        response.model_id,
-        summary.sccs.len()
-    );
-    for scc in &summary.sccs {
-        out.push_str(&format!("{}\n", scc_label_lines(scc).join(" | ")));
-    }
-    out
 }
 
 fn append_dot_cluster<I>(out: &mut String, name: &str, label: &str, entries: I)
@@ -1365,10 +1717,11 @@ mod tests {
     };
 
     use super::{
-        render_model_dot, render_model_dot_with_view, render_model_mermaid,
-        render_model_mermaid_with_view, render_model_svg, render_model_svg_with_view,
-        render_model_text_with_view, render_trace_mermaid, render_trace_sequence_mermaid,
-        GraphView,
+        build_failure_graph_slice, render_model_dot, render_model_dot_failure,
+        render_model_dot_with_view, render_model_mermaid, render_model_mermaid_failure,
+        render_model_mermaid_with_view, render_model_svg, render_model_svg_failure,
+        render_model_svg_with_view, render_model_text_with_view, render_trace_mermaid,
+        render_trace_sequence_mermaid, GraphView,
     };
 
     #[test]
@@ -1660,6 +2013,94 @@ mod tests {
         let logic = render_model_mermaid_with_view(&inspect, GraphView::Logic);
         assert!(logic.contains("transition internals hidden"));
         assert!(!logic.contains("transition_INC_0"));
+    }
+
+    #[test]
+    fn renders_failure_slice_views() {
+        let inspect = InspectResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req-1".to_string(),
+            status: "ok".to_string(),
+            model_id: "CounterModel".to_string(),
+            machine_ir_ready: true,
+            machine_ir_error: None,
+            capabilities: InspectCapabilities::fully_ready(),
+            state_fields: vec!["x".to_string()],
+            actions: vec!["INC".to_string()],
+            predicates: vec![],
+            scenarios: vec![],
+            properties: vec!["P_RANGE".to_string()],
+            state_field_details: vec![InspectStateField {
+                name: "x".to_string(),
+                rust_type: "u8".to_string(),
+                range: Some("0..=3".to_string()),
+                variants: Vec::new(),
+                is_set: false,
+            }],
+            action_details: vec![InspectAction {
+                action_id: "INC".to_string(),
+                role: "business".to_string(),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+            }],
+            predicate_details: vec![],
+            scenario_details: vec![],
+            transition_details: vec![InspectTransition {
+                action_id: "INC".to_string(),
+                role: "business".to_string(),
+                guard: Some("x < 3".to_string()),
+                effect: Some("x := x + 1".to_string()),
+                reads: vec!["x".to_string()],
+                writes: vec!["x".to_string()],
+                path_tags: vec!["counterexample".to_string()],
+                updates: vec![InspectTransitionUpdate {
+                    field: "x".to_string(),
+                    expr: "x + 1".to_string(),
+                }],
+            }],
+            property_details: vec![InspectProperty {
+                property_id: "P_RANGE".to_string(),
+                kind: "invariant".to_string(),
+                expr: Some("state.x <= 1".to_string()),
+                scope_expr: None,
+                action_filter: None,
+            }],
+        };
+        let trace = EvidenceTrace {
+            schema_version: "1.0.0".to_string(),
+            evidence_id: "ev-1".to_string(),
+            run_id: "run-1".to_string(),
+            property_id: "P_RANGE".to_string(),
+            evidence_kind: EvidenceKind::Counterexample,
+            assurance_level: AssuranceLevel::Complete,
+            trace_hash: "sha256:x".to_string(),
+            steps: vec![TraceStep {
+                index: 0,
+                from_state_id: "s-0".to_string(),
+                action_id: Some("INC".to_string()),
+                action_label: Some("INC".to_string()),
+                to_state_id: "s-1".to_string(),
+                depth: 1,
+                state_before: BTreeMap::from([("x".to_string(), Value::UInt(1))]),
+                state_after: BTreeMap::from([("x".to_string(), Value::UInt(2))]),
+                path: None,
+                note: None,
+            }],
+        };
+        let slice = build_failure_graph_slice(&inspect, &trace, "P_RANGE").expect("slice");
+        assert_eq!(slice.failing_action_id.as_deref(), Some("INC"));
+        assert_eq!(slice.focused_fields, vec!["x".to_string()]);
+
+        let mermaid = render_model_mermaid_failure(&inspect, &slice);
+        assert!(mermaid.contains("Failure Slice"));
+        assert!(mermaid.contains("property P_RANGE fails after action INC"));
+
+        let dot = render_model_dot_failure(&inspect, &slice);
+        assert!(dot.contains("cluster_failure_slice"));
+        assert!(dot.contains("P_RANGE"));
+
+        let svg = render_model_svg_failure(&inspect, &slice);
+        assert!(svg.contains("failure slice: CounterModel"));
     }
 
     #[test]

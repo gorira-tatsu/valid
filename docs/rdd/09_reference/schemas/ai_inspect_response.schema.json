@@ -2,12 +2,74 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.inspect.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "model_id", "state_fields", "actions", "predicates", "scenarios", "properties"],
+  "required": ["schema_version", "request_id", "status", "model_id", "capabilities", "state_fields", "actions", "predicates", "scenarios", "properties"],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string", "minLength": 1 },
     "status": { "type": "string", "enum": ["ok"] },
     "model_id": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "parse_ready",
+        "explicit_ready",
+        "ir_ready",
+        "solver_ready",
+        "coverage_ready",
+        "explain_ready",
+        "testgen_ready",
+        "reasons",
+        "parse",
+        "explicit",
+        "ir",
+        "solver",
+        "coverage",
+        "explain",
+        "testgen",
+        "temporal"
+      ],
+      "properties": {
+        "parse_ready": { "type": "boolean" },
+        "explicit_ready": { "type": "boolean" },
+        "ir_ready": { "type": "boolean" },
+        "solver_ready": { "type": "boolean" },
+        "coverage_ready": { "type": "boolean" },
+        "explain_ready": { "type": "boolean" },
+        "testgen_ready": { "type": "boolean" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "parse": { "$ref": "#/$defs/capabilityDetail" },
+        "explicit": { "$ref": "#/$defs/capabilityDetail" },
+        "ir": { "$ref": "#/$defs/capabilityDetail" },
+        "solver": { "$ref": "#/$defs/capabilityDetail" },
+        "coverage": { "$ref": "#/$defs/capabilityDetail" },
+        "explain": { "$ref": "#/$defs/capabilityDetail" },
+        "testgen": { "$ref": "#/$defs/capabilityDetail" },
+        "temporal": {
+          "type": "object",
+          "required": [
+            "property_ids",
+            "operators",
+            "support_level",
+            "explicit_status",
+            "solver_status",
+            "reason"
+          ],
+          "properties": {
+            "property_ids": { "type": "array", "items": { "type": "string" } },
+            "operators": { "type": "array", "items": { "type": "string" } },
+            "support_level": {
+              "type": "string",
+              "enum": ["not_applicable", "explicit_only"]
+            },
+            "explicit_status": { "type": "string", "minLength": 1 },
+            "solver_status": { "type": "string", "minLength": 1 },
+            "reason": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "state_fields": { "type": "array", "items": { "type": "string" } },
     "actions": { "type": "array", "items": { "type": "string" } },
     "predicates": { "type": "array", "items": { "type": "string" } },
@@ -51,6 +113,21 @@
         },
         "additionalProperties": false
       }
+    }
+  },
+  "$defs": {
+    "capabilityDetail": {
+      "type": "object",
+      "required": ["reason", "migration_hint", "unsupported_features"],
+      "properties": {
+        "reason": { "type": "string" },
+        "migration_hint": { "type": ["string", "null"] },
+        "unsupported_features": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

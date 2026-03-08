@@ -34,6 +34,15 @@ pub struct CapabilityMatrix {
     pub supports_trace: bool,
     pub supports_witness: bool,
     pub selfcheck_compatible: bool,
+    pub temporal: TemporalCapabilityMatrix,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporalCapabilityMatrix {
+    pub status: String,
+    pub supported_operators: Vec<String>,
+    pub unsupported_operators: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 pub trait SolverAdapter {
@@ -129,19 +138,77 @@ pub enum AdapterConfig {
 
 pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
     format!(
-        "{{\"backend\":\"{}\",\"capabilities\":{{\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{}}}}}",
+        "{{\"backend\":\"{}\",\"capabilities\":{{\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{}}}}}",
         matrix.backend_name,
         matrix.supports_explicit,
         matrix.supports_bmc,
         matrix.supports_certificate,
         matrix.supports_trace,
         matrix.supports_witness,
-        matrix.selfcheck_compatible
+        matrix.selfcheck_compatible,
+        render_temporal_capability_json(&matrix.temporal),
     )
 }
 
 pub fn validate_capability_matrix(matrix: &CapabilityMatrix) -> Result<(), String> {
-    require_non_empty(&matrix.backend_name, "backend_name")
+    require_non_empty(&matrix.backend_name, "backend_name")?;
+    require_non_empty(&matrix.temporal.status, "temporal.status")?;
+    Ok(())
+}
+
+fn render_temporal_capability_json(temporal: &TemporalCapabilityMatrix) -> String {
+    format!(
+        "{{\"status\":\"{}\",\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
+        temporal.status,
+        render_string_array(&temporal.supported_operators),
+        render_string_array(&temporal.unsupported_operators),
+        render_string_array(&temporal.notes),
+    )
+}
+
+fn render_string_array(values: &[String]) -> String {
+    let body = values
+        .iter()
+        .map(|value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{}]", body)
+}
+
+fn all_temporal_operators() -> Vec<String> {
+    vec![
+        "always".to_string(),
+        "eventually".to_string(),
+        "next".to_string(),
+        "until".to_string(),
+    ]
+}
+
+fn complete_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
+    TemporalCapabilityMatrix {
+        status: "complete".to_string(),
+        supported_operators: all_temporal_operators(),
+        unsupported_operators: Vec::new(),
+        notes,
+    }
+}
+
+fn bounded_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
+    TemporalCapabilityMatrix {
+        status: "bounded".to_string(),
+        supported_operators: all_temporal_operators(),
+        unsupported_operators: Vec::new(),
+        notes,
+    }
+}
+
+fn unavailable_temporal_support(note: impl Into<String>) -> TemporalCapabilityMatrix {
+    TemporalCapabilityMatrix {
+        status: "unavailable".to_string(),
+        supported_operators: Vec::new(),
+        unsupported_operators: all_temporal_operators(),
+        notes: vec![note.into()],
+    }
 }
 
 pub fn capabilities_for_config(config: &AdapterConfig) -> CapabilityMatrix {
@@ -271,6 +338,9 @@ impl SolverAdapter for ExplicitAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: true,
+            temporal: complete_temporal_support(vec![
+                "evaluated over the explored reachable graph".to_string(),
+            ]),
         }
     }
 
@@ -361,6 +431,10 @@ impl SolverAdapter for MockBmcAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            temporal: bounded_temporal_support(vec![
+                "temporal properties are checked only within the configured depth bound"
+                    .to_string(),
+            ]),
         }
     }
 
@@ -454,6 +528,9 @@ impl SolverAdapter for Cvc5Adapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            temporal: unavailable_temporal_support(
+                "SMT adapter does not yet lower temporal expressions; use backend=explicit",
+            ),
         }
     }
 
@@ -563,6 +640,9 @@ impl SolverAdapter for VarisatAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: true,
+            temporal: unavailable_temporal_support(
+                "SAT adapter does not yet lower temporal expressions; use backend=explicit",
+            ),
         }
     }
 
@@ -666,6 +746,9 @@ impl SolverAdapter for CommandSolverAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            temporal: unavailable_temporal_support(
+                "command backends do not declare temporal support in the normalized protocol",
+            ),
         }
     }
 
@@ -1090,8 +1173,12 @@ mod tests {
         let caps = adapter.capabilities();
         assert!(caps.supports_bmc);
         assert!(caps.supports_witness);
+        assert_eq!(caps.temporal.status, "bounded");
         validate_capability_matrix(&caps).unwrap();
         assert!(render_capability_matrix_json(&caps).contains("\"backend\":\"mock-bmc\""));
+        assert!(
+            render_capability_matrix_json(&caps).contains("\"temporal\":{\"status\":\"bounded\"")
+        );
     }
 
     #[test]

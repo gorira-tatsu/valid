@@ -247,6 +247,7 @@ fn cargo_valid_inspects_registered_model() {
     assert!(stdout.contains("\"capabilities\":{\"parse_ready\":true"));
     assert!(stdout.contains("\"solver_ready\":false"));
     assert!(stdout.contains("\"opaque_step_closure\""));
+    assert!(stdout.contains("\"temporal\":{\"property_ids\":[]"));
     assert!(stdout.contains("\"state_field_details\""));
     assert!(stdout.contains("\"action_details\""));
     assert!(stdout.contains("\"transition_details\""));
@@ -485,6 +486,40 @@ fn cargo_valid_graph_marks_step_models_as_explicit_only() {
     let logic_stdout = String::from_utf8_lossy(&logic_output.stdout);
     assert!(logic_stdout.contains("transition internals hidden"));
     assert!(!logic_stdout.contains("transition_INC_0"));
+}
+
+#[test]
+fn cargo_valid_graph_supports_failure_view() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("graph")
+        .arg("failing-counter")
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .output()
+        .expect("cargo-valid failure graph should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Failure Slice"));
+    assert!(stdout.contains("P_FAIL"));
+
+    let json_output = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(example_registry_file())
+        .arg("graph")
+        .arg("failing-counter")
+        .arg("--view=failure")
+        .arg("--property=P_FAIL")
+        .arg("--format=json")
+        .output()
+        .expect("cargo-valid failure graph json should run");
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(json_stdout.contains("\"graph_view\":\"failure\""));
+    assert!(json_stdout.contains("\"graph_slice\""));
+    assert!(json_stdout.contains("\"property_id\":\"P_FAIL\""));
 }
 
 #[test]
@@ -1149,6 +1184,26 @@ fn cargo_valid_init_writes_valid_toml() {
         .join("generated-tests")
         .join(".gitkeep")
         .exists());
+    assert!(project_dir.join("artifacts").join(".gitkeep").exists());
+    assert!(project_dir
+        .join("benchmarks")
+        .join("baselines")
+        .join(".gitkeep")
+        .exists());
+    let codex_config = fs::read_to_string(project_dir.join(".mcp").join("codex.toml"))
+        .expect("codex bootstrap config");
+    assert!(codex_config.contains("command = \"valid\""));
+    assert!(codex_config.contains("\"--project\", \".\""));
+    assert!(!codex_config.contains("/Users/"));
+    let claude_code_config = fs::read_to_string(project_dir.join(".mcp").join("claude-code.json"))
+        .expect("claude code bootstrap config");
+    assert!(claude_code_config.contains("\"valid-registry\""));
+    assert!(claude_code_config.contains("\"--project\""));
+    let bootstrap_guide =
+        fs::read_to_string(project_dir.join("docs").join("ai").join("bootstrap.md"))
+            .expect("bootstrap guide");
+    assert!(bootstrap_guide.contains(".mcp/codex.toml"));
+    assert!(bootstrap_guide.contains("critical_properties"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

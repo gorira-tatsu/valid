@@ -234,6 +234,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("resources should be present")
         .iter()
         .any(|item| item["uri"] == "valid://docs/ai-authoring-guide"));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
+        .any(|item| item["uri"] == "valid://docs/ai-curriculum"));
 
     let authoring_resource = client.request(
         "resources/read",
@@ -276,6 +281,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("docs should be present")
         .iter()
         .any(|item| item["doc_id"] == "language-spec"));
+    assert!(docs_index["docs"]
+        .as_array()
+        .expect("docs should be present")
+        .iter()
+        .any(|item| item["doc_id"] == "ai-review-workflow"));
 
     let authoring_guide = structured_content(
         client.call_tool("valid_docs_get", json!({ "doc_id": "ai-authoring-guide" })),
@@ -359,6 +369,22 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_str()
         .expect("graph should be text")
         .contains("flowchart"));
+
+    let failure_graph = structured_content(client.call_tool(
+        "valid_graph",
+        json!({
+            "model_file": model_file_str,
+            "format": "json",
+            "view": "failure",
+            "property_id": "P_FAIL"
+        }),
+    ));
+    assert_eq!(failure_graph["graph_view"], "failure");
+    assert_eq!(failure_graph["graph_slice"]["property_id"], "P_FAIL");
+    assert!(failure_graph["graph_slice"]["summary"]
+        .as_str()
+        .expect("summary should exist")
+        .contains("P_FAIL"));
 
     let deadlock_graph = structured_content(client.call_tool(
         "valid_graph",

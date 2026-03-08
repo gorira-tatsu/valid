@@ -42,11 +42,50 @@ pub struct ObservationMismatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConformanceMismatchKind {
+    State,
+    Property,
+    Output,
+    HarnessRuntime,
+}
+
+impl ConformanceMismatchKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Property => "property",
+            Self::Output => "output",
+            Self::HarnessRuntime => "harness_runtime",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConformanceMismatch {
+    pub kind: ConformanceMismatchKind,
+    pub likely_fix_surface: String,
+    pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<BTreeMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual: Option<BTreeMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_property_holds: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_property_holds: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConformanceReport {
     pub schema_version: String,
     pub vector_id: String,
     pub status: String,
     pub mismatch_count: usize,
+    pub mismatch_categories: Vec<String>,
+    pub mismatches: Vec<ConformanceMismatch>,
     pub observation_mismatches: Vec<ObservationMismatch>,
     pub expected_property_holds: Option<bool>,
     pub actual_property_holds: Option<bool>,
@@ -192,30 +231,88 @@ pub fn compare_conformance(
     response: &ConformanceResponse,
 ) -> ConformanceReport {
     let mut observation_mismatches = Vec::new();
+    let mut mismatches = Vec::new();
     for (index, expected) in vector.expected_observations.iter().enumerate() {
         let actual = response.observations.get(index).cloned();
         if actual.as_ref() != Some(expected) {
+            let (kind, likely_fix_surface, summary) = match actual.as_ref() {
+                Some(_) => (
+                    ConformanceMismatchKind::State,
+                    "implementation_state".to_string(),
+                    format!("state observation mismatch at step {index}"),
+                ),
+                None => (
+                    ConformanceMismatchKind::Output,
+                    "implementation_output".to_string(),
+                    format!("missing observation output at step {index}"),
+                ),
+            };
             observation_mismatches.push(ObservationMismatch {
                 index,
                 expected: expected.clone(),
+                actual: actual.clone(),
+            });
+            mismatches.push(ConformanceMismatch {
+                kind,
+                likely_fix_surface,
+                summary,
+                index: Some(index),
+                expected: Some(expected.clone()),
                 actual,
+                expected_property_holds: None,
+                actual_property_holds: None,
             });
         }
     }
     for index in vector.expected_observations.len()..response.observations.len() {
+        let actual = response.observations.get(index).cloned();
         observation_mismatches.push(ObservationMismatch {
             index,
             expected: BTreeMap::new(),
-            actual: response.observations.get(index).cloned(),
+            actual: actual.clone(),
+        });
+        mismatches.push(ConformanceMismatch {
+            kind: ConformanceMismatchKind::Output,
+            likely_fix_surface: "implementation_output".to_string(),
+            summary: format!("unexpected observation output at step {index}"),
+            index: Some(index),
+            expected: Some(BTreeMap::new()),
+            actual,
+            expected_property_holds: None,
+            actual_property_holds: None,
         });
     }
     let property_mismatch = vector.expected_property_holds != response.property_holds;
-    let mismatch_count = observation_mismatches.len() + usize::from(property_mismatch);
+    if property_mismatch {
+        mismatches.push(ConformanceMismatch {
+            kind: ConformanceMismatchKind::Property,
+            likely_fix_surface: "implementation_or_model".to_string(),
+            summary: "property result mismatch".to_string(),
+            index: None,
+            expected: None,
+            actual: None,
+            expected_property_holds: vector.expected_property_holds,
+            actual_property_holds: response.property_holds,
+        });
+    }
+    let mismatch_categories = {
+        let mut categories = Vec::new();
+        for mismatch in &mismatches {
+            let category = mismatch.kind.as_str().to_string();
+            if !categories.contains(&category) {
+                categories.push(category);
+            }
+        }
+        categories
+    };
+    let mismatch_count = mismatches.len();
     ConformanceReport {
         schema_version: "1.0.0".to_string(),
         vector_id: vector.vector_id.clone(),
         status: if mismatch_count == 0 { "PASS" } else { "FAIL" }.to_string(),
         mismatch_count,
+        mismatch_categories,
+        mismatches,
         observation_mismatches,
         expected_property_holds: vector.expected_property_holds,
         actual_property_holds: response.property_holds,
@@ -237,7 +334,7 @@ mod tests {
         testgen::{TestVector, VectorActionStep},
     };
 
-    use super::{compare_conformance, ConformanceResponse};
+    use super::{compare_conformance, ConformanceMismatchKind, ConformanceResponse};
 
     fn sample_vector() -> TestVector {
         TestVector {
@@ -288,6 +385,8 @@ mod tests {
         );
         assert_eq!(report.status, "PASS");
         assert_eq!(report.mismatch_count, 0);
+        assert!(report.mismatch_categories.is_empty());
+        assert!(report.mismatches.is_empty());
     }
 
     #[test]
@@ -306,5 +405,54 @@ mod tests {
         assert_eq!(report.status, "FAIL");
         assert_eq!(report.mismatch_count, 2);
         assert_eq!(report.observation_mismatches.len(), 1);
+        assert_eq!(
+            report.mismatch_categories,
+            vec!["state".to_string(), "property".to_string()]
+        );
+        assert_eq!(report.mismatches[0].kind, ConformanceMismatchKind::State);
+        assert_eq!(report.mismatches[1].kind, ConformanceMismatchKind::Property);
+    }
+
+    #[test]
+    fn compare_conformance_classifies_missing_and_extra_outputs() {
+        let missing_output = compare_conformance(
+            &sample_vector(),
+            "fixture-runner",
+            &ConformanceResponse {
+                schema_version: "1.0.0".to_string(),
+                status: "ok".to_string(),
+                observations: vec![],
+                property_holds: Some(false),
+                message: None,
+            },
+        );
+        assert_eq!(
+            missing_output.mismatch_categories,
+            vec!["output".to_string()]
+        );
+        assert_eq!(
+            missing_output.mismatches[0].kind,
+            ConformanceMismatchKind::Output
+        );
+
+        let extra_output = compare_conformance(
+            &sample_vector(),
+            "fixture-runner",
+            &ConformanceResponse {
+                schema_version: "1.0.0".to_string(),
+                status: "ok".to_string(),
+                observations: vec![
+                    BTreeMap::from([("x".to_string(), Value::UInt(2))]),
+                    BTreeMap::from([("x".to_string(), Value::UInt(3))]),
+                ],
+                property_holds: Some(false),
+                message: None,
+            },
+        );
+        assert_eq!(extra_output.mismatch_categories, vec!["output".to_string()]);
+        assert_eq!(
+            extra_output.mismatches[0].kind,
+            ConformanceMismatchKind::Output
+        );
     }
 }
