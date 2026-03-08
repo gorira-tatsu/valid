@@ -26,7 +26,7 @@ use crate::{
     frontend::compile_model,
     ir::Path,
     kernel::{eval::eval_expr, replay::replay_actions, transition::apply_action},
-    project::{rerun_recommendations, ProjectConfig},
+    project::{rerun_recommendations, verification_policy, ProjectConfig},
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
@@ -2294,9 +2294,14 @@ fn list_models_tool(config: &ServerConfig, args: &ListModelsArgs) -> Result<Tool
 }
 
 fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResult, String> {
+    let effective_suite_name = effective_suite_name(
+        config.project_config.as_ref(),
+        args.critical,
+        args.suite_name.as_deref(),
+    );
     let mode = if args.critical {
         "critical"
-    } else if args.suite_name.is_some() {
+    } else if effective_suite_name.is_some() {
         "named_suite"
     } else {
         "all"
@@ -2329,7 +2334,7 @@ fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResu
             project_config,
             &catalog,
             args.critical,
-            args.suite_name.as_deref(),
+            effective_suite_name.as_deref(),
         )?;
         let mut outputs = Vec::new();
         for run in runs {
@@ -2368,7 +2373,8 @@ fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResu
         }
         Ok(ToolResult::success(json!({
             "selection_mode": mode,
-            "suite_name": args.suite_name,
+            "suite_name": effective_suite_name,
+            "verification_policy": verification_policy(project_config),
             "runs": outputs
         })))
     } else {
@@ -2399,7 +2405,7 @@ fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResu
                     project_config,
                     &catalog,
                     args.critical,
-                    args.suite_name.as_deref(),
+                    effective_suite_name.as_deref(),
                 )?;
                 let mut outputs = Vec::new();
                 for run in runs {
@@ -2436,7 +2442,8 @@ fn suite_run_tool(config: &ServerConfig, args: &SuiteRunArgs) -> Result<ToolResu
                 }
                 Ok(ToolResult::success(json!({
                     "selection_mode": mode,
-                    "suite_name": args.suite_name,
+                    "suite_name": effective_suite_name,
+                    "verification_policy": verification_policy(project_config),
                     "runs": outputs
                 })))
             }
@@ -2454,6 +2461,10 @@ fn augment_list_models_value(config: &ServerConfig, mut value: Value) -> Value {
             object.insert(
                 "property_suites".to_string(),
                 json!(project_config.property_suites),
+            );
+            object.insert(
+                "verification_policy".to_string(),
+                json!(verification_policy(project_config)),
             );
         }
     }
@@ -2546,6 +2557,19 @@ fn select_suite_runs(
         );
     }
     Err("valid_suite_run requires `critical=true` or `suite_name`".to_string())
+}
+
+fn effective_suite_name(
+    project_config: Option<&ProjectConfig>,
+    critical: bool,
+    explicit_suite_name: Option<&str>,
+) -> Option<String> {
+    if critical {
+        return None;
+    }
+    explicit_suite_name
+        .map(str::to_string)
+        .or_else(|| project_config.and_then(|config| config.default_suite.clone()))
 }
 
 fn expand_mcp_property_targets(

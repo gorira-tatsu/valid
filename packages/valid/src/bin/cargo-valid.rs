@@ -42,7 +42,8 @@ use valid::{
     project::{
         render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
         render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
-        render_project_config_template, render_registry_source_template, ProjectConfig,
+        render_project_config_template, render_registry_source_template, verification_policy,
+        ProjectConfig,
     },
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
@@ -360,20 +361,25 @@ fn run_external_all(parsed: CliArgs) -> ! {
     }
 
     if parsed.json {
-        let mode = match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+        let effective_suite_name = effective_suite_name(
+            parsed.project_config.as_ref(),
+            parsed.critical,
+            parsed.suite_name.as_deref(),
+        );
+        let mode = match suite_selection_mode(parsed.critical, effective_suite_name.as_deref()) {
             SuiteSelectionMode::All => "all",
             SuiteSelectionMode::Critical => "critical",
             SuiteSelectionMode::Named => "named_suite",
         };
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "selection_mode": mode,
-                "suite_name": parsed.suite_name,
-                "runs": json_runs
-            }))
-            .expect("suite json")
-        );
+        let mut body = json!({
+            "selection_mode": mode,
+            "suite_name": effective_suite_name,
+            "runs": json_runs
+        });
+        if let Some(config) = &parsed.project_config {
+            body["verification_policy"] = json!(verification_policy(config));
+        }
+        println!("{}", serde_json::to_string(&body).expect("suite json"));
     }
     progress.finish(aggregate_status);
     process::exit(aggregate_status.code());
@@ -624,7 +630,12 @@ enum SuiteSelectionMode {
 }
 
 fn build_suite_runs_for_external(parsed: &CliArgs) -> Vec<SuiteRun> {
-    match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+    let effective_suite_name = effective_suite_name(
+        parsed.project_config.as_ref(),
+        parsed.critical,
+        parsed.suite_name.as_deref(),
+    );
+    match suite_selection_mode(parsed.critical, effective_suite_name.as_deref()) {
         SuiteSelectionMode::All => {
             let models = if parsed.suite_models.is_empty() {
                 fetch_external_models(parsed)
@@ -677,7 +688,7 @@ fn build_suite_runs_for_external(parsed: &CliArgs) -> Vec<SuiteRun> {
             let config = parsed.project_config.as_ref().unwrap_or_else(|| {
                 usage_exit("`cargo valid suite --suite=<name>` requires valid.toml property_suites")
             });
-            let suite_name = parsed.suite_name.as_deref().expect("named suite");
+            let suite_name = effective_suite_name.as_deref().expect("named suite");
             let entries = config.property_suites.get(suite_name).unwrap_or_else(|| {
                 usage_exit(&format!("unknown property suite `{suite_name}`"));
             });
@@ -706,7 +717,12 @@ fn build_suite_runs_for_bundled(parsed: &ParsedArgs) -> Vec<SuiteRun> {
         &parsed.suite_models,
         parsed.property_id.as_ref(),
         parsed.critical,
-        parsed.suite_name.as_deref(),
+        effective_suite_name(
+            parsed.project_config.as_ref(),
+            parsed.critical,
+            parsed.suite_name.as_deref(),
+        )
+        .as_deref(),
     )
 }
 
@@ -824,6 +840,19 @@ fn suite_selection_mode(critical: bool, suite_name: Option<&str>) -> SuiteSelect
     }
 }
 
+fn effective_suite_name(
+    config: Option<&ProjectConfig>,
+    critical: bool,
+    explicit_suite_name: Option<&str>,
+) -> Option<String> {
+    if critical {
+        return None;
+    }
+    explicit_suite_name
+        .map(str::to_string)
+        .or_else(|| config.and_then(|config| config.default_suite.clone()))
+}
+
 fn expand_property_targets(
     model_catalog: &std::collections::BTreeMap<String, Vec<String>>,
     requested: Vec<(String, String)>,
@@ -918,20 +947,25 @@ fn cmd_all(parsed: ParsedArgs) {
     }
 
     if parsed.json {
-        let mode = match suite_selection_mode(parsed.critical, parsed.suite_name.as_deref()) {
+        let effective_suite_name = effective_suite_name(
+            parsed.project_config.as_ref(),
+            parsed.critical,
+            parsed.suite_name.as_deref(),
+        );
+        let mode = match suite_selection_mode(parsed.critical, effective_suite_name.as_deref()) {
             SuiteSelectionMode::All => "all",
             SuiteSelectionMode::Critical => "critical",
             SuiteSelectionMode::Named => "named_suite",
         };
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "selection_mode": mode,
-                "suite_name": parsed.suite_name,
-                "runs": json_runs
-            }))
-            .expect("suite json")
-        );
+        let mut body = json!({
+            "selection_mode": mode,
+            "suite_name": effective_suite_name,
+            "runs": json_runs
+        });
+        if let Some(config) = &parsed.project_config {
+            body["verification_policy"] = json!(verification_policy(config));
+        }
+        println!("{}", serde_json::to_string(&body).expect("suite json"));
     }
     progress.finish(aggregate_status);
     process::exit(aggregate_status.code());
@@ -946,6 +980,7 @@ fn cmd_list(parsed: ParsedArgs) {
         if let Some(config) = &parsed.project_config {
             body["critical_properties"] = json!(config.critical_properties);
             body["property_suites"] = json!(config.property_suites);
+            body["verification_policy"] = json!(verification_policy(config));
         }
         println!("{}", serde_json::to_string(&body).expect("list json"));
     } else {
