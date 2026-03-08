@@ -1905,7 +1905,14 @@ fn init_response_schema() -> Value {
             "created": { "type": "string" },
             "registry": { "type": "string" },
             "scaffolded_registry": { "type": "string" },
-            "generated_tests_dir": { "type": "string" }
+            "generated_tests_dir": { "type": "string" },
+            "artifacts_dir": { "type": "string" },
+            "benchmarks_baseline_dir": { "type": "string" },
+            "mcp_configs": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "ai_bootstrap_guide": { "type": "string" }
         }
     })
 }

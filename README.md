@@ -77,8 +77,11 @@ cargo install --path . --features varisat-backend
 cargo valid init
 ```
 
-`cargo valid init` creates a minimal `valid.toml` and scaffolds a starter
-registry file under `examples/valid_models.rs`:
+`cargo valid init` creates a minimal `valid.toml`, scaffolds a starter
+registry file under `examples/valid_models.rs`, creates the default
+`generated-tests/`, `artifacts/`, and `benchmarks/baselines/` directories, and
+writes project-local AI/MCP bootstrap snippets under `.mcp/` plus
+`docs/ai/bootstrap.md`:
 
 ```toml
 registry = "examples/valid_models.rs"
@@ -104,6 +107,16 @@ benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
 
+After init, the shortest AI-assisted setup path is:
+
+```sh
+cargo valid models
+cargo valid inspect approval-model
+cat .mcp/codex.toml
+```
+
+The generated `.mcp/` snippets use `valid mcp --project .`, so they avoid
+hard-coded local build paths and keep the project root as the source of truth.
 Reusable CI workflow templates for `inspect`, `check`, `generate-tests`,
 `conformance`, and `doc --check` now live in
 [`.github/workflows/`](.github/workflows/) with usage notes under
@@ -260,6 +273,13 @@ For reproducible registry startup, you can pass build policy through to Cargo:
 valid mcp --project /absolute/path/to/project --locked --offline
 valid mcp --project /absolute/path/to/project --feature varisat-backend
 ```
+
+Fresh `cargo valid init` projects now also include local snippets at:
+
+- `.mcp/codex.toml`
+- `.mcp/claude-code.json`
+- `.mcp/claude-desktop.json`
+- `docs/ai/bootstrap.md`
 
 When registry mode is configured at startup, tool calls only need `model_name`.
 Without startup configuration, pass `registry_binary` and `model_name` per

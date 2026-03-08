@@ -1154,6 +1154,26 @@ fn cargo_valid_init_writes_valid_toml() {
         .join("generated-tests")
         .join(".gitkeep")
         .exists());
+    assert!(project_dir.join("artifacts").join(".gitkeep").exists());
+    assert!(project_dir
+        .join("benchmarks")
+        .join("baselines")
+        .join(".gitkeep")
+        .exists());
+    let codex_config = fs::read_to_string(project_dir.join(".mcp").join("codex.toml"))
+        .expect("codex bootstrap config");
+    assert!(codex_config.contains("command = \"valid\""));
+    assert!(codex_config.contains("\"--project\", \".\""));
+    assert!(!codex_config.contains("/Users/"));
+    let claude_code_config = fs::read_to_string(project_dir.join(".mcp").join("claude-code.json"))
+        .expect("claude code bootstrap config");
+    assert!(claude_code_config.contains("\"valid-registry\""));
+    assert!(claude_code_config.contains("\"--project\""));
+    let bootstrap_guide =
+        fs::read_to_string(project_dir.join("docs").join("ai").join("bootstrap.md"))
+            .expect("bootstrap guide");
+    assert!(bootstrap_guide.contains(".mcp/codex.toml"));
+    assert!(bootstrap_guide.contains("critical_properties"));
 
     let _ = fs::remove_dir_all(project_dir);
 }
