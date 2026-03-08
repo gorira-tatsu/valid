@@ -9,6 +9,7 @@ what not to do, and which commands/tools to reach for next.
 Related documents:
 
 - [AI Docs Curriculum](./curriculum.md)
+- [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Common Pitfalls](./common-pitfalls.md)
@@ -182,10 +183,12 @@ For MCP-driven authoring:
 
 If your MCP client supports prompts, prefer this sequence:
 
-1. `clarify_requirement` when the requirement is still ambiguous
-2. `author_model` for new work or `review_model` for existing models
-3. `migrate_step_to_transitions` for step-heavy models
-4. `explain_readiness_failure` or `triage_conformance_failure` when a run
+1. `refine_requirement` when the requirement is still ambiguous
+2. `refine_requirement_from_evidence` when a counterexample, dead action,
+   vacuity clue, or mismatch shows the brief is incomplete
+3. `author_model` for new work or `review_model` for existing models
+4. `migrate_step_to_transitions` for step-heavy models
+5. `explain_readiness_failure` or `triage_conformance_failure` when a run
    already failed
 
 ## Rules to follow
@@ -230,6 +233,7 @@ If your MCP client supports prompts, prefer this sequence:
 ## Next read
 
 - If you need the learning path or task map: [AI Docs Curriculum](./curriculum.md)
+- If you need a clarification-first loop: [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - If you need source-adjacent comment guidance: [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)

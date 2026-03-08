@@ -10,6 +10,9 @@
 - [AI Docs Curriculum](./ai/curriculum.md)
   Learning-order and task-order map for authoring, review, migration, and
   conformance workflows.
+- [Requirement Refinement Workflow](./ai/requirement-refinement-workflow.md)
+  Clarification-first and evidence-driven loop for turning ambiguous product
+  requirements into stable modeling briefs.
 - [Model Authoring Best Practices](./ai/model-authoring-best-practices.md)
   Guidance for documenting model intent, scope, assumptions, scenarios, and
   critical properties close to the source.
@@ -35,7 +38,9 @@
 
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide, then move through the AI docs curriculum.
+authoring guide, then move through the AI docs curriculum. If the requirement
+is still moving, read the requirement refinement workflow before editing the
+model.
 If you want models to stay readable for review and long-term maintenance, read
 the model authoring best-practice guide alongside the AI guide.
 If you want to keep a `valid` project maintainable as it grows, read the

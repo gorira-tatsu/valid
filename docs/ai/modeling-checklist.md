@@ -5,6 +5,7 @@ Use this checklist before returning a generated model or reviewing one.
 Related documents:
 
 - [AI Authoring Guide](./authoring-guide.md)
+- [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Examples Curriculum](./examples-curriculum.md)
@@ -75,10 +76,12 @@ Related documents:
 - The finite domains are small enough to inspect mentally
 - Repeated guards or property expressions have been extracted into predicates
 - The CLI/MCP commands suggested to the user match the chosen mode
-- If the requirement is still fuzzy, start again with the `clarify_requirement`
-  MCP prompt before editing the model further
+- If the requirement is still fuzzy, go back to the requirement refinement
+  workflow and use `refine_requirement` or `refine_requirement_from_evidence`
+  before editing the model further
 ## Task-specific follow-up
 
+- For requirement refinement: [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - For review: [Review Workflow](./review-workflow.md)
 - For migration: [Migration Guide](./migration-guide.md)
 - For implementation handoff: [Conformance Workflow](./conformance-workflow.md)
