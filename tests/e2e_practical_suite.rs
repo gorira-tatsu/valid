@@ -166,6 +166,8 @@ fn practical_suite_coverage_and_path_testgen_surface_business_paths() {
     assert!(coverage.status.success());
     let coverage_stdout = String::from_utf8_lossy(&coverage.stdout);
     assert!(coverage_stdout.contains("\"path_tags\""));
+    assert!(coverage_stdout.contains("\"requirement_tags\""));
+    assert!(coverage_stdout.contains("\"requirement_tag_coverage_percent\""));
     assert!(coverage_stdout.contains("finance_path"));
     assert!(coverage_stdout.contains("risk_path"));
 

@@ -498,7 +498,8 @@ cargo valid suite --suite=smoke
 - `explain`
   Summarizes likely failure causes and next steps.
 - `coverage`
-  Reports action, guard, and path-tag coverage.
+  Reports action, guard, path-tag, and requirement-tag coverage, including
+  business/setup splits.
 - `generate-tests`
   Produces regression-oriented Rust tests under `generated-tests/`. JSON output
   reports `strictness` and `derivation` for each vector so review tooling can
