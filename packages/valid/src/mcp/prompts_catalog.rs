@@ -83,6 +83,33 @@ pub(crate) const PROMPTS: &[PromptEntry] = &[
         ],
     },
     PromptEntry {
+        name: "compare_candidate_models",
+        title: "Compare Candidate Models",
+        description: "Guide an LLM through comparing two plausible model candidates and extracting the shortest reviewable difference before choosing one.",
+        arguments: &[
+            PromptArgument {
+                name: "left_candidate",
+                description: "Left candidate model path, registry model name, or inline label.",
+                required: true,
+            },
+            PromptArgument {
+                name: "right_candidate",
+                description: "Right candidate model path, registry model name, or inline label.",
+                required: true,
+            },
+            PromptArgument {
+                name: "requirement_brief",
+                description: "Shared requirement brief or ambiguity statement that both candidates claim to satisfy.",
+                required: true,
+            },
+            PromptArgument {
+                name: "focus_property",
+                description: "Optional property id or requirement slice that should anchor the comparison.",
+                required: false,
+            },
+        ],
+    },
+    PromptEntry {
         name: "author_model",
         title: "Author Model",
         description: "Guide an LLM through authoring a new valid model from a domain description.",

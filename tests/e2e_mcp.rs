@@ -274,6 +274,7 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         "refine_requirement",
         "clarify_requirement",
         "refine_requirement_from_evidence",
+        "compare_candidate_models",
         "author_model",
         "review_model",
         "migrate_step_to_transitions",
@@ -347,6 +348,29 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_str()
         .expect("evidence prompt text should be present")
         .contains("using model evidence"));
+
+    let comparison_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "compare_candidate_models",
+            "arguments": {
+                "left_candidate": "left.valid",
+                "right_candidate": "right.valid",
+                "requirement_brief": "retry should preserve draft edits until the user abandons them"
+            }
+        }),
+    );
+    assert!(comparison_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("comparison prompt text should be present")
+        .contains("Compare two plausible candidate models"));
+    assert!(comparison_prompt["messages"]
+        .as_array()
+        .expect("comparison prompt messages should be present")
+        .iter()
+        .any(|item| item["content"]["type"] == "resource"
+            && item["content"]["resource"]["uri"]
+                == "valid://docs/ai-candidate-comparison-workflow"));
 
     let conformance_prompt = client.request(
         "prompts/get",
