@@ -826,7 +826,7 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
     );
     if parsed.json {
         println!(
-            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
+            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"vector_groups\":[{}],\"generated_files\":[{}]}}",
             response.schema_version,
             response.request_id,
             response.status,
@@ -835,15 +835,28 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                 .vectors
                 .iter()
                 .map(|vector| format!(
-                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
+                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                     vector.vector_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
                     vector.strategy,
+                    vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                    vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
                     vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
                     vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
                     vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(","),
+            response
+                .vector_groups
+                .iter()
+                .map(|group| format!(
+                    "{{\"group_kind\":\"{}\",\"group_id\":\"{}\",\"vector_ids\":[{}]}}",
+                    group.group_kind,
+                    group.group_id,
+                    group.vector_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(",")
                 ))
                 .collect::<Vec<_>>()
                 .join(","),
@@ -855,15 +868,43 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
             println!("vectors:");
             for vector in &response.vectors {
                 println!(
-                    "- {} strictness={} derivation={} source={} strategy={} focus_action={} guard_enabled={} notes={}",
+                    "- {} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
                     vector.vector_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
                     vector.strategy,
+                    if vector.requirement_clusters.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.requirement_clusters.join(",")
+                    },
+                    if vector.risk_clusters.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.risk_clusters.join(",")
+                    },
                     vector.focus_action_id.as_deref().unwrap_or("-"),
-                    vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "-".to_string()),
-                    if vector.notes.is_empty() { "-".to_string() } else { vector.notes.join(",") }
+                    vector
+                        .expected_guard_enabled
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    if vector.notes.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.notes.join(",")
+                    }
+                );
+            }
+        }
+        if !response.vector_groups.is_empty() {
+            println!("grouped output:");
+            for group in &response.vector_groups {
+                println!(
+                    "- {}:{} -> {}",
+                    group.group_kind,
+                    group.group_id,
+                    group.vector_ids.join(",")
                 );
             }
         }
@@ -1177,11 +1218,14 @@ fn testgen_machine<M: VerifiedMachine>(
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
+                requirement_clusters: vector.grouping.requirement_clusters.clone(),
+                risk_clusters: vector.grouping.risk_clusters.clone(),
                 focus_action_id: vector.focus_action_id.clone(),
                 expected_guard_enabled: vector.expected_guard_enabled,
                 notes: vector.notes.clone(),
             })
             .collect(),
+        vector_groups: crate::api::summarize_testgen_groups(&vectors),
         generated_files,
     }
 }

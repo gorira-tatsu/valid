@@ -1,6 +1,6 @@
 //! Machine-readable API layer for AI and CLI integration.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
@@ -38,6 +38,59 @@ use crate::{
         write_generated_test_files, MinimizeResult, ReplayTarget,
     },
 };
+
+pub fn summarize_testgen_groups(
+    vectors: &[crate::testgen::TestVector],
+) -> Vec<TestgenGroupSummary> {
+    let mut groups = BTreeMap::<(String, String), Vec<String>>::new();
+    for vector in vectors {
+        for cluster in &vector.grouping.requirement_clusters {
+            groups
+                .entry(("requirement".to_string(), cluster.clone()))
+                .or_default()
+                .push(vector.vector_id.clone());
+        }
+        for cluster in &vector.grouping.risk_clusters {
+            groups
+                .entry(("risk".to_string(), cluster.clone()))
+                .or_default()
+                .push(vector.vector_id.clone());
+        }
+    }
+    groups
+        .into_iter()
+        .map(|((group_kind, group_id), mut vector_ids)| {
+            vector_ids.sort();
+            vector_ids.dedup();
+            TestgenGroupSummary {
+                group_kind,
+                group_id,
+                vector_ids,
+            }
+        })
+        .collect()
+}
+
+fn backfill_testgen_grouping(property_id: &str, vectors: &mut [crate::testgen::TestVector]) {
+    let fallback_cluster = format!("property:{property_id}");
+    for vector in vectors {
+        if vector.grouping.requirement_clusters.is_empty() {
+            vector
+                .grouping
+                .requirement_clusters
+                .push(fallback_cluster.clone());
+        }
+        if vector.grouping.risk_clusters.is_empty()
+            && vector
+                .grouping
+                .requirement_clusters
+                .iter()
+                .any(|cluster| cluster == "risk_path")
+        {
+            vector.grouping.risk_clusters.push("risk_path".to_string());
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectResponse {
@@ -211,13 +264,13 @@ pub struct CheckRequest {
     pub solver_args: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainCandidateCause {
     pub kind: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainFieldDiff {
     pub field: String,
     pub before: crate::ir::Value,
@@ -243,13 +296,24 @@ pub struct ExplainReviewContext {
     pub vacuous: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExplainRepairTargetHint {
     pub target: String,
     pub reason: String,
     pub priority: String,
     pub action_id: Option<String>,
     pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TracebackSummary {
+    pub breakpoint_kind: String,
+    pub breakpoint_note: Option<String>,
+    pub failure_step_index: usize,
+    pub failing_action_id: Option<String>,
+    pub changed_fields: Vec<String>,
+    pub field_diffs: Vec<ExplainFieldDiff>,
+    pub involved_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -465,6 +529,7 @@ pub struct TestgenResponse {
     pub status: String,
     pub vector_ids: Vec<String>,
     pub vectors: Vec<TestgenVectorSummary>,
+    pub vector_groups: Vec<TestgenGroupSummary>,
     pub generated_files: Vec<String>,
 }
 
@@ -476,9 +541,18 @@ pub struct TestgenVectorSummary {
     pub derivation: String,
     pub source_kind: String,
     pub strategy: String,
+    pub requirement_clusters: Vec<String>,
+    pub risk_clusters: Vec<String>,
     pub focus_action_id: Option<String>,
     pub expected_guard_enabled: Option<bool>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestgenGroupSummary {
+    pub group_kind: String,
+    pub group_id: String,
+    pub vector_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -2274,6 +2348,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         }
         vectors
     };
+    backfill_testgen_grouping(target_property_id, &mut vectors);
     annotate_model_replay_targets(&request.source_name, target_property_id, &mut vectors);
     let generated_files =
         write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
@@ -2303,11 +2378,14 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
+                requirement_clusters: vector.grouping.requirement_clusters.clone(),
+                risk_clusters: vector.grouping.risk_clusters.clone(),
                 focus_action_id: vector.focus_action_id.clone(),
                 expected_guard_enabled: vector.expected_guard_enabled,
                 notes: vector.notes.clone(),
             })
             .collect(),
+        vector_groups: summarize_testgen_groups(&vectors),
         generated_files,
     })
 }
@@ -5249,8 +5327,21 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
         if let Some(action_id) = &vector.focus_action_id {
             require_non_empty(action_id, "vectors[].focus_action_id")?;
         }
+        for cluster in &vector.requirement_clusters {
+            require_non_empty(cluster, "vectors[].requirement_clusters[]")?;
+        }
+        for cluster in &vector.risk_clusters {
+            require_non_empty(cluster, "vectors[].risk_clusters[]")?;
+        }
         for note in &vector.notes {
             require_non_empty(note, "vectors[].notes[]")?;
+        }
+    }
+    for group in &response.vector_groups {
+        require_non_empty(&group.group_kind, "vector_groups[].group_kind")?;
+        require_non_empty(&group.group_id, "vector_groups[].group_id")?;
+        if group.vector_ids.is_empty() {
+            return Err("vector_groups[].vector_ids must not be empty".to_string());
         }
     }
     Ok(())
@@ -6257,6 +6348,10 @@ property P_RECOVERY_VISIBLE:
         })
         .unwrap();
         assert!(response.vector_ids.len() >= 1);
+        assert!(response
+            .vectors
+            .iter()
+            .all(|vector| !vector.requirement_clusters.is_empty()));
         validate_testgen_response(&response).unwrap();
         cleanup_generated_files(&response.generated_files);
     }
@@ -6279,6 +6374,7 @@ property P_RECOVERY_VISIBLE:
         .unwrap();
         assert_eq!(response.vector_ids.len(), 1);
         assert_eq!(response.vectors[0].source_kind, "witness");
+        assert!(!response.vectors[0].requirement_clusters.is_empty());
         validate_testgen_response(&response).unwrap();
         cleanup_generated_files(&response.generated_files);
     }
@@ -6354,6 +6450,10 @@ property P_RECOVERY_VISIBLE:
         })
         .unwrap();
         assert!(!response.vector_ids.is_empty());
+        assert!(response
+            .vector_groups
+            .iter()
+            .any(|group| group.group_kind == "requirement"));
         validate_testgen_response(&response).unwrap();
         cleanup_generated_files(&response.generated_files);
     }

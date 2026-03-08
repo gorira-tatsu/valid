@@ -18,7 +18,8 @@
     "expected_path_tags",
     "setup_action_ids",
     "business_action_ids",
-    "notes"
+    "notes",
+    "grouping"
   ],
   "properties": {
     "schema_version": { "type": "string" },
@@ -46,6 +47,14 @@
     "setup_action_ids": { "type": "array", "items": { "type": "string" } },
     "business_action_ids": { "type": "array", "items": { "type": "string" } },
     "notes": { "type": "array", "items": { "type": "string" } },
+    "grouping": {
+      "type": "object",
+      "required": ["requirement_clusters", "risk_clusters"],
+      "properties": {
+        "requirement_clusters": { "type": "array", "items": { "type": "string" } },
+        "risk_clusters": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "replay_target": { "type": ["object", "null"] }
   }
 }

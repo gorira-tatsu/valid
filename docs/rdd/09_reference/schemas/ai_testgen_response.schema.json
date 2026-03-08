@@ -15,22 +15,46 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["vector_id", "run_id", "strictness", "derivation", "source_kind", "strategy", "notes"],
+        "required": [
+          "vector_id",
+          "run_id",
+          "strictness",
+          "derivation",
+          "source_kind",
+          "strategy",
+          "notes",
+          "requirement_clusters",
+          "risk_clusters"
+        ],
         "properties": {
-          "vector_id": { "type": "string", "minLength": 1 },
-          "run_id": { "type": "string", "minLength": 1 },
-          "strictness": { "type": "string", "minLength": 1 },
-          "derivation": { "type": "string", "minLength": 1 },
-          "source_kind": { "type": "string", "minLength": 1 },
-          "strategy": { "type": "string", "minLength": 1 },
+          "vector_id": { "type": "string" },
+          "run_id": { "type": "string" },
+          "strictness": { "type": "string" },
+          "derivation": { "type": "string" },
+          "source_kind": { "type": "string" },
+          "strategy": { "type": "string" },
           "focus_action_id": { "type": ["string", "null"] },
           "expected_guard_enabled": { "type": ["boolean", "null"] },
           "notes": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 }
-          }
+          },
+          "requirement_clusters": { "type": "array", "items": { "type": "string" } },
+          "risk_clusters": { "type": "array", "items": { "type": "string" } }
         },
         "additionalProperties": false
+      }
+    },
+    "vector_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group_kind", "group_id", "vector_ids"],
+        "properties": {
+          "group_kind": { "type": "string" },
+          "group_id": { "type": "string" },
+          "vector_ids": { "type": "array", "items": { "type": "string" } }
+        }
       }
     },
     "generated_files": {

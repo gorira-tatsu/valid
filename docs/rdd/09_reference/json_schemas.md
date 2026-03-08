@@ -42,6 +42,14 @@
 - 定義箇所: `08_specs/testgen_contract_coverage_specs.md`
 - 本体: [schemas/test_vector.schema.json](schemas/test_vector.schema.json)
 
+主要フィールド:
+
+- `expected_path_tags`
+- `setup_action_ids`
+- `business_action_ids`
+- `grouping.requirement_clusters`
+- `grouping.risk_clusters`
+
 ## 3.1 DiagnosticBundle
 
 - ID: `schema.diagnostic_bundle`
@@ -122,6 +130,14 @@
 - 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`
 - 本体: [schemas/ai_testgen_request.schema.json](schemas/ai_testgen_request.schema.json), [schemas/ai_testgen_response.schema.json](schemas/ai_testgen_response.schema.json)
 - 補足: `vectors[]` は `focus_action_id`, `expected_guard_enabled`, `notes` を含み、enablement 系の blocked action / blocker guidance を返せる
+
+主要フィールド:
+
+- `vector_ids`
+- `vectors[].requirement_clusters`
+- `vectors[].risk_clusters`
+- `vector_groups[].group_kind`
+- `vector_groups[].group_id`
 
 ## 12.1 AI Orchestrate Request/Response
 

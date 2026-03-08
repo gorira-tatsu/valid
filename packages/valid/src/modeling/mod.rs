@@ -2779,6 +2779,9 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                     .into_iter()
                     .map(|tag| format!("path_tag:{tag}"))
                     .collect(),
+                grouping: crate::testgen::vector_grouping_from_path_tags(
+                    &machine_transition_tags_for_action::<M>(&action_id),
+                ),
                 replay_target: None,
             });
         }
@@ -3243,6 +3246,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         })
         .map(|step| step.action_id.clone())
         .collect::<Vec<_>>();
+    let grouping = crate::testgen::vector_grouping_from_path_tags(&expected_path_tags);
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -3305,6 +3309,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         setup_action_ids,
         business_action_ids,
         notes,
+        grouping,
         replay_target: None,
     })
 }
