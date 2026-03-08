@@ -19,6 +19,7 @@ Related documents:
 - [Project Organization Guide](../project-organization.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
+- [Parameterized Action Roadmap](../dsl/parameterized-action-roadmap.md)
 
 ## What `valid` is
 
@@ -194,6 +195,10 @@ If your MCP client supports prompts, prefer this sequence:
 - Use `.valid` mode only for compatibility fixtures or frontend tests.
 - Always give bounded integer ranges.
 - Add `reads` and `writes` metadata to every action variant when possible.
+- Do not teach or generate action explosion for business inputs. If the
+  conceptual action is "one action plus a bounded choice", document that intent
+  and keep any duplicated variants limited to tiny teaching fixtures until
+  bounded parameterized actions exist.
 - Keep a short source-adjacent comment above each long-lived model explaining
   summary, scope, assumptions, critical properties, and scenario intent.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and

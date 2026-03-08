@@ -14,6 +14,7 @@ Related documents:
 - [Project Organization Guide](../project-organization.md)
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
+- [Parameterized Action Roadmap](./parameterized-action-roadmap.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
 
 ## What the DSL is
@@ -203,6 +204,15 @@ For maintainability, keep model intent visible with named `predicates:`,
 focused `scenarios:`, and descriptive action ids. Use `cargo valid lint` /
 `cargo valid readiness` to catch repeated conditions, oversized model
 structure, and setup-heavy transition sets before they drift.
+
+Treat today's enum-only action surface as the current implementation boundary,
+not as a recommendation to encode every business input as its own action
+variant. If the real-world concept is "one action with a bounded choice", do
+not automatically model it as `DoXForA`, `DoXForB`, `DoXForC`, and so on just
+to fit the current surface. Reserve that duplication for intentionally tiny
+examples or regression fixtures, and use the
+[Parameterized Action Roadmap](./parameterized-action-roadmap.md) as the
+planning reference for the long-term shape.
 
 ## IDE Notes
 

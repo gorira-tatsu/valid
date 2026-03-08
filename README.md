@@ -16,8 +16,10 @@ the primary one.
 User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
-[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). The action
+evolution plan lives in
+[docs/dsl/parameterized-action-roadmap.md](./docs/dsl/parameterized-action-roadmap.md).
+AI-assisted authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
 [docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
 and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
 file-splitting guidance lives in
