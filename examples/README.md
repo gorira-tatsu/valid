@@ -24,7 +24,9 @@ Current examples:
 - `password_policy.rs`
   Small declarative string/password-policy model using `len` and
   `regex_match`. Its strong/weak split is a bounded teaching fixture, not the
-  recommended long-term pattern for arbitrary password payloads.
+  recommended long-term pattern for arbitrary password payloads. Treat it as a
+  temporary stand-in for the parameterized-action roadmap, not as a template
+  for variant-per-input modeling.
 - `iam_transition_registry.rs`
   Small declarative policy model with explicit path tags.
 - `saas_multi_tenant_registry.rs`

@@ -48,6 +48,8 @@ If you need the higher-level document order first, start with
   - `String`
   - `len`, `regex_match`
   - explicit-ready vs solver-ready expectations
+  - why the strong/weak action split is a bounded teaching stopgap rather than
+    the desired long-term action shape
 - Suggested commands:
   - `cargo valid --registry examples/password_policy.rs readiness password-policy-safe`
   - `cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG`
