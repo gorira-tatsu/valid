@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    evidence::{EvidenceKind, EvidenceTrace},
+    evidence::{write_vector_artifact, EvidenceKind, EvidenceTrace},
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
@@ -13,7 +13,12 @@ use crate::{
         transition::{apply_action_transition, build_initial_state},
         MachineState,
     },
-    support::{artifact::generated_test_path, hash::stable_hash_hex, io::write_text_file},
+    support::{
+        artifact::generated_test_path,
+        artifact_index::{record_artifact, ArtifactRecord},
+        hash::stable_hash_hex,
+        io::write_text_file,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +31,7 @@ pub struct ReplayTarget {
 pub struct TestVector {
     pub schema_version: String,
     pub vector_id: String,
+    pub run_id: String,
     pub source_kind: String,
     pub strictness: String,
     pub derivation: String,
@@ -129,6 +135,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: trace.evidence_id.replace("ev-", "vec-"),
+        run_id: trace.run_id.clone(),
         source_kind: "counterexample".to_string(),
         strictness: "strict".to_string(),
         derivation: "counterexample_trace".to_string(),
@@ -507,12 +514,14 @@ fn reproduces_failure(
 
 pub fn render_rust_test(vector: &TestVector) -> String {
     let mut out = String::new();
+    out.push_str(&format!("// valid-run-id: {}\n", vector.run_id));
     out.push_str("#[test]\n");
     out.push_str(&format!(
         "fn generated_{}() {{\n",
         vector.vector_id.replace('-', "_")
     ));
     out.push_str(&format!("    let vector_id = \"{}\";\n", vector.vector_id));
+    out.push_str(&format!("    let run_id = \"{}\";\n", vector.run_id));
     out.push_str(&format!(
         "    let property_id = \"{}\";\n",
         vector.property_id
@@ -599,6 +608,7 @@ pub fn render_rust_test(vector: &TestVector) -> String {
         out.push_str("    valid::testgen::assert_replay_output_json(&stdout, &actions, &expected_states, property_id, focus_action_id, expected_guard_enabled, expected_property_holds, &expected_path_tags, &expected_decision_ids);\n");
     }
     out.push_str("    assert!(!vector_id.is_empty());\n");
+    out.push_str("    assert!(!run_id.is_empty());\n");
     out.push_str("    assert!(!property_id.is_empty());\n");
     out.push_str("    assert!(!source_kind.is_empty());\n");
     out.push_str("    assert!(!strictness.is_empty());\n");
@@ -786,9 +796,21 @@ pub fn generated_test_output_path(vector: &TestVector) -> String {
 pub fn write_generated_test_files(vectors: &[TestVector]) -> Result<Vec<String>, String> {
     let mut generated_files = Vec::with_capacity(vectors.len());
     for vector in vectors {
+        let vector_json = render_test_vector_json(vector)?;
+        let _ = write_vector_artifact(&vector.run_id, &vector.vector_id, &vector_json)?;
         let rendered = render_rust_test(vector);
         let path = generated_test_output_path(vector);
         write_text_file(&path, &rendered)?;
+        record_artifact(ArtifactRecord {
+            artifact_kind: "generated_test".to_string(),
+            path: path.clone(),
+            run_id: vector.run_id.clone(),
+            model_id: None,
+            property_id: Some(vector.property_id.clone()),
+            evidence_id: vector.evidence_id.clone(),
+            vector_id: Some(vector.vector_id.clone()),
+            suite_id: None,
+        })?;
         generated_files.push(path);
     }
     Ok(generated_files)
@@ -1237,6 +1259,11 @@ fn build_model_vector_for_node(
                     ))
             )
             .replace("sha256:", "")
+        ),
+        run_id: format!(
+            "run-vector-{}",
+            stable_hash_hex(&(model.model_id.clone() + property_id + &signature))
+                .replace("sha256:", "")
         ),
         source_kind: source_kind.to_string(),
         strictness: strictness.to_string(),

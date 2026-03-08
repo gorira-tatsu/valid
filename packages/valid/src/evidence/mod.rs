@@ -10,6 +10,7 @@ use crate::{
     ir::{DecisionKind, DecisionOutcome, Path, Value},
     support::{
         artifact::{evidence_path, run_result_path, vector_path},
+        artifact_index::{record_artifact, ArtifactRecord},
         diagnostics::Diagnostic,
         io::write_text_file,
         json::{
@@ -82,17 +83,47 @@ pub fn write_outcome_artifacts(
         CheckOutcome::Completed(result) => {
             let result_path = run_result_path(&result.manifest.run_id);
             write_text_file(&result_path, &render_outcome_json(model_id, outcome))?;
+            record_artifact(ArtifactRecord {
+                artifact_kind: "check_result".to_string(),
+                path: result_path.clone(),
+                run_id: result.manifest.run_id.clone(),
+                model_id: Some(model_id.to_string()),
+                property_id: Some(result.property_result.property_id.clone()),
+                evidence_id: None,
+                vector_id: None,
+                suite_id: None,
+            })?;
             paths.push(result_path);
             if let Some(trace) = &result.trace {
                 validate_trace(trace)?;
                 let trace_path = evidence_path(&trace.run_id, &trace.evidence_id);
                 write_text_file(&trace_path, &render_trace_json(trace))?;
+                record_artifact(ArtifactRecord {
+                    artifact_kind: "evidence_trace".to_string(),
+                    path: trace_path.clone(),
+                    run_id: trace.run_id.clone(),
+                    model_id: Some(model_id.to_string()),
+                    property_id: Some(trace.property_id.clone()),
+                    evidence_id: Some(trace.evidence_id.clone()),
+                    vector_id: None,
+                    suite_id: None,
+                })?;
                 paths.push(trace_path);
             }
         }
         CheckOutcome::Errored(error) => {
             let result_path = run_result_path(&error.manifest.run_id);
             write_text_file(&result_path, &render_outcome_json(model_id, outcome))?;
+            record_artifact(ArtifactRecord {
+                artifact_kind: "check_result".to_string(),
+                path: result_path.clone(),
+                run_id: error.manifest.run_id.clone(),
+                model_id: Some(model_id.to_string()),
+                property_id: None,
+                evidence_id: None,
+                vector_id: None,
+                suite_id: None,
+            })?;
             paths.push(result_path);
         }
     }
@@ -118,6 +149,16 @@ fn should_emit_artifacts(policy: ArtifactPolicy, outcome: &CheckOutcome) -> bool
 pub fn write_vector_artifact(run_id: &str, vector_id: &str, body: &str) -> Result<String, String> {
     let path = vector_path(run_id, vector_id);
     write_text_file(&path, body)?;
+    record_artifact(ArtifactRecord {
+        artifact_kind: "test_vector".to_string(),
+        path: path.clone(),
+        run_id: run_id.to_string(),
+        model_id: None,
+        property_id: None,
+        evidence_id: None,
+        vector_id: Some(vector_id.to_string()),
+        suite_id: None,
+    })?;
     Ok(path)
 }
 

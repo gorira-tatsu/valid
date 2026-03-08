@@ -20,6 +20,7 @@ use crate::{
     },
     support::{
         artifact::selfcheck_report_path,
+        artifact_index::{record_artifact, ArtifactRecord},
         io::write_text_file,
         json::{parse_json, require_array_field, require_object, require_string_field},
         schema::{require_non_empty, require_schema_version},
@@ -91,6 +92,16 @@ pub fn render_selfcheck_json(report: &SelfcheckReport) -> String {
 pub fn write_selfcheck_artifact(report: &SelfcheckReport) -> Result<String, String> {
     let path = selfcheck_report_path(&report.suite_id, &report.run_id);
     write_text_file(&path, &render_selfcheck_json(report))?;
+    record_artifact(ArtifactRecord {
+        artifact_kind: "selfcheck_report".to_string(),
+        path: path.clone(),
+        run_id: report.run_id.clone(),
+        model_id: None,
+        property_id: None,
+        evidence_id: None,
+        vector_id: None,
+        suite_id: Some(report.suite_id.clone()),
+    })?;
     Ok(path)
 }
 
