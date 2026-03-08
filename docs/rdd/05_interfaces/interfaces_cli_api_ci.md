@@ -200,6 +200,16 @@ MVP の `strategy` は次を受け付ける。
 - AI と CI が backend 選択前に機能差分を確認できるようにする
 - `command` backend では `solver_executable` と `solver_args[]` の整合を事前に検証する
 
+Temporal reporting:
+
+- `capabilities.temporal.status` は backend ごとの `complete | bounded | unavailable` を返す
+- `capabilities.temporal.semantics` は temporal 判定の意味論を返す
+  - `reachable_graph_fixpoint`: explicit backend。到達可能グラフ上で fixpoint として評価する
+  - `depth_bounded_search`: BMC 系 backend。指定 horizon 内だけを対象にする
+  - `unavailable`: その backend は temporal lowering を提供しない
+- `capabilities.temporal.assurance_levels[]` はその backend が返しうる assurance を明示する
+- inspect/readiness でも temporal property が存在する場合は backend-by-backend の temporal matrix を含め、`explicit` の complete semantics と `mock-bmc` の bounded-only semantics を混同しない
+
 ## 5. API設計
 
 ### 5.1 原則

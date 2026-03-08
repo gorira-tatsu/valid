@@ -110,6 +110,18 @@ pub struct InspectTemporalCapabilities {
     pub explicit_status: String,
     pub solver_status: String,
     pub reason: String,
+    pub backend_statuses: Vec<InspectTemporalBackendStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectTemporalBackendStatus {
+    pub backend: String,
+    pub status: String,
+    pub semantics: String,
+    pub assurance_levels: Vec<String>,
+    pub supported_operators: Vec<String>,
+    pub unsupported_operators: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 impl InspectTemporalCapabilities {
@@ -121,6 +133,7 @@ impl InspectTemporalCapabilities {
             explicit_status: "not_applicable".to_string(),
             solver_status: "not_applicable".to_string(),
             reason: String::new(),
+            backend_statuses: Vec::new(),
         }
     }
 }
@@ -420,6 +433,7 @@ fn inspect_temporal_capabilities(model: &ModelIr) -> InspectTemporalCapabilities
     for property in &temporal_properties {
         collect_temporal_operators(&property.expr, &mut operators);
     }
+    let backend_statuses = temporal_backend_statuses();
 
     InspectTemporalCapabilities {
         property_ids: temporal_properties
@@ -427,11 +441,44 @@ fn inspect_temporal_capabilities(model: &ModelIr) -> InspectTemporalCapabilities
             .map(|property| property.property_id.clone())
             .collect(),
         operators: operators.into_iter().collect(),
-        support_level: "explicit_only".to_string(),
+        support_level: "backend_specific".to_string(),
         explicit_status: "complete".to_string(),
-        solver_status: "unavailable".to_string(),
-        reason: "temporal properties currently require backend=explicit; bounded or unavailable temporal support is reported per backend through the capabilities surface".to_string(),
+        solver_status: "bounded_or_unavailable".to_string(),
+        reason: "temporal semantics are backend-specific: explicit evaluates over the reachable graph, mock-bmc is bounded-only, and current SAT/SMT/command adapters do not lower temporal formulas".to_string(),
+        backend_statuses,
     }
+}
+
+fn temporal_backend_statuses() -> Vec<InspectTemporalBackendStatus> {
+    let configs = [
+        AdapterConfig::Explicit,
+        AdapterConfig::MockBmc,
+        AdapterConfig::SatVarisat,
+        AdapterConfig::SmtCvc5 {
+            executable: "cvc5".to_string(),
+            args: Vec::new(),
+        },
+        AdapterConfig::Command {
+            backend_name: "command".to_string(),
+            executable: "solver".to_string(),
+            args: Vec::new(),
+        },
+    ];
+    configs
+        .into_iter()
+        .map(|config| {
+            let matrix = capabilities_for_config(&config);
+            InspectTemporalBackendStatus {
+                backend: matrix.backend_name,
+                status: matrix.temporal.status,
+                semantics: matrix.temporal.semantics,
+                assurance_levels: matrix.temporal.assurance_levels,
+                supported_operators: matrix.temporal.supported_operators,
+                unsupported_operators: matrix.temporal.unsupported_operators,
+                notes: matrix.temporal.notes,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1774,6 +1821,20 @@ pub fn validate_inspect_response(response: &InspectResponse) -> Result<(), Strin
         &response.capabilities.temporal.solver_status,
         "capabilities.temporal.solver_status",
     )?;
+    for backend in &response.capabilities.temporal.backend_statuses {
+        require_non_empty(
+            &backend.backend,
+            "capabilities.temporal.backend_statuses[].backend",
+        )?;
+        require_non_empty(
+            &backend.status,
+            "capabilities.temporal.backend_statuses[].status",
+        )?;
+        require_non_empty(
+            &backend.semantics,
+            "capabilities.temporal.backend_statuses[].semantics",
+        )?;
+    }
     require_len_match(
         response.state_fields.len(),
         response.state_field_details.len(),
@@ -2785,6 +2846,28 @@ pub fn lint_from_inspect_and_source(
             None,
         ));
     }
+    if !inspect.capabilities.temporal.property_ids.is_empty() {
+        let backend_summary = inspect
+            .capabilities
+            .temporal
+            .backend_statuses
+            .iter()
+            .map(|backend| format!("{}={}", backend.backend, backend.status))
+            .collect::<Vec<_>>()
+            .join(", ");
+        findings.push(capability_finding(
+            "warn",
+            "temporal_backend_semantics_vary",
+            format!(
+                "temporal properties use backend-specific semantics and assurance levels ({backend_summary})"
+            ),
+            Some(
+                "use backend=explicit for reachable-graph evaluation, treat mock-bmc as bounded bug-finding only, and consult `valid capabilities --backend ...` before relying on solver results"
+                    .to_string(),
+            ),
+            None,
+        ));
+    }
     findings.extend(maintainability_findings(inspect, source));
     let status = if findings
         .iter()
@@ -3281,6 +3364,12 @@ fn append_capability_guidance(inspect: &InspectResponse, next_steps: &mut Vec<St
             push_unique(next_steps, hint.clone());
         }
     }
+    if !inspect.capabilities.temporal.property_ids.is_empty() {
+        push_unique(
+            next_steps,
+            "temporal backend review: explicit gives reachable-graph semantics, mock-bmc is bounded-only, and SAT/SMT/command backends remain unavailable for temporal formulas".to_string(),
+        );
+    }
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
@@ -3459,8 +3548,25 @@ fn render_capabilities_json(capabilities: &InspectCapabilities) -> String {
 }
 
 fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilities) -> String {
+    let backend_statuses = temporal
+        .backend_statuses
+        .iter()
+        .map(|backend| {
+            format!(
+                "{{\"backend\":\"{}\",\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
+                escape_json(&backend.backend),
+                escape_json(&backend.status),
+                escape_json(&backend.semantics),
+                render_string_array(&backend.assurance_levels),
+                render_string_array(&backend.supported_operators),
+                render_string_array(&backend.unsupported_operators),
+                render_string_array(&backend.notes)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"property_ids\":{},\"operators\":{},\"support_level\":\"{}\",\"explicit_status\":\"{}\",\"solver_status\":\"{}\",\"reason\":{}}}",
+        "{{\"property_ids\":{},\"operators\":{},\"support_level\":\"{}\",\"explicit_status\":\"{}\",\"solver_status\":\"{}\",\"reason\":{},\"backend_statuses\":[{}]}}",
         render_string_array(&temporal.property_ids),
         render_string_array(&temporal.operators),
         escape_json(&temporal.support_level),
@@ -3470,7 +3576,8 @@ fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilit
             "null".to_string()
         } else {
             format!("\"{}\"", escape_json(&temporal.reason))
-        }
+        },
+        backend_statuses
     )
 }
 
@@ -3566,7 +3673,40 @@ fn render_temporal_capability_details_text(temporal: &InspectTemporalCapabilitie
     if !temporal.reason.is_empty() {
         line.push_str(&format!(" reason={}", temporal.reason));
     }
-    format!("temporal_capabilities:\n{}\n", indent_block(&line, 2))
+    let mut out = format!("temporal_capabilities:\n{}\n", indent_block(&line, 2));
+    if !temporal.backend_statuses.is_empty() {
+        out.push_str("  backend_matrix:\n");
+        for backend in &temporal.backend_statuses {
+            let mut backend_line = format!(
+                "- {} status={} semantics={}",
+                backend.backend, backend.status, backend.semantics
+            );
+            if !backend.assurance_levels.is_empty() {
+                backend_line.push_str(&format!(
+                    " assurance_levels=[{}]",
+                    backend.assurance_levels.join(", ")
+                ));
+            }
+            if !backend.supported_operators.is_empty() {
+                backend_line.push_str(&format!(
+                    " supported=[{}]",
+                    backend.supported_operators.join(", ")
+                ));
+            }
+            if !backend.unsupported_operators.is_empty() {
+                backend_line.push_str(&format!(
+                    " unsupported=[{}]",
+                    backend.unsupported_operators.join(", ")
+                ));
+            }
+            if !backend.notes.is_empty() {
+                backend_line.push_str(&format!(" notes={}", backend.notes.join(" | ")));
+            }
+            out.push_str(&indent_block(&backend_line, 4));
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn render_csv_or_none(values: &[String]) -> String {
@@ -4056,6 +4196,10 @@ pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result
     require_non_empty(
         &response.capabilities.temporal.status,
         "capabilities.temporal.status",
+    )?;
+    require_non_empty(
+        &response.capabilities.temporal.semantics,
+        "capabilities.temporal.semantics",
     )?;
     Ok(())
 }
@@ -4943,10 +5087,13 @@ mod tests {
         let response = inspect_source(&request).unwrap();
         assert_eq!(
             response.capabilities.temporal.support_level,
-            "explicit_only"
+            "backend_specific"
         );
         assert_eq!(response.capabilities.temporal.explicit_status, "complete");
-        assert_eq!(response.capabilities.temporal.solver_status, "unavailable");
+        assert_eq!(
+            response.capabilities.temporal.solver_status,
+            "bounded_or_unavailable"
+        );
         assert_eq!(
             response.capabilities.temporal.property_ids,
             vec!["P_EVENTUAL_OPEN".to_string()]
