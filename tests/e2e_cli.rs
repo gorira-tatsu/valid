@@ -317,6 +317,44 @@ fn cli_check_accepts_scenario_selection() {
 }
 
 #[test]
+fn cli_inspect_and_check_support_bounded_action_choices() {
+    let temp_dir = unique_temp_dir("valid-bounded-choice");
+    let model_path = temp_dir.join("choice.valid");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    fs::write(
+        &model_path,
+        "model Counter\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Add:\n  choose delta: 1, 2\n  pre: x + {{delta}} <= 2\n  post:\n    x = x + {{delta}}\nproperty P_REACH_TWO:\n  reachability: x == 2\n",
+    )
+    .expect("model file should be written");
+
+    let inspect = Command::new(binary_path())
+        .arg("inspect")
+        .arg(&model_path)
+        .arg("--json")
+        .output()
+        .expect("inspect should run");
+    assert!(inspect.status.success());
+    let inspect_stdout = String::from_utf8_lossy(&inspect.stdout);
+    assert!(inspect_stdout.contains("Add[delta=1]"));
+    assert!(inspect_stdout.contains("Add[delta=2]"));
+
+    let check = Command::new(binary_path())
+        .arg("check")
+        .arg(&model_path)
+        .arg("--property=P_REACH_TWO")
+        .arg("--json")
+        .output()
+        .expect("check should run");
+    let check_stdout = String::from_utf8_lossy(&check.stdout);
+    assert_eq!(check.status.code(), Some(1));
+    assert!(check_stdout.contains("\"property_kind\":\"reachability\""));
+    assert!(check_stdout.contains("\"reason_code\":\"TARGET_REACHED\""));
+
+    let _ = fs::remove_file(&model_path);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn cli_artifacts_lists_selfcheck_run_history() {
     let temp_dir = unique_temp_dir("valid-artifacts");
     fs::create_dir_all(&temp_dir).expect("temp dir should be created");

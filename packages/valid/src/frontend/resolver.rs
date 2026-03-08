@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::frontend::parser::{ParsedAssignment, ParsedModel, ParsedNamedExpr};
+use crate::frontend::parser::{ParsedAssignment, ParsedChoice, ParsedModel, ParsedNamedExpr};
 use crate::support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +36,10 @@ pub fn resolve_model(parsed: ParsedModel) -> Result<ResolvedModel, Vec<Diagnosti
                 action.line,
             ));
         }
+        let mut choice_names = HashSet::new();
+        for choice in &action.choices {
+            ensure_unique_choice(choice, &mut choice_names, &mut errors);
+        }
         for post in &action.posts {
             check_assignment_target(post, &fields, &mut errors);
         }
@@ -62,6 +66,24 @@ pub fn resolve_model(parsed: ParsedModel) -> Result<ResolvedModel, Vec<Diagnosti
         Ok(ResolvedModel { parsed })
     } else {
         Err(errors)
+    }
+}
+
+fn ensure_unique_choice(
+    choice: &ParsedChoice,
+    seen: &mut HashSet<String>,
+    errors: &mut Vec<Diagnostic>,
+) {
+    if choice.name.is_empty() {
+        errors.push(resolve_error(
+            "bounded choice name must not be empty".to_string(),
+            choice.line,
+        ));
+    } else if !seen.insert(choice.name.clone()) {
+        errors.push(resolve_error(
+            format!("duplicate bounded choice `{}`", choice.name),
+            choice.line,
+        ));
     }
 }
 

@@ -154,6 +154,9 @@ Useful expressions:
 - `reachability` and `deadlock_freedom` are supported over the finite state
   space
 - `cover`, `transition`, and scenario-scoped checks are explicit-first today
+- for tiny finite input domains, prefer `choose name: v1, v2, ...` inside one
+  action and reference `{{name}}` in `pre:` / `post:` expressions instead of
+  exploding one conceptual action into many hand-written variants
 - a model can be `explicit_ready` but not `solver_ready`
 - `readiness` / `lint` is the authority for migration hints and degraded
   capability reasons, plus advisory maintainability findings such as missing
