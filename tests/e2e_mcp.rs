@@ -234,6 +234,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("resources should be present")
         .iter()
         .any(|item| item["uri"] == "valid://docs/ai-authoring-guide"));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
+        .any(|item| item["uri"] == "valid://docs/ai-curriculum"));
 
     let authoring_resource = client.request(
         "resources/read",
@@ -276,6 +281,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("docs should be present")
         .iter()
         .any(|item| item["doc_id"] == "language-spec"));
+    assert!(docs_index["docs"]
+        .as_array()
+        .expect("docs should be present")
+        .iter()
+        .any(|item| item["doc_id"] == "ai-review-workflow"));
 
     let authoring_guide = structured_content(
         client.call_tool("valid_docs_get", json!({ "doc_id": "ai-authoring-guide" })),

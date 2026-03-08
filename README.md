@@ -17,7 +17,11 @@ User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
 [docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md).
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
+and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
+file-splitting guidance lives in
+[docs/project-organization.md](./docs/project-organization.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
@@ -106,7 +110,9 @@ Reusable CI workflow templates for `inspect`, `check`, `generate-tests`,
 [docs/ci/README.md](docs/ci/README.md). The repository validates them against a
 fixture project in
 [`tests/fixtures/projects/ci_template_project/`](tests/fixtures/projects/ci_template_project/).
-
+Keep the registry file thin and move real model logic into `src/models/` or
+another explicit module tree. The recommended project layout is documented in
+[docs/project-organization.md](./docs/project-organization.md).
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
 
@@ -175,7 +181,7 @@ Desktop, and other MCP clients can call it as tools.
 Recommended AI flow:
 
 1. call `valid_docs_index`
-2. read `ai-authoring-guide` through `valid_docs_get`
+2. read `ai-authoring-guide` and `ai-curriculum` through `valid_docs_get`
 3. read one curated example through `valid_example_get`
 4. move to `valid_inspect`, `valid_lint`, and `valid_check`
 

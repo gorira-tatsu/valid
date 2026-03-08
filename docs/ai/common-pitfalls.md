@@ -95,3 +95,17 @@ Models may still run, but `inspect`, `graph`, `explain`, `coverage`, and
 
 `valid` properties express semantic constraints over reachable states. They are
 not ordinary Rust type-level guarantees or runtime assertions.
+
+## 9. Reading docs in the wrong order
+
+Common mistake:
+
+- jumping straight to the full spec
+- skipping examples and review flow
+- treating one checklist as the whole curriculum
+
+Correct:
+
+- start with [AI Authoring Guide](./authoring-guide.md)
+- use [AI Docs Curriculum](./curriculum.md) to pick the next page by task
+- switch to the review, migration, or conformance page when the task changes

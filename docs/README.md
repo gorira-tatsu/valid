@@ -7,6 +7,15 @@
   check, testgen, conformance, and doc drift checks.
 - [AI Authoring Guide](./ai/authoring-guide.md)
   Short canonical entrypoint for LLM agents and AI-assisted authoring flows.
+- [AI Docs Curriculum](./ai/curriculum.md)
+  Learning-order and task-order map for authoring, review, migration, and
+  conformance workflows.
+- [Model Authoring Best Practices](./ai/model-authoring-best-practices.md)
+  Guidance for documenting model intent, scope, assumptions, scenarios, and
+  critical properties close to the source.
+- [Project Organization Guide](./project-organization.md)
+  Recommended layout for model files, registries, shared types, integration
+  models, and generated artifacts.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
@@ -26,7 +35,11 @@
 
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide.
+authoring guide, then move through the AI docs curriculum.
+If you want models to stay readable for review and long-term maintenance, read
+the model authoring best-practice guide alongside the AI guide.
+If you want to keep a `valid` project maintainable as it grows, read the
+project organization guide next.
 If you want to model and verify a system, start with the Rust DSL guide.
 If you want to understand the repository's design and scope, read the
 architecture note and the RDD.
