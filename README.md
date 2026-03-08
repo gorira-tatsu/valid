@@ -17,7 +17,8 @@ User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
 [docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md).
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md)
+and [docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
