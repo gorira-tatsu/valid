@@ -196,6 +196,22 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     assert!(initialize["capabilities"]["logging"].is_object());
 
     let tools = client.request("tools/list", json!({}));
+    #[cfg(not(feature = "varisat-backend"))]
+    {
+        let valid_check = tools["tools"]
+            .as_array()
+            .expect("tools/list should return tools")
+            .iter()
+            .find(|tool| tool["name"].as_str() == Some("valid_check"))
+            .expect("valid_check should be listed");
+        let backend_enum = valid_check["inputSchema"]["properties"]["backend"]["enum"]
+            .as_array()
+            .expect("backend enum should be listed")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(!backend_enum.iter().any(|backend| *backend == "sat-varisat"));
+    }
     let tool_names = tools
         .get("tools")
         .and_then(Value::as_array)
@@ -274,6 +290,7 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         "refine_requirement",
         "clarify_requirement",
         "refine_requirement_from_evidence",
+        "compare_candidate_models",
         "author_model",
         "review_model",
         "migrate_step_to_transitions",
@@ -347,6 +364,29 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_str()
         .expect("evidence prompt text should be present")
         .contains("using model evidence"));
+
+    let comparison_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "compare_candidate_models",
+            "arguments": {
+                "left_candidate": "left.valid",
+                "right_candidate": "right.valid",
+                "requirement_brief": "retry should preserve draft edits until the user abandons them"
+            }
+        }),
+    );
+    assert!(comparison_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("comparison prompt text should be present")
+        .contains("Compare two plausible candidate models"));
+    assert!(comparison_prompt["messages"]
+        .as_array()
+        .expect("comparison prompt messages should be present")
+        .iter()
+        .any(|item| item["content"]["type"] == "resource"
+            && item["content"]["resource"]["uri"]
+                == "valid://docs/ai-candidate-comparison-workflow"));
 
     let conformance_prompt = client.request(
         "prompts/get",
@@ -576,6 +616,22 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .and_then(Value::as_str)
         .expect("generated file should be present");
     assert!(temp.path().join(generated_file).exists() || PathBuf::from(generated_file).exists());
+
+    let deadlock_model = temp.path().join("deadlock.valid");
+    fs::write(
+        &deadlock_model,
+        "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n",
+    )
+    .expect("deadlock model should be written");
+    let deadlock_testgen = structured_content(client.call_tool(
+        "valid_testgen",
+        json!({
+            "model_file": deadlock_model.to_string_lossy().to_string(),
+            "strategy": "deadlock"
+        }),
+    ));
+    assert_eq!(deadlock_testgen["vectors"][0]["strategy"], "deadlock");
+    assert_eq!(deadlock_testgen["vectors"][0]["source_kind"], "deadlock");
 
     let distinguish = structured_content(client.call_tool(
         "valid_distinguish",

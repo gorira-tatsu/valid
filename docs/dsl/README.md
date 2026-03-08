@@ -214,6 +214,19 @@ examples or regression fixtures, and use the
 [Parameterized Action Roadmap](./parameterized-action-roadmap.md) as the
 planning reference for the long-term shape.
 
+For tiny finite domains, you can now keep the conceptual action in one place:
+
+```text
+action Add:
+  choose delta: 1, 2
+  pre: x + {{delta}} <= 2
+  post:
+    x = x + {{delta}}
+```
+
+This lowers to one concrete action per choice combination for exploration and
+evidence while keeping the authoring surface bounded and explicit.
+
 ## IDE Notes
 
 Current guidance for a smoother IDE experience:
@@ -346,6 +359,7 @@ solver lowering.
 - `coverage`
 - `explain`
 - `generate-tests --strategy=path`
+- `generate-tests --strategy=deadlock`
 
 Examples:
 
