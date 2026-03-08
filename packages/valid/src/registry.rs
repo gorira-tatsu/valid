@@ -20,8 +20,8 @@ use crate::{
         BatchResult, ExitCode, ProgressReporter, Surface,
     },
     contract::{
-        build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
-        snapshot_model, write_lock_file, ContractSnapshot,
+        build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_drift_text,
+        render_lock_json, snapshot_model, write_lock_file, ContractSnapshot,
     },
     coverage::{render_coverage_json, render_coverage_text, CoverageReport},
     doc::{
@@ -1514,6 +1514,9 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                     .unwrap_or_default();
                 drift.affected_critical_properties = recommendations.affected_critical_properties;
                 drift.affected_property_suites = recommendations.affected_property_suites;
+                drift.affected_artifacts = recommendations.affected_artifacts;
+                drift.repair_surfaces = recommendations.repair_surfaces;
+                drift.suggested_reruns = recommendations.suggested_reruns;
                 let item_exit = if drift.status != "unchanged" {
                     has_drift = true;
                     ExitCode::Fail
@@ -1523,10 +1526,7 @@ fn cmd_contract(models: &[RegisteredModel], args: Vec<String>) {
                 if json {
                     reports.push(render_drift_json(&drift));
                 } else {
-                    println!("{}: {}", drift.contract_id, drift.status);
-                    for change in &drift.changes {
-                        println!("  changed: {change}");
-                    }
+                    print!("{}", render_drift_text(&drift));
                 }
                 progress.item_complete(index, total, model.name, item_exit.code());
             }

@@ -12,6 +12,16 @@ pub struct PropertySuiteEntry {
 pub struct RerunRecommendations {
     pub affected_critical_properties: Vec<String>,
     pub affected_property_suites: Vec<String>,
+    pub affected_artifacts: Vec<String>,
+    pub repair_surfaces: Vec<String>,
+    pub suggested_reruns: Vec<RerunSuggestion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RerunSuggestion {
+    pub action: String,
+    pub target: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
@@ -163,11 +173,124 @@ pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRec
         .iter()
         .filter(|(_, entries)| entries.iter().any(|entry| entry.model == model_id))
         .map(|(suite_name, _)| suite_name.clone())
-        .collect();
+        .collect::<Vec<_>>();
+    let doc_path = format!(
+        "{}/docs/{}.md",
+        config
+            .artifacts_dir
+            .as_deref()
+            .unwrap_or("artifacts")
+            .trim_end_matches('/'),
+        sanitize_model_id(model_id)
+    );
+    let generated_tests_dir = config
+        .generated_tests_dir
+        .as_deref()
+        .unwrap_or("generated-tests")
+        .trim_end_matches('/')
+        .to_string();
+    let mut affected_artifacts = vec![doc_path.clone(), format!("{generated_tests_dir}/")];
+    let mut repair_surfaces = vec![
+        "contract_lock".to_string(),
+        "generated_doc".to_string(),
+        "generated_tests".to_string(),
+    ];
+    let mut suggested_reruns = vec![
+        RerunSuggestion {
+            action: "refresh_contract_lock".to_string(),
+            target: model_id.to_string(),
+            reason: "contract drift updates the canonical lock entry".to_string(),
+        },
+        RerunSuggestion {
+            action: "regenerate_doc".to_string(),
+            target: doc_path,
+            reason: "generated documentation embeds the contract hash".to_string(),
+        },
+        RerunSuggestion {
+            action: "regenerate_tests".to_string(),
+            target: generated_tests_dir,
+            reason: "generated tests may rely on stale traces or contract structure".to_string(),
+        },
+    ];
+    if !affected_critical_properties.is_empty() {
+        repair_surfaces.push("critical_properties".to_string());
+        affected_artifacts.push("valid.toml#critical_properties".to_string());
+        for property_id in &affected_critical_properties {
+            suggested_reruns.push(RerunSuggestion {
+                action: "rerun_critical_property".to_string(),
+                target: property_id.clone(),
+                reason: format!("critical property `{property_id}` maps to `{model_id}`"),
+            });
+        }
+    }
+    if !affected_property_suites.is_empty() {
+        repair_surfaces.push("property_suites".to_string());
+        affected_artifacts.push("valid.toml#property_suites".to_string());
+        for suite_name in &affected_property_suites {
+            suggested_reruns.push(RerunSuggestion {
+                action: "rerun_property_suite".to_string(),
+                target: suite_name.clone(),
+                reason: format!("property suite `{suite_name}` includes `{model_id}`"),
+            });
+        }
+    }
     RerunRecommendations {
         affected_critical_properties,
         affected_property_suites,
+        affected_artifacts,
+        repair_surfaces,
+        suggested_reruns,
     }
+}
+
+pub fn doc_repair_surfaces(drift_sections: &[String]) -> Vec<String> {
+    let mut repair_surfaces = vec!["generated_doc".to_string()];
+    if drift_sections
+        .iter()
+        .any(|section| matches!(section.as_str(), "source_hash" | "contract_hash"))
+    {
+        repair_surfaces.push("contract_metadata".to_string());
+    }
+    if drift_sections.iter().any(|section| section == "mermaid") {
+        repair_surfaces.push("graph_rendering".to_string());
+    }
+    repair_surfaces
+}
+
+pub fn doc_suggested_reruns(output_path: &str, drift_sections: &[String]) -> Vec<RerunSuggestion> {
+    let mut suggested_reruns = vec![RerunSuggestion {
+        action: "regenerate_doc".to_string(),
+        target: output_path.to_string(),
+        reason: "doc drift is repaired by regenerating the derived markdown".to_string(),
+    }];
+    if drift_sections
+        .iter()
+        .any(|section| matches!(section.as_str(), "source_hash" | "contract_hash"))
+    {
+        suggested_reruns.push(RerunSuggestion {
+            action: "review_contract_inputs".to_string(),
+            target: output_path.to_string(),
+            reason: "doc metadata drift usually means the contract or source changed".to_string(),
+        });
+    }
+    if drift_sections.iter().any(|section| section == "mermaid") {
+        suggested_reruns.push(RerunSuggestion {
+            action: "review_graph_rendering".to_string(),
+            target: output_path.to_string(),
+            reason: "diagram drift usually comes from graph rendering changes".to_string(),
+        });
+    }
+    suggested_reruns
+}
+
+fn sanitize_model_id(model_id: &str) -> String {
+    model_id
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+            _ => '-',
+        })
+        .collect()
 }
 
 pub fn render_registry_source_template() -> String {
@@ -478,7 +601,7 @@ mod tests {
         render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
         render_project_config_template, render_registry_source_template, rerun_recommendations,
         verification_policy, CoverageGates, ProjectConfig, PropertySuiteEntry,
-        RerunRecommendations, VerificationPolicy,
+        RerunRecommendations, RerunSuggestion, VerificationPolicy,
     };
 
     #[test]
@@ -613,6 +736,47 @@ default_graph_format = "mermaid"
             RerunRecommendations {
                 affected_critical_properties: vec!["P_SAFE".to_string()],
                 affected_property_suites: vec!["smoke".to_string()],
+                affected_artifacts: vec![
+                    "artifacts/docs/counter.md".to_string(),
+                    "generated-tests/".to_string(),
+                    "valid.toml#critical_properties".to_string(),
+                    "valid.toml#property_suites".to_string(),
+                ],
+                repair_surfaces: vec![
+                    "contract_lock".to_string(),
+                    "generated_doc".to_string(),
+                    "generated_tests".to_string(),
+                    "critical_properties".to_string(),
+                    "property_suites".to_string(),
+                ],
+                suggested_reruns: vec![
+                    RerunSuggestion {
+                        action: "refresh_contract_lock".to_string(),
+                        target: "counter".to_string(),
+                        reason: "contract drift updates the canonical lock entry".to_string(),
+                    },
+                    RerunSuggestion {
+                        action: "regenerate_doc".to_string(),
+                        target: "artifacts/docs/counter.md".to_string(),
+                        reason: "generated documentation embeds the contract hash".to_string(),
+                    },
+                    RerunSuggestion {
+                        action: "regenerate_tests".to_string(),
+                        target: "generated-tests".to_string(),
+                        reason: "generated tests may rely on stale traces or contract structure"
+                            .to_string(),
+                    },
+                    RerunSuggestion {
+                        action: "rerun_critical_property".to_string(),
+                        target: "P_SAFE".to_string(),
+                        reason: "critical property `P_SAFE` maps to `counter`".to_string(),
+                    },
+                    RerunSuggestion {
+                        action: "rerun_property_suite".to_string(),
+                        target: "smoke".to_string(),
+                        reason: "property suite `smoke` includes `counter`".to_string(),
+                    },
+                ],
             }
         );
     }

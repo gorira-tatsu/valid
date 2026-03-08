@@ -28,8 +28,8 @@ use valid::{
     },
     conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
-        build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_lock_json,
-        snapshot_model, write_lock_file,
+        build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_drift_text,
+        render_lock_json, snapshot_model, write_lock_file,
     },
     coverage::{collect_coverage, render_coverage_json, render_coverage_text},
     doc::{
@@ -1356,7 +1356,14 @@ fn cmd_contract(args: Vec<String>) {
                 .unwrap_or_default();
             drift.affected_critical_properties = recommendations.affected_critical_properties;
             drift.affected_property_suites = recommendations.affected_property_suites;
-            println!("{}", render_drift_json(&drift));
+            drift.affected_artifacts = recommendations.affected_artifacts;
+            drift.repair_surfaces = recommendations.repair_surfaces;
+            drift.suggested_reruns = recommendations.suggested_reruns;
+            if json {
+                println!("{}", render_drift_json(&drift));
+            } else {
+                print!("{}", render_drift_text(&drift));
+            }
             let exit_code = if drift.status == "unchanged" {
                 ExitCode::Success
             } else {
