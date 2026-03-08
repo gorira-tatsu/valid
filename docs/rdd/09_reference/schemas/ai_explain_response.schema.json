@@ -2,17 +2,147 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.explain.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "evidence_id", "property_id", "failure_step_index", "involved_fields", "candidate_causes", "repair_hints", "confidence"],
+  "required": [
+    "schema_version",
+    "request_id",
+    "status",
+    "evidence_id",
+    "property_id",
+    "breakpoint_kind",
+    "failure_step_index",
+    "changed_fields",
+    "field_diffs",
+    "guard_reviews",
+    "involved_fields",
+    "review_context",
+    "candidate_causes",
+    "repair_targets",
+    "repair_hints",
+    "confidence"
+  ],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string" },
     "status": { "type": "string" },
     "evidence_id": { "type": "string" },
     "property_id": { "type": "string" },
+    "breakpoint_kind": { "type": "string" },
+    "breakpoint_note": { "type": ["string", "null"] },
     "failure_step_index": { "type": "integer", "minimum": 0 },
+    "failing_action_id": { "type": ["string", "null"] },
+    "failing_action_role": { "type": ["string", "null"] },
+    "decision_path": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/decision" }
+        }
+      }
+    },
+    "failing_action_reads": { "type": "array", "items": { "type": "string" } },
+    "failing_action_writes": { "type": "array", "items": { "type": "string" } },
+    "failing_action_path_tags": { "type": "array", "items": { "type": "string" } },
+    "changed_fields": { "type": "array", "items": { "type": "string" } },
+    "field_diffs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/field_diff" }
+    },
+    "guard_reviews": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/guard_review" }
+    },
+    "write_overlap_fields": { "type": "array", "items": { "type": "string" } },
     "involved_fields": { "type": "array", "items": { "type": "string" } },
-    "candidate_causes": { "type": "array", "items": { "type": "object" } },
+    "review_context": { "$ref": "#/$defs/review_context" },
+    "candidate_causes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate_cause" }
+    },
+    "repair_targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/repair_target" }
+    },
     "repair_hints": { "type": "array", "items": { "type": "string" } },
-    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+    "next_steps": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "best_practices": { "type": "array", "items": { "type": "string" } },
+    "review_summary": { "type": "object" }
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "properties": {
+        "decision_id": { "type": "string" },
+        "action_id": { "type": "string" },
+        "kind": { "type": "string" },
+        "label": { "type": "string" },
+        "field": { "type": ["string", "null"] },
+        "reads": { "type": "array", "items": { "type": "string" } },
+        "writes": { "type": "array", "items": { "type": "string" } },
+        "path_tags": { "type": "array", "items": { "type": "string" } },
+        "outcome": { "type": "string" }
+      }
+    },
+    "field_diff": {
+      "type": "object",
+      "required": ["field", "before", "after"],
+      "properties": {
+        "field": { "type": "string" },
+        "before": {},
+        "after": {}
+      }
+    },
+    "guard_review": {
+      "type": "object",
+      "required": ["decision_id", "label", "outcome"],
+      "properties": {
+        "decision_id": { "type": "string" },
+        "label": { "type": "string" },
+        "outcome": { "type": "string" }
+      }
+    },
+    "review_context": {
+      "type": "object",
+      "required": [
+        "scenario_id",
+        "scenario_expr",
+        "scenario_match_before",
+        "scenario_match_after",
+        "property_scope_expr",
+        "property_scope_match_before",
+        "property_scope_match_after",
+        "vacuous"
+      ],
+      "properties": {
+        "scenario_id": { "type": ["string", "null"] },
+        "scenario_expr": { "type": ["string", "null"] },
+        "scenario_match_before": { "type": ["boolean", "null"] },
+        "scenario_match_after": { "type": ["boolean", "null"] },
+        "property_scope_expr": { "type": ["string", "null"] },
+        "property_scope_match_before": { "type": ["boolean", "null"] },
+        "property_scope_match_after": { "type": ["boolean", "null"] },
+        "vacuous": { "type": "boolean" }
+      }
+    },
+    "candidate_cause": {
+      "type": "object",
+      "required": ["kind", "message"],
+      "properties": {
+        "kind": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "repair_target": {
+      "type": "object",
+      "required": ["target", "reason", "priority", "action_id", "fields"],
+      "properties": {
+        "target": { "type": "string" },
+        "reason": { "type": "string" },
+        "priority": { "type": "string" },
+        "action_id": { "type": ["string", "null"] },
+        "fields": { "type": "array", "items": { "type": "string" } }
+      }
+    }
   }
 }
