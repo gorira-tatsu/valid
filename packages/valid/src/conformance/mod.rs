@@ -11,7 +11,7 @@ use crate::{
         eval::eval_expr,
         transition::{apply_action_transition, build_initial_state},
     },
-    testgen::TestVector,
+    testgen::{TestVector, VectorActionStep},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +92,18 @@ pub struct ConformanceReport {
     pub runner: String,
 }
 
+pub trait RustConformanceHarness {
+    fn harness_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    fn apply_action(&mut self, step: &VectorActionStep) -> Result<BTreeMap<String, Value>, String>;
+
+    fn property_holds(&self, _property_id: &str) -> Result<Option<bool>, String> {
+        Ok(None)
+    }
+}
+
 pub fn build_vector_from_actions(
     model: &ModelIr,
     property_id: Option<&str>,
@@ -147,6 +159,7 @@ pub fn build_vector_from_actions(
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!("vec-conformance-{}", model.model_id),
+        run_id: format!("run-conformance-{}", model.model_id),
         source_kind: "spec_conformance".to_string(),
         strictness: "strict".to_string(),
         derivation: "spec_replay".to_string(),
@@ -223,6 +236,56 @@ pub fn run_conformance(
             .unwrap_or_else(|| "conformance runner returned non-ok status".to_string()));
     }
     Ok(compare_conformance(vector, runner, &response))
+}
+
+pub fn run_rust_conformance<H: RustConformanceHarness>(
+    vector: &TestVector,
+    harness: &mut H,
+) -> ConformanceReport {
+    let mut observations = Vec::new();
+    for step in &vector.actions {
+        match harness.apply_action(step) {
+            Ok(observation) => observations.push(observation),
+            Err(message) => {
+                return harness_runtime_report(
+                    vector,
+                    harness.harness_name(),
+                    format!(
+                        "rust conformance harness failed at step {} (`{}`): {}",
+                        step.index, step.action_id, message
+                    ),
+                );
+            }
+        }
+    }
+    let property_holds = if vector.property_id.is_empty() {
+        None
+    } else {
+        match harness.property_holds(&vector.property_id) {
+            Ok(value) => value,
+            Err(message) => {
+                return harness_runtime_report(
+                    vector,
+                    harness.harness_name(),
+                    format!(
+                        "rust conformance harness failed while checking property `{}`: {}",
+                        vector.property_id, message
+                    ),
+                );
+            }
+        }
+    };
+    compare_conformance(
+        vector,
+        harness.harness_name(),
+        &ConformanceResponse {
+            schema_version: "1.0.0".to_string(),
+            status: "ok".to_string(),
+            observations,
+            property_holds,
+            message: None,
+        },
+    )
 }
 
 pub fn compare_conformance(
@@ -320,6 +383,30 @@ pub fn compare_conformance(
     }
 }
 
+fn harness_runtime_report(vector: &TestVector, runner: &str, summary: String) -> ConformanceReport {
+    ConformanceReport {
+        schema_version: "1.0.0".to_string(),
+        vector_id: vector.vector_id.clone(),
+        status: "FAIL".to_string(),
+        mismatch_count: 1,
+        mismatch_categories: vec![ConformanceMismatchKind::HarnessRuntime.as_str().to_string()],
+        mismatches: vec![ConformanceMismatch {
+            kind: ConformanceMismatchKind::HarnessRuntime,
+            likely_fix_surface: "conformance_harness".to_string(),
+            summary,
+            index: None,
+            expected: None,
+            actual: None,
+            expected_property_holds: vector.expected_property_holds,
+            actual_property_holds: None,
+        }],
+        observation_mismatches: Vec::new(),
+        expected_property_holds: vector.expected_property_holds,
+        actual_property_holds: None,
+        runner: runner.to_string(),
+    }
+}
+
 pub fn render_conformance_report_json(report: &ConformanceReport) -> Result<String, String> {
     serde_json::to_string(report)
         .map_err(|err| format!("failed to serialize conformance report: {err}"))
@@ -330,16 +417,21 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::{
+        frontend::compile_model,
         ir::{Path, Value},
         testgen::{TestVector, VectorActionStep},
     };
 
-    use super::{compare_conformance, ConformanceMismatchKind, ConformanceResponse};
+    use super::{
+        compare_conformance, run_rust_conformance, ConformanceMismatchKind, ConformanceResponse,
+        RustConformanceHarness,
+    };
 
     fn sample_vector() -> TestVector {
         TestVector {
             schema_version: "1.0.0".to_string(),
             vector_id: "vec-1".to_string(),
+            run_id: "run-1".to_string(),
             source_kind: "counterexample".to_string(),
             strictness: "strict".to_string(),
             derivation: "counterexample_trace".to_string(),
@@ -454,5 +546,86 @@ mod tests {
             extra_output.mismatches[0].kind,
             ConformanceMismatchKind::Output
         );
+    }
+
+    struct CounterHarness {
+        x: u64,
+    }
+
+    impl RustConformanceHarness for CounterHarness {
+        fn harness_name(&self) -> &'static str {
+            "counter-harness"
+        }
+
+        fn apply_action(
+            &mut self,
+            step: &VectorActionStep,
+        ) -> Result<BTreeMap<String, Value>, String> {
+            match step.action_id.as_str() {
+                "Inc" => {
+                    self.x += 1;
+                    Ok(BTreeMap::from([("x".to_string(), Value::UInt(self.x))]))
+                }
+                "Reset" => {
+                    self.x = 0;
+                    Ok(BTreeMap::from([("x".to_string(), Value::UInt(self.x))]))
+                }
+                other => Err(format!("unknown action `{other}`")),
+            }
+        }
+
+        fn property_holds(&self, property_id: &str) -> Result<Option<bool>, String> {
+            match property_id {
+                "P_SAFE" => Ok(Some(self.x <= 2)),
+                _ => Ok(None),
+            }
+        }
+    }
+
+    #[test]
+    fn run_rust_conformance_executes_sample_sut_end_to_end() {
+        let model = compile_model(include_str!(
+            "../../../../tests/fixtures/models/safe_counter.valid"
+        ))
+        .expect("fixture should compile");
+        let vector = super::build_vector_from_actions(&model, Some("P_SAFE"), &["Inc".to_string()])
+            .expect("vector should build");
+        let mut harness = CounterHarness { x: 0 };
+        let report = run_rust_conformance(&vector, &mut harness);
+        assert_eq!(report.status, "PASS");
+        assert_eq!(report.runner, "counter-harness");
+        assert!(report.mismatch_categories.is_empty());
+    }
+
+    #[test]
+    fn run_rust_conformance_reports_runtime_harness_failures() {
+        struct BrokenHarness;
+
+        impl RustConformanceHarness for BrokenHarness {
+            fn harness_name(&self) -> &'static str {
+                "broken-harness"
+            }
+
+            fn apply_action(
+                &mut self,
+                step: &VectorActionStep,
+            ) -> Result<BTreeMap<String, Value>, String> {
+                Err(format!("refused action `{}`", step.action_id))
+            }
+        }
+
+        let report = run_rust_conformance(&sample_vector(), &mut BrokenHarness);
+        assert_eq!(report.status, "FAIL");
+        assert_eq!(
+            report.mismatch_categories,
+            vec!["harness_runtime".to_string()]
+        );
+        assert_eq!(
+            report.mismatches[0].kind,
+            ConformanceMismatchKind::HarnessRuntime
+        );
+        assert!(report.mismatches[0]
+            .summary
+            .contains("rust conformance harness failed"));
     }
 }

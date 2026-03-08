@@ -61,6 +61,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &[
             "ai-authoring-guide",
             "ai-curriculum",
+            "ai-requirement-refinement-workflow",
             "dsl-guide",
             "install-guide",
             "architecture-note",
@@ -124,6 +125,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         related_docs: &[
             "ai-curriculum",
+            "ai-requirement-refinement-workflow",
             "ai-modeling-checklist",
             "ai-common-pitfalls",
             "ai-examples-curriculum",
@@ -134,6 +136,40 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         source_path: "docs/ai/authoring-guide.md",
         body_markdown: include_str!("../../../../docs/ai/authoring-guide.md"),
+    },
+    DocEntry {
+        id: "ai-requirement-refinement-workflow",
+        title: "Requirement Refinement Workflow",
+        kind: "workflow",
+        audience: "llm-agents",
+        recommended_for: &["clarification-first", "requirement-refinement", "evidence-driven-repair"],
+        canonical_entry: false,
+        summary: "Task-oriented guide for turning ambiguous product requirements into stable modeling briefs, then refining them from verification evidence.",
+        key_points: &[
+            "Explains the clarification-first loop before and after model authoring",
+            "Maps counterexamples, dead actions, vacuity, and mismatches to targeted follow-up questions",
+        ],
+        canonical_rules: &[
+            "Do not patch the model before deciding whether the requirement brief is incomplete",
+            "Ask the minimum product-facing follow-up questions needed to unlock the next model change",
+        ],
+        supported_features: &[
+            "Initial requirement clarification flow",
+            "Evidence-driven refinement flow",
+            "Example sessions and exit criteria",
+        ],
+        unsupported_features: &[
+            "Normative syntax details",
+        ],
+        related_docs: &[
+            "ai-authoring-guide",
+            "ai-curriculum",
+            "ai-modeling-checklist",
+            "ai-review-workflow",
+            "ai-conformance-workflow",
+        ],
+        source_path: "docs/ai/requirement-refinement-workflow.md",
+        body_markdown: include_str!("../../../../docs/ai/requirement-refinement-workflow.md"),
     },
     DocEntry {
         id: "ai-conformance-workflow",
@@ -160,6 +196,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         related_docs: &[
             "ai-curriculum",
+            "ai-requirement-refinement-workflow",
             "ai-review-workflow",
             "ai-modeling-checklist",
             "ai-examples-curriculum",
@@ -220,6 +257,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         related_docs: &[
             "ai-authoring-guide",
+            "ai-requirement-refinement-workflow",
             "ai-review-workflow",
             "ai-migration-guide",
             "ai-conformance-workflow",
@@ -252,6 +290,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         ],
         related_docs: &[
             "ai-authoring-guide",
+            "ai-requirement-refinement-workflow",
             "ai-curriculum",
             "ai-review-workflow",
             "ai-migration-guide",
@@ -288,6 +327,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &[
             "ai-curriculum",
             "ai-authoring-guide",
+            "ai-requirement-refinement-workflow",
             "ai-examples-curriculum",
             "ai-review-workflow",
         ],
@@ -321,6 +361,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &[
             "ai-authoring-guide",
             "ai-curriculum",
+            "ai-requirement-refinement-workflow",
             "ai-review-workflow",
             "ai-migration-guide",
             "ai-conformance-workflow",
@@ -355,6 +396,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &[
             "ai-curriculum",
             "ai-authoring-guide",
+            "ai-requirement-refinement-workflow",
             "ai-common-pitfalls",
             "ai-modeling-checklist",
             "ai-conformance-workflow",
@@ -387,6 +429,33 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &["docs-index", "dsl-guide", "frontend-adr"],
         source_path: "docs/architecture.md",
         body_markdown: include_str!("../../../../docs/architecture.md"),
+    },
+    DocEntry {
+        id: "artifact-inventory-guide",
+        title: "Artifact Inventory and Run History",
+        kind: "operations",
+        audience: "humans-and-agents",
+        recommended_for: &["artifacts", "run-history", "automation"],
+        canonical_entry: false,
+        summary: "Guide to the artifact index, run-history files, and CLI listing surfaces used to correlate valid outputs across runs.",
+        key_points: &[
+            "Documents artifacts/index.json and artifacts/run-history.json",
+            "Explains how valid and cargo valid expose artifact inventory listings",
+        ],
+        canonical_rules: &[
+            "Treat artifact inventory as operational metadata, not normative model semantics",
+        ],
+        supported_features: &[
+            "Artifact index layout",
+            "Run-history conventions",
+            "CLI inventory commands",
+        ],
+        unsupported_features: &[
+            "Modeling syntax reference",
+        ],
+        related_docs: &["docs-index", "install-guide", "architecture-note"],
+        source_path: "docs/artifacts.md",
+        body_markdown: include_str!("../../../../docs/artifacts.md"),
     },
     DocEntry {
         id: "dsl-guide",

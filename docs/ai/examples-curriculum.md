@@ -25,6 +25,9 @@ If you need the higher-level document order first, start with
   - `FiniteRelation`
   - `FiniteMap`
   - cross-tenant policies
+  - integration-model pattern for shared membership plus plan state
+  - when to keep local membership/plan rules small and restate only the
+    shared-state contract under review
   - declarative transitions
 - Suggested commands:
   - `cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe`
@@ -36,6 +39,8 @@ If you need the higher-level document order first, start with
 - Focus:
   - grouped declarative transitions
   - entitlements and isolation policies
+  - integration-model pattern for shared-state cross-domain checks
+  - when to use an integration model instead of inventing early compose syntax
   - path tags
 - Suggested commands:
   - `cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe`
@@ -48,6 +53,8 @@ If you need the higher-level document order first, start with
   - `String`
   - `len`, `regex_match`
   - explicit-ready vs solver-ready expectations
+  - why the strong/weak action split is a bounded teaching stopgap rather than
+    the desired long-term action shape
 - Suggested commands:
   - `cargo valid --registry examples/password_policy.rs readiness password-policy-safe`
   - `cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG`
@@ -71,6 +78,10 @@ and one declarative transition example.
 - review:
   use the declarative registry examples so `inspect`, `graph`, and `explain`
   stay readable
+- integration-pattern:
+  use `tenant_relation_registry.rs` for the smallest shared-state cross-domain
+  contract and `saas_multi_tenant_registry.rs` for the same pattern with more
+  workflow texture
 - migration:
   compare the counter registry shape with older step-heavy models
 - conformance:

@@ -64,7 +64,6 @@ pub fn benchmark_baseline_path(report_id: &str) -> String {
         &format!("{report_id}.json"),
     )
 }
-
 pub fn handoff_path(model_id: &str) -> String {
     path_from_env_or_default(
         "VALID_ARTIFACTS_DIR",
@@ -84,4 +83,12 @@ fn sanitize_artifact_component(value: &str) -> String {
             }
         })
         .collect()
+}
+
+pub fn artifact_index_path() -> String {
+    path_from_env_or_default("VALID_ARTIFACTS_DIR", "artifacts", "index.json")
+}
+
+pub fn run_history_path() -> String {
+    path_from_env_or_default("VALID_ARTIFACTS_DIR", "artifacts", "run-history.json")
 }

@@ -736,6 +736,7 @@ const TRACE_OPTIONS: &[ArgSpec] = &[
     SOLVER_ARG_ARG,
 ];
 const CLEAN_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
+const ARTIFACTS_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const SCHEMA_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const COMMANDS_OPTIONS: &[ArgSpec] = &[JSON_ARG];
 const BATCH_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG];
@@ -957,6 +958,18 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         response_schema: Some(SchemaRef { id: "schema.cli.clean_response", builder: clean_response_schema }),
         supports_json: true,
         supports_progress: true,
+    },
+    CommandSpec {
+        name: "artifacts",
+        aliases: &[],
+        description: "List artifact index and run history.",
+        usage: "valid artifacts [--json]",
+        positional: &[],
+        options: ARTIFACTS_OPTIONS,
+        request_schema: None,
+        response_schema: Some(SchemaRef { id: "schema.cli.artifact_inventory", builder: artifact_inventory_schema }),
+        supports_json: true,
+        supports_progress: false,
     },
     CommandSpec {
         name: "selfcheck",
@@ -1240,6 +1253,18 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
 ];
 
 const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "artifacts",
+        aliases: &[],
+        description: "List project artifact index and run history.",
+        usage: "cargo valid artifacts [--json]",
+        positional: &[],
+        options: ARTIFACTS_OPTIONS,
+        request_schema: None,
+        response_schema: Some(SchemaRef { id: "schema.cli.artifact_inventory", builder: artifact_inventory_schema }),
+        supports_json: true,
+        supports_progress: false,
+    },
     CommandSpec {
         name: "init",
         aliases: &[],
@@ -1937,6 +1962,51 @@ fn clean_response_schema() -> Value {
             "status": { "type": "string", "enum": ["ok"] },
             "root": { "type": "string" },
             "removed": { "type": "array", "items": { "type": "string" } }
+        }
+    })
+}
+
+fn artifact_inventory_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "schema.cli.artifact_inventory",
+        "type": "object",
+        "required": ["schema_version", "artifact_index_path", "run_history_path", "artifacts", "runs"],
+        "properties": {
+            "schema_version": { "type": "string" },
+            "artifact_index_path": { "type": "string" },
+            "run_history_path": { "type": "string" },
+            "artifacts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["artifact_kind", "path", "run_id"],
+                    "properties": {
+                        "artifact_kind": { "type": "string" },
+                        "path": { "type": "string" },
+                        "run_id": { "type": "string" },
+                        "model_id": { "type": ["string", "null"] },
+                        "property_id": { "type": ["string", "null"] },
+                        "evidence_id": { "type": ["string", "null"] },
+                        "vector_id": { "type": ["string", "null"] },
+                        "suite_id": { "type": ["string", "null"] }
+                    }
+                }
+            },
+            "runs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["run_id", "artifact_paths", "artifact_kinds", "model_ids", "property_ids"],
+                    "properties": {
+                        "run_id": { "type": "string" },
+                        "artifact_paths": { "type": "array", "items": { "type": "string" } },
+                        "artifact_kinds": { "type": "array", "items": { "type": "string" } },
+                        "model_ids": { "type": "array", "items": { "type": "string" } },
+                        "property_ids": { "type": "array", "items": { "type": "string" } }
+                    }
+                }
+            }
         }
     })
 }

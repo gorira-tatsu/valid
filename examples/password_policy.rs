@@ -4,6 +4,8 @@
 目的:
   - 文字列状態、長さ制約、正規表現ベースの構成要件を `valid` DSL で表現する
   - 現在の text support が explicit-ready で使えることを確認する
+  - `SetStrongPassword` / `SetWeakPassword` の分割は教育用の bounded 例であり、
+    任意のパスワード入力を variant ごとに増やす推奨パターンではない
 
 含まれるモデル:
   - password-policy-safe

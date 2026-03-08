@@ -737,6 +737,7 @@ mod tests {
                     explicit_status: "not_applicable".to_string(),
                     solver_status: "not_applicable".to_string(),
                     reason: String::new(),
+                    backend_statuses: Vec::new(),
                 },
                 reasons: Vec::new(),
             },
@@ -773,6 +774,7 @@ mod tests {
             property_details: vec![crate::api::InspectProperty {
                 property_id: "P_SAFE".to_string(),
                 kind: "invariant".to_string(),
+                layer: "assert".to_string(),
                 expr: Some("x <= 1".to_string()),
                 scope_expr: None,
                 action_filter: None,

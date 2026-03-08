@@ -17,9 +17,31 @@ pub(crate) struct PromptEntry {
 
 pub(crate) const PROMPTS: &[PromptEntry] = &[
     PromptEntry {
+        name: "refine_requirement",
+        title: "Refine Requirement",
+        description: "Guide an LLM through turning an ambiguous product requirement into a stable modeling brief before model authoring or review.",
+        arguments: &[
+            PromptArgument {
+                name: "requirement",
+                description: "Natural-language requirement, feature request, policy text, or incident summary that still needs refinement.",
+                required: true,
+            },
+            PromptArgument {
+                name: "current_brief",
+                description: "Optional current modeling brief, assumptions list, or requirement summary to tighten instead of starting from scratch.",
+                required: false,
+            },
+            PromptArgument {
+                name: "risk_area",
+                description: "Optional business, compliance, UX, or operational risk area to prioritize while asking follow-up questions.",
+                required: false,
+            },
+        ],
+    },
+    PromptEntry {
         name: "clarify_requirement",
         title: "Clarify Requirement",
-        description: "Guide an LLM through turning an ambiguous requirement into a concrete modeling brief before authoring begins.",
+        description: "Compatibility alias for refine_requirement for clients that still use the older clarification-first prompt name.",
         arguments: &[
             PromptArgument {
                 name: "requirement",
@@ -29,6 +51,33 @@ pub(crate) const PROMPTS: &[PromptEntry] = &[
             PromptArgument {
                 name: "risk_area",
                 description: "Optional business, compliance, or UX risk area to prioritize while asking follow-up questions.",
+                required: false,
+            },
+        ],
+    },
+    PromptEntry {
+        name: "refine_requirement_from_evidence",
+        title: "Refine Requirement From Evidence",
+        description: "Guide an LLM through asking targeted follow-up questions when counterexamples, dead actions, vacuity, coverage gaps, or mismatches show the requirement brief is incomplete.",
+        arguments: &[
+            PromptArgument {
+                name: "current_brief",
+                description: "Current requirement brief or modeling brief that should be treated as the baseline.",
+                required: true,
+            },
+            PromptArgument {
+                name: "evidence_kind",
+                description: "Triggering signal such as counterexample, dead_action, vacuity, coverage_gap, or conformance_mismatch.",
+                required: true,
+            },
+            PromptArgument {
+                name: "evidence_summary",
+                description: "Short summary of the failing trace, dead action report, vacuity clue, or mismatch.",
+                required: true,
+            },
+            PromptArgument {
+                name: "risk_area",
+                description: "Optional business, compliance, UX, or operational risk area to keep centered during follow-up.",
                 required: false,
             },
         ],
