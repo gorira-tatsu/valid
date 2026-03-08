@@ -236,6 +236,8 @@ struct TestgenArgs {
     property: Option<String>,
     #[arg(long)]
     strategy: Option<String>,
+    #[arg(long = "focus-action")]
+    focus_action: Option<String>,
     #[arg(long)]
     seed: Option<u64>,
     #[arg(long)]
@@ -508,6 +510,7 @@ fn testgen_to_parsed(args: TestgenArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        focus_action_id: args.focus_action,
         extra: args.strategy,
         ..ParsedArgs::default()
     }
@@ -1612,7 +1615,7 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
@@ -1627,6 +1630,7 @@ fn cmd_testgen(args: Vec<String>) {
         source: source.clone(),
         property_id: parsed.property_id.clone(),
         strategy,
+        focus_action_id: parsed.focus_action_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1642,7 +1646,7 @@ fn cmd_testgen(args: Vec<String>) {
             }
             if parsed.json {
                 println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"vector_groups\":[{}],\"generated_files\":[{}]}}",
                     response.schema_version,
                     response.request_id,
                     response.status,
@@ -1656,13 +1660,44 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
-                            vector.strategy
+                            vector.strategy,
+                            vector
+                                .requirement_clusters
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(","),
+                            vector
+                                .risk_clusters
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(","),
+                            vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
+                            vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                            vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    response
+                        .vector_groups
+                        .iter()
+                        .map(|group| format!(
+                            "{{\"group_kind\":\"{}\",\"group_id\":\"{}\",\"vector_ids\":[{}]}}",
+                            group.group_kind,
+                            group.group_id,
+                            group
+                                .vector_ids
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(",")
                         ))
                         .collect::<Vec<_>>()
                         .join(","),
@@ -1677,14 +1712,45 @@ fn cmd_testgen(args: Vec<String>) {
                 println!("generated {} vector(s)", response.vector_ids.len());
                 for vector in &response.vectors {
                     println!(
-                        "  {} run_id={} strictness={} derivation={} source={} strategy={}",
+                        "  {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
                         vector.vector_id,
                         vector.run_id,
                         vector.strictness,
                         vector.derivation,
                         vector.source_kind,
-                        vector.strategy
+                        vector.strategy,
+                        if vector.requirement_clusters.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.requirement_clusters.join(",")
+                        },
+                        if vector.risk_clusters.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.risk_clusters.join(",")
+                        },
+                        vector.focus_action_id.as_deref().unwrap_or("-"),
+                        vector
+                            .expected_guard_enabled
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        if vector.notes.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.notes.join(",")
+                        }
                     );
+                }
+                if !response.vector_groups.is_empty() {
+                    println!("grouped output:");
+                    for group in &response.vector_groups {
+                        println!(
+                            "  {}:{} -> {}",
+                            group.group_kind,
+                            group.group_id,
+                            group.vector_ids.join(",")
+                        );
+                    }
                 }
                 for path in &response.generated_files {
                     println!("  {path}");
@@ -1929,6 +1995,12 @@ fn cmd_conformance(args: Vec<String>) {
         );
     } else {
         println!("vector_id: {}", report.vector_id);
+        if let Some(evidence_id) = &report.evidence_id {
+            println!("evidence_id: {}", evidence_id);
+        }
+        if let Some(property_id) = &report.property_id {
+            println!("property_id: {}", property_id);
+        }
         println!("runner: {}", report.runner);
         println!("status: {}", report.status);
         println!("mismatch_count: {}", report.mismatch_count);
@@ -1937,6 +2009,43 @@ fn cmd_conformance(args: Vec<String>) {
                 "mismatch_categories: {}",
                 report.mismatch_categories.join(",")
             );
+        }
+        if let Some(traceback) = &report.traceback {
+            println!("traceback.breakpoint_kind: {}", traceback.breakpoint_kind);
+            println!(
+                "traceback.failure_step_index: {}",
+                traceback.failure_step_index
+            );
+            if let Some(action_id) = &traceback.failing_action_id {
+                println!("traceback.failing_action_id: {}", action_id);
+            }
+            if !traceback.changed_fields.is_empty() {
+                println!(
+                    "traceback.changed_fields: {}",
+                    traceback.changed_fields.join(",")
+                );
+            }
+            if !traceback.involved_fields.is_empty() {
+                println!(
+                    "traceback.involved_fields: {}",
+                    traceback.involved_fields.join(",")
+                );
+            }
+        }
+        if !report.candidate_causes.is_empty() {
+            println!("candidate_causes:");
+            for cause in &report.candidate_causes {
+                println!("  - {}: {}", cause.kind, cause.message);
+            }
+        }
+        if !report.repair_targets.is_empty() {
+            println!("repair_targets:");
+            for target in &report.repair_targets {
+                println!(
+                    "  - {} [{}] {}",
+                    target.target, target.priority, target.reason
+                );
+            }
         }
         for mismatch in &report.mismatches {
             println!(
@@ -1961,6 +2070,16 @@ fn cmd_conformance(args: Vec<String>) {
                 "property_holds expected {:?} actual {:?}",
                 report.expected_property_holds, report.actual_property_holds
             );
+        }
+        println!(
+            "review_summary.headline: {}",
+            report.review_summary.headline
+        );
+        if !report.review_summary.next_steps.is_empty() {
+            println!("review_summary.next_steps:");
+            for step in &report.review_summary.next_steps {
+                println!("  - {}", step);
+            }
         }
     }
     let exit_code = if report.status == "PASS" {
@@ -2169,6 +2288,11 @@ where
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );
+        } else if arg == "--focus-action" {
+            parsed.focus_action_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(
                 iter.next()
@@ -2184,6 +2308,8 @@ where
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );
+        } else if let Some(value) = arg.strip_prefix("--focus-action=") {
+            parsed.focus_action_id = Some(value.to_string());
         } else if extra_handler(&arg, &mut parsed) {
             continue;
         } else if parsed.path.is_empty() {

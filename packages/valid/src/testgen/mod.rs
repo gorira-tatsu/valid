@@ -64,6 +64,8 @@ pub struct TestVector {
     #[serde(default)]
     pub notes: Vec<String>,
     #[serde(default)]
+    pub grouping: VectorGrouping,
+    #[serde(default)]
     pub replay_target: Option<ReplayTarget>,
 }
 
@@ -72,6 +74,14 @@ pub struct VectorActionStep {
     pub index: usize,
     pub action_id: String,
     pub action_label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct VectorGrouping {
+    #[serde(default)]
+    pub requirement_clusters: Vec<String>,
+    #[serde(default)]
+    pub risk_clusters: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +97,7 @@ fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'stat
         ("deadlock", "deadlock") => ("strict", "deadlock_trace"),
         ("witness", "transition_coverage") => ("strict", "witness_trace"),
         ("witness", _) => ("strict", "witness_trace"),
+        (_, "enablement") => ("heuristic", "enablement_search"),
         (_, "transition") => ("heuristic", "transition_search"),
         (_, "guard") => ("heuristic", "guard_search"),
         (_, "boundary") => ("heuristic", "boundary_search"),
@@ -94,6 +105,62 @@ fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'stat
         (_, "random") => ("heuristic", "deterministic_random_search"),
         _ => ("heuristic", "model_exploration"),
     }
+}
+
+fn infer_vector_grouping(path_tags: &[String]) -> VectorGrouping {
+    let requirement_clusters = path_tags
+        .iter()
+        .filter(|tag| {
+            !matches!(
+                tag.as_str(),
+                "guard_path" | "read_path" | "write_path" | "transition_path"
+            )
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let risk_clusters = requirement_clusters
+        .iter()
+        .filter(|tag| is_risk_cluster_tag(tag))
+        .cloned()
+        .collect::<Vec<_>>();
+    VectorGrouping {
+        requirement_clusters,
+        risk_clusters,
+    }
+}
+
+pub fn vector_grouping_from_path_tags(path_tags: &[String]) -> VectorGrouping {
+    infer_vector_grouping(path_tags)
+}
+
+fn is_risk_cluster_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "risk_path"
+            | "audit_path"
+            | "compliance_path"
+            | "exception_path"
+            | "regression_path"
+            | "recovery_path"
+            | "security_path"
+            | "privacy_path"
+            | "fraud_path"
+            | "governance_path"
+            | "boundary_path"
+            | "deny_path"
+            | "tenant_isolation_path"
+    ) || tag.contains("risk")
+        || tag.contains("audit")
+        || tag.contains("compliance")
+        || tag.contains("security")
+        || tag.contains("privacy")
+        || tag.contains("fraud")
+        || tag.contains("isolation")
+        || tag.contains("governance")
+        || tag.contains("regression")
+        || tag.contains("recovery")
 }
 
 pub fn build_counterexample_vector(trace: &EvidenceTrace) -> Result<TestVector, String> {
@@ -133,6 +200,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         .collect::<Vec<_>>();
     let expected_path = trace_path(trace);
     let expected_path_tags = path_tags_or_empty(&expected_path);
+    let grouping = infer_vector_grouping(&expected_path_tags);
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: trace.evidence_id.replace("ev-", "vec-"),
@@ -159,6 +227,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         setup_action_ids: Vec::new(),
         business_action_ids: Vec::new(),
         notes: Vec::new(),
+        grouping,
         replay_target: None,
     })
 }
@@ -336,9 +405,11 @@ pub fn build_model_test_vectors_for_strategy(
     model: &ModelIr,
     property_id: &str,
     strategy: &str,
+    focus_action_id: Option<&str>,
 ) -> Result<Vec<TestVector>, String> {
     match strategy {
         "deadlock" => build_model_deadlock_vectors(model, property_id),
+        "enablement" => build_model_enablement_vectors(model, property_id, focus_action_id),
         "transition" | "witness" => {
             let vectors = build_synthetic_witness_vectors(model, property_id);
             if vectors.is_empty() {
@@ -353,6 +424,77 @@ pub fn build_model_test_vectors_for_strategy(
         "random" => build_model_random_vectors(model, property_id, 5),
         _ => Ok(Vec::new()),
     }
+}
+
+fn build_model_enablement_vectors(
+    model: &ModelIr,
+    property_id: &str,
+    focus_action_id: Option<&str>,
+) -> Result<Vec<TestVector>, String> {
+    let target_action_id =
+        focus_action_id.ok_or_else(|| "enablement strategy requires --focus-action".to_string())?;
+    let exploration = explore_model(model)?;
+    let action = model
+        .actions
+        .iter()
+        .find(|action| action.action_id == target_action_id)
+        .ok_or_else(|| format!("unknown action `{target_action_id}` for enablement strategy"))?;
+    let mut notes = vec![
+        format!("enablement_target:{target_action_id}"),
+        format!("guard:{:?}", action.guard),
+    ];
+    if !action.reads.is_empty() {
+        notes.push(format!("blocker_reads:{}", action.reads.join(",")));
+    }
+    notes.extend(
+        action
+            .decision_path()
+            .legacy_path_tags()
+            .into_iter()
+            .map(|tag| format!("path_tag:{tag}")),
+    );
+
+    if let Some((node_index, _)) = exploration.nodes.iter().enumerate().find(|(_, node)| {
+        apply_action_transition(model, &node.state, action)
+            .ok()
+            .flatten()
+            .is_some()
+    }) {
+        let mut reached_notes = notes.clone();
+        reached_notes.push("enablement_reached".to_string());
+        return Ok(build_model_vector_for_node(
+            model,
+            &exploration.nodes,
+            node_index,
+            property_id,
+            "enablement",
+            "enablement",
+            Some(target_action_id.to_string()),
+            None,
+            Some(true),
+            action.decision_path(),
+            reached_notes,
+        )
+        .into_iter()
+        .collect());
+    }
+
+    notes.push("enablement_unreachable".to_string());
+    Ok(build_model_vector_for_node(
+        model,
+        &exploration.nodes,
+        0,
+        property_id,
+        "enablement",
+        "enablement",
+        Some(target_action_id.to_string()),
+        None,
+        Some(false),
+        action.decision_path_for_guard(false),
+        notes,
+    )
+    .into_iter()
+    .collect())
 }
 
 fn build_model_deadlock_vectors(
@@ -498,6 +640,7 @@ fn build_model_deadlock_vector(
             ],
             None => vec!["deadlock_reached".to_string()],
         },
+        grouping: VectorGrouping::default(),
         replay_target: None,
     }
 }
@@ -703,6 +846,18 @@ fn reproduces_failure(
 pub fn render_rust_test(vector: &TestVector) -> String {
     let mut out = String::new();
     out.push_str(&format!("// valid-run-id: {}\n", vector.run_id));
+    if !vector.grouping.requirement_clusters.is_empty() {
+        out.push_str(&format!(
+            "// valid-requirement-clusters: {}\n",
+            vector.grouping.requirement_clusters.join(",")
+        ));
+    }
+    if !vector.grouping.risk_clusters.is_empty() {
+        out.push_str(&format!(
+            "// valid-risk-clusters: {}\n",
+            vector.grouping.risk_clusters.join(",")
+        ));
+    }
     out.push_str("#[test]\n");
     out.push_str(&format!(
         "fn generated_{}() {{\n",
@@ -766,6 +921,14 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     for note in &vector.notes {
         out.push_str(&format!("    notes.push({note:?});\n"));
     }
+    out.push_str("    let mut requirement_clusters = Vec::new();\n");
+    for cluster in &vector.grouping.requirement_clusters {
+        out.push_str(&format!("    requirement_clusters.push({cluster:?});\n"));
+    }
+    out.push_str("    let mut risk_clusters = Vec::new();\n");
+    for cluster in &vector.grouping.risk_clusters {
+        out.push_str(&format!("    risk_clusters.push({cluster:?});\n"));
+    }
     out.push_str("    let mut expected_path_tags = Vec::new();\n");
     for tag in &vector.expected_path_tags {
         out.push_str(&format!("    expected_path_tags.push({tag:?});\n"));
@@ -817,6 +980,14 @@ pub fn render_rust_test(vector: &TestVector) -> String {
     out.push_str("    }\n");
     out.push_str("    for note in &notes {\n");
     out.push_str("        assert!(!note.is_empty(), \"note must be non-empty\");\n");
+    out.push_str("    }\n");
+    out.push_str("    for cluster in &requirement_clusters {\n");
+    out.push_str(
+        "        assert!(!cluster.is_empty(), \"requirement cluster must be non-empty\");\n",
+    );
+    out.push_str("    }\n");
+    out.push_str("    for cluster in &risk_clusters {\n");
+    out.push_str("        assert!(requirement_clusters.contains(cluster), \"risk cluster must also be a requirement cluster\");\n");
     out.push_str("    }\n");
     out.push_str("    assert!(focus_action_id.is_some() || focus_field.is_some() || !actions.is_empty() || expected_guard_enabled.is_some() || !expected_states.is_empty());\n");
     out.push_str("}\n");
@@ -1432,6 +1603,8 @@ fn build_model_vector_for_node(
                 })
         })
         .collect::<Vec<_>>();
+    let expected_path_tags = path_tags_or_empty(&expected_path);
+    let grouping = infer_vector_grouping(&expected_path_tags);
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -1470,11 +1643,12 @@ fn build_model_vector_for_node(
         focus_field,
         expected_guard_enabled,
         expected_property_holds: Some(property_holds),
-        expected_path_tags: path_tags_or_empty(&expected_path),
+        expected_path_tags,
         expected_path,
         setup_action_ids,
         business_action_ids,
         notes,
+        grouping,
         replay_target: None,
     })
 }

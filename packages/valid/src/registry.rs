@@ -75,7 +75,7 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
 const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--json] [--progress=json]";
@@ -91,7 +91,7 @@ const CHECK_USAGE: &str = "usage: <registry-bin> check <model> [--json] [--progr
 const EXPLAIN_USAGE: &str = "usage: <registry-bin> explain <model> [--json] [--progress=json]";
 const COVERAGE_USAGE: &str = "usage: <registry-bin> coverage <model> [--json] [--progress=json]";
 const ORCHESTRATE_USAGE: &str = "usage: <registry-bin> orchestrate <model> [--json] [--progress=json] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]";
-const TESTGEN_USAGE: &str = "usage: <registry-bin> testgen <model> [--json] [--progress=json] [--property=<id>] [--strategy=<...>]";
+const TESTGEN_USAGE: &str = "usage: <registry-bin> testgen <model> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>]";
 const REPLAY_USAGE: &str = "usage: <registry-bin> replay <model> [--json] [--progress=json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]";
 const CONTRACT_USAGE: &str =
     "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json] [--progress=json]";
@@ -105,7 +105,7 @@ pub struct RegisteredModel {
     pub explain: fn(&str) -> Result<ExplainResponse, String>,
     pub coverage: fn() -> CoverageReport,
     pub orchestrate: fn(&str, Option<&AdapterConfig>) -> Result<OrchestrateResponse, String>,
-    pub testgen: fn(Option<&str>, &str, bool) -> TestgenResponse,
+    pub testgen: fn(Option<&str>, &str, Option<&str>, bool) -> TestgenResponse,
     pub replay: fn(Option<&str>, &[String], Option<&str>) -> Result<String, String>,
     pub contract_snapshot: fn() -> Result<ContractSnapshot, String>,
 }
@@ -821,11 +821,12 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
     let response = (model.testgen)(
         parsed.property_id.as_deref(),
         parsed.strategy.as_deref().unwrap_or("counterexample"),
+        parsed.focus_action_id.as_deref(),
         parsed.json,
     );
     if parsed.json {
         println!(
-            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
+            "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"vector_groups\":[{}],\"generated_files\":[{}]}}",
             response.schema_version,
             response.request_id,
             response.status,
@@ -834,12 +835,28 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                 .vectors
                 .iter()
                 .map(|vector| format!(
-                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                     vector.vector_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
-                    vector.strategy
+                    vector.strategy,
+                    vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                    vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                    vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
+                    vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                    vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(","),
+            response
+                .vector_groups
+                .iter()
+                .map(|group| format!(
+                    "{{\"group_kind\":\"{}\",\"group_id\":\"{}\",\"vector_ids\":[{}]}}",
+                    group.group_kind,
+                    group.group_id,
+                    group.vector_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(",")
                 ))
                 .collect::<Vec<_>>()
                 .join(","),
@@ -851,12 +868,43 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
             println!("vectors:");
             for vector in &response.vectors {
                 println!(
-                    "- {} strictness={} derivation={} source={} strategy={}",
+                    "- {} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
                     vector.vector_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
-                    vector.strategy
+                    vector.strategy,
+                    if vector.requirement_clusters.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.requirement_clusters.join(",")
+                    },
+                    if vector.risk_clusters.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.risk_clusters.join(",")
+                    },
+                    vector.focus_action_id.as_deref().unwrap_or("-"),
+                    vector
+                        .expected_guard_enabled
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    if vector.notes.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.notes.join(",")
+                    }
+                );
+            }
+        }
+        if !response.vector_groups.is_empty() {
+            println!("grouped output:");
+            for group in &response.vector_groups {
+                println!(
+                    "- {}:{} -> {}",
+                    group.group_kind,
+                    group.group_id,
+                    group.vector_ids.join(",")
                 );
             }
         }
@@ -1145,9 +1193,11 @@ fn orchestrate_machine<M: VerifiedMachine>(
 fn testgen_machine<M: VerifiedMachine>(
     property_id: Option<&str>,
     request_id: &str,
+    focus_action_id: Option<&str>,
     json: bool,
 ) -> TestgenResponse {
-    let mut vectors = build_machine_test_vectors_for_strategy::<M>(property_id, request_id);
+    let mut vectors =
+        build_machine_test_vectors_for_strategy::<M>(property_id, request_id, focus_action_id);
     annotate_registry_replay_targets::<M>(property_id, &mut vectors);
     let generated_files = write_generated_test_files(&vectors)
         .unwrap_or_else(|message| message_exit("testgen", json, &message, Some(TESTGEN_USAGE)));
@@ -1168,8 +1218,14 @@ fn testgen_machine<M: VerifiedMachine>(
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
+                requirement_clusters: vector.grouping.requirement_clusters.clone(),
+                risk_clusters: vector.grouping.risk_clusters.clone(),
+                focus_action_id: vector.focus_action_id.clone(),
+                expected_guard_enabled: vector.expected_guard_enabled,
+                notes: vector.notes.clone(),
             })
             .collect(),
+        vector_groups: crate::api::summarize_testgen_groups(&vectors),
         generated_files,
     }
 }

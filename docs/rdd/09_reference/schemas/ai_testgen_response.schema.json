@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.ai.testgen.response",
   "type": "object",
-  "required": ["schema_version", "request_id", "status", "vector_ids", "generated_files"],
+  "required": ["schema_version", "request_id", "status", "vector_ids", "vectors", "generated_files"],
   "properties": {
     "schema_version": { "type": "string" },
     "request_id": { "type": "string", "minLength": 1 },
@@ -10,6 +10,52 @@
     "vector_ids": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "vectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "vector_id",
+          "run_id",
+          "strictness",
+          "derivation",
+          "source_kind",
+          "strategy",
+          "notes",
+          "requirement_clusters",
+          "risk_clusters"
+        ],
+        "properties": {
+          "vector_id": { "type": "string" },
+          "run_id": { "type": "string" },
+          "strictness": { "type": "string" },
+          "derivation": { "type": "string" },
+          "source_kind": { "type": "string" },
+          "strategy": { "type": "string" },
+          "focus_action_id": { "type": ["string", "null"] },
+          "expected_guard_enabled": { "type": ["boolean", "null"] },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "requirement_clusters": { "type": "array", "items": { "type": "string" } },
+          "risk_clusters": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "vector_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["group_kind", "group_id", "vector_ids"],
+        "properties": {
+          "group_kind": { "type": "string" },
+          "group_id": { "type": "string" },
+          "vector_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
     },
     "generated_files": {
       "type": "array",
