@@ -735,10 +735,12 @@ fn bundled_rust_models_run_via_main_cli_path() {
         .output()
         .expect("check should run");
     assert_eq!(check.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"traceback\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"changed_fields\""));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("\"breakpoint_kind\""));
+    let check_stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(check_stdout.contains("\"kind\":\"completed\""));
+    assert!(check_stdout.contains("\"property_id\":\"P_FAIL\""));
+    assert!(check_stdout.contains("\"traceback\""));
+    assert!(check_stdout.contains("\"changed_fields\""));
+    assert!(check_stdout.contains("\"breakpoint_kind\""));
 
     let coverage = Command::new(binary_path())
         .arg("coverage")
@@ -882,7 +884,7 @@ fn cli_commands_and_schema_are_machine_readable() {
     assert!(commands_stdout.contains("\"surface\":\"valid\""));
     assert!(commands_stdout.contains("\"name\":\"check\""));
     assert!(commands_stdout.contains("\"name\":\"mcp\""));
-    assert!(commands_stdout.contains("\"response\":\"schema.run_result\""));
+    assert!(commands_stdout.contains("\"response\":\"schema.cli.completed\""));
 
     let schema = Command::new(binary_path())
         .arg("schema")
@@ -893,7 +895,8 @@ fn cli_commands_and_schema_are_machine_readable() {
     let schema_stdout = String::from_utf8_lossy(&schema.stdout);
     assert!(schema_stdout.contains("\"command\":\"check\""));
     assert!(schema_stdout.contains("\"parameter_schema_id\":\"schema.cli.valid.check.parameters\""));
-    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.run_result\""));
+    assert!(schema_stdout.contains("\"response_schema_id\":\"schema.cli.completed\""));
+    assert!(schema_stdout.contains("\"error_schema_id\":\"schema.cli.error\""));
 }
 
 #[test]
