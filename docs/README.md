@@ -10,15 +10,20 @@
 - [AI Docs Curriculum](./ai/curriculum.md)
   Learning-order and task-order map for authoring, review, migration, and
   conformance workflows.
+- [Requirement Refinement Workflow](./ai/requirement-refinement-workflow.md)
+  Clarification-first and evidence-driven loop for turning ambiguous product
+  requirements into stable modeling briefs.
 - [Model Authoring Best Practices](./ai/model-authoring-best-practices.md)
   Guidance for documenting model intent, scope, assumptions, scenarios, and
   critical properties close to the source.
 - [Project Organization Guide](./project-organization.md)
   Recommended layout for model files, registries, shared types, integration
-  models, and generated artifacts.
+  models, generated artifacts, and the pre-compose integration-model pattern.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
+- [Artifact Inventory and Run History](./artifacts.md)
+  Artifact index layout, run-history files, and CLI listing surfaces.
 - [Rust DSL Guide](./dsl/README.md)
   User-facing documentation for writing and operating models with the `valid`
   Rust DSL.
@@ -26,6 +31,9 @@
   Current implemented surface and semantic subset for the Rust DSL.
 - [DSL Language Evolution](./dsl/language-evolution.md)
   Design notes for proposed and in-flight language features.
+- [Parameterized Action Roadmap](./dsl/parameterized-action-roadmap.md)
+  Incremental plan for moving from enum-only actions to bounded parameterized
+  actions without encouraging action explosion in docs or examples.
 - [ADR-0001: `valid_model!` Frontend Decision](./adr/0001-valid-model-frontend.md)
   Decision record for keeping `valid_model!` on the `macro_rules!` track unless
   A1 fails to recover `rust-analyzer` compatibility.
@@ -35,7 +43,9 @@
 
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide, then move through the AI docs curriculum.
+authoring guide, then move through the AI docs curriculum. If the requirement
+is still moving, read the requirement refinement workflow before editing the
+model.
 If you want models to stay readable for review and long-term maintenance, read
 the model authoring best-practice guide alongside the AI guide.
 If you want to keep a `valid` project maintainable as it grows, read the

@@ -53,6 +53,10 @@ use valid::{
     },
     support::{
         artifact::{benchmark_baseline_path, benchmark_report_path},
+        artifact_index::{
+            load_artifact_index, load_run_history, record_artifact, render_artifact_inventory_json,
+            render_artifact_inventory_text, ArtifactRecord,
+        },
         hash::stable_hash_hex,
         io::write_text_file,
     },
@@ -93,6 +97,9 @@ fn main() {
     let parsed = maybe_auto_discover_external(parsed);
     if parsed.command == "init" {
         cmd_init(&parsed);
+    }
+    if parsed.command == "artifacts" {
+        cmd_artifacts(&parsed);
     }
     if parsed.command == "clean" {
         cmd_clean(&parsed);
@@ -167,7 +174,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn internal_bundled_mode_enabled() -> bool {
@@ -1548,8 +1555,9 @@ fn cmd_testgen(parsed: ParsedArgs) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
                             vector.vector_id,
+                            vector.run_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
@@ -1565,8 +1573,9 @@ fn cmd_testgen(parsed: ParsedArgs) {
                     println!("vectors:");
                     for vector in &response.vectors {
                         println!(
-                            "- {} strictness={} derivation={} source={} strategy={}",
+                            "- {} run_id={} strictness={} derivation={} source={} strategy={}",
                             vector.vector_id,
+                            vector.run_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
@@ -1640,6 +1649,26 @@ fn cmd_clean(parsed: &CliArgs) -> ! {
         }
     }
     progress.finish(ExitCode::Success);
+    process::exit(ExitCode::Success.code());
+}
+
+fn cmd_artifacts(parsed: &CliArgs) -> ! {
+    let index = load_artifact_index().unwrap_or_else(|message| {
+        message_exit("artifacts", parsed.json, &message, None);
+    });
+    let history = load_run_history().unwrap_or_else(|message| {
+        message_exit("artifacts", parsed.json, &message, None);
+    });
+    if parsed.json {
+        println!(
+            "{}",
+            render_artifact_inventory_json(&index, &history).unwrap_or_else(|message| {
+                message_exit("artifacts", true, &message, None);
+            })
+        );
+    } else {
+        print!("{}", render_artifact_inventory_text(&index, &history));
+    }
     process::exit(ExitCode::Success.code());
 }
 
@@ -2442,7 +2471,18 @@ fn clean_artifacts(root: &Path) -> Vec<String> {
 
 fn write_benchmark_artifact(report_id: &str, body: &str) -> Option<String> {
     let path = benchmark_report_path(report_id);
-    write_text_file(&path, body).ok().map(|_| path)
+    write_text_file(&path, body).ok()?;
+    let _ = record_artifact(ArtifactRecord {
+        artifact_kind: "benchmark_report".to_string(),
+        path: path.clone(),
+        run_id: report_id.to_string(),
+        model_id: None,
+        property_id: None,
+        evidence_id: None,
+        vector_id: None,
+        suite_id: None,
+    });
+    Some(path)
 }
 
 fn migration_output_path(model: &str, requested: &str) -> String {

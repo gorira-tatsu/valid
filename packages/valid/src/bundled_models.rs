@@ -296,6 +296,7 @@ pub fn testgen_bundled_model(
             .iter()
             .map(|vector| crate::api::TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
+                run_id: vector.run_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
@@ -586,6 +587,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
         .map(|property| InspectProperty {
             property_id: property.property_id.to_string(),
             kind: crate::api::property_kind_label(&property.property_kind).to_string(),
+            layer: crate::api::property_layer_label(property.property_layer).to_string(),
             expr: property.expr.map(str::to_string),
             scope_expr: None,
             action_filter: None,
@@ -621,6 +623,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
                 explicit_status: "not_applicable".to_string(),
                 solver_status: "not_applicable".to_string(),
                 reason: String::new(),
+                backend_statuses: Vec::new(),
             },
             reasons: capabilities.reasons.clone(),
         },

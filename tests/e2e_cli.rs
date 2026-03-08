@@ -317,6 +317,35 @@ fn cli_check_accepts_scenario_selection() {
 }
 
 #[test]
+fn cli_artifacts_lists_selfcheck_run_history() {
+    let temp_dir = unique_temp_dir("valid-artifacts");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+    let selfcheck = Command::new(binary_path())
+        .arg("selfcheck")
+        .arg("--json")
+        .current_dir(&temp_dir)
+        .output()
+        .expect("selfcheck should run");
+    assert!(selfcheck.status.success());
+
+    let output = Command::new(binary_path())
+        .arg("artifacts")
+        .arg("--json")
+        .current_dir(&temp_dir)
+        .output()
+        .expect("artifacts should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"artifacts\""));
+    assert!(stdout.contains("\"runs\""));
+    assert!(stdout.contains("\"run_id\": \"selfcheck-local-0001\""));
+    assert!(stdout.contains("\"artifact_kind\": \"selfcheck_report\""));
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn cli_graph_renders_mermaid_for_valid_model() {
     let safe = repo_path("tests/fixtures/models/safe_counter.valid");
     let output = Command::new(binary_path())

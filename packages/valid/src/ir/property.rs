@@ -5,9 +5,39 @@ use std::fmt;
 pub struct PropertyIr {
     pub property_id: String,
     pub kind: PropertyKind,
+    pub layer: PropertyLayer,
     pub expr: ExprIr,
     pub scope: Option<ExprIr>,
     pub action_filter: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyLayer {
+    Assume,
+    Assert,
+}
+
+impl PropertyLayer {
+    pub fn parse(input: &str) -> Option<Self> {
+        match input {
+            "assume" => Some(Self::Assume),
+            "assert" => Some(Self::Assert),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Assume => "assume",
+            Self::Assert => "assert",
+        }
+    }
+}
+
+impl fmt::Display for PropertyLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

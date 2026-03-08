@@ -3,11 +3,16 @@
 
 目的:
   - FiniteRelation と FiniteMap を使って、テナント所属とテナント別プランを自然に書く
-  - SaaS の cross-tenant access を小さいモデルで検証する
+  - SaaS の cross-tenant access を小さい integration model で検証する
+  - compose 構文なしでも shared-state cross-domain check を書ける形を示す
+
+統合する関心:
+  - membership サブドメイン
+  - billing / plan サブドメイン
 
 含まれるモデル:
   - tenant-relation-safe
-    membership と tenant plan の両方を見て export を許可する
+    membership と tenant plan の shared state を見て export を許可する
   - tenant-relation-regression
     plan だけで export を許可してしまい、cross-tenant access が起きる
 
@@ -63,6 +68,12 @@ valid_actions! {
 }
 
 valid_model! {
+    /// Model: TenantRelationSafeModel
+    /// Summary: Shared-state integration model for membership plus tenant-plan export gating.
+    /// In scope: export authorization from shared membership and plan state.
+    /// Out of scope: standalone membership workflows, billing lifecycles, and full compose semantics.
+    /// Assumptions: membership ownership and plan ownership remain local concerns outside this thin shared-state review surface.
+    /// Critical properties: P_EXPORT_REQUIRES_MEMBERSHIP, P_EXPORT_REQUIRES_ENTERPRISE, P_NO_CROSS_TENANT_ACCESS.
     model TenantRelationSafeModel<TenantRelationState, TenantRelationAction>;
     init [TenantRelationState {
         memberships: FiniteRelation::empty(),
@@ -109,6 +120,12 @@ valid_model! {
 }
 
 valid_model! {
+    /// Model: TenantRelationRegressionModel
+    /// Summary: Regression-oriented integration model showing how plan-only export logic breaks the shared-state contract.
+    /// In scope: the cross-domain failure where plan state is checked without corresponding membership state.
+    /// Out of scope: all local remediation flows and unrelated tenant lifecycle transitions.
+    /// Assumptions: this example intentionally restates only the minimum shared state needed to review the contract.
+    /// Critical properties: P_EXPORT_REQUIRES_MEMBERSHIP, P_NO_CROSS_TENANT_ACCESS.
     model TenantRelationRegressionModel<TenantRelationState, TenantRelationAction>;
     init [TenantRelationState {
         memberships: FiniteRelation::empty(),

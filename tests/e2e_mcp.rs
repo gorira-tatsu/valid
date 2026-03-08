@@ -238,6 +238,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_array()
         .expect("resources should be present")
         .iter()
+        .any(|item| item["uri"] == "valid://docs/ai-requirement-refinement-workflow"));
+    assert!(resources["resources"]
+        .as_array()
+        .expect("resources should be present")
+        .iter()
         .any(|item| item["uri"] == "valid://docs/ai-curriculum"));
 
     let authoring_resource = client.request(
@@ -248,6 +253,14 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_str()
         .expect("resource text should be present")
         .contains("AI Authoring Guide"));
+    let refinement_resource = client.request(
+        "resources/read",
+        json!({ "uri": "valid://docs/ai-requirement-refinement-workflow" }),
+    );
+    assert!(refinement_resource["contents"][0]["text"]
+        .as_str()
+        .expect("resource text should be present")
+        .contains("Requirement Refinement Workflow"));
 
     let prompts = client.request("prompts/list", json!({}));
     let prompt_names = prompts["prompts"]
@@ -257,7 +270,9 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .map(|item| item["name"].as_str().expect("prompt name should be text"))
         .collect::<Vec<_>>();
     for expected in [
+        "refine_requirement",
         "clarify_requirement",
+        "refine_requirement_from_evidence",
         "author_model",
         "review_model",
         "migrate_step_to_transitions",
@@ -285,6 +300,21 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .iter()
         .any(|item| item["content"]["type"] == "resource"));
 
+    let refine_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "refine_requirement",
+            "arguments": {
+                "requirement": "exports require approval but failures may be retried",
+                "risk_area": "auditability"
+            }
+        }),
+    );
+    assert!(refine_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("refine prompt text should be present")
+        .contains("stable modeling brief"));
+
     let clarify_prompt = client.request(
         "prompts/get",
         json!({
@@ -299,6 +329,23 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .as_str()
         .expect("clarify prompt text should be present")
         .contains("Ask only the minimum follow-up questions"));
+
+    let evidence_prompt = client.request(
+        "prompts/get",
+        json!({
+            "name": "refine_requirement_from_evidence",
+            "arguments": {
+                "current_brief": "approved exports are immutable and may retry only transport failures",
+                "evidence_kind": "counterexample",
+                "evidence_summary": "a trace shows validation failure still permits retry",
+                "risk_area": "auditability"
+            }
+        }),
+    );
+    assert!(evidence_prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .expect("evidence prompt text should be present")
+        .contains("using model evidence"));
 
     let conformance_prompt = client.request(
         "prompts/get",
@@ -325,6 +372,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("docs should be present")
         .iter()
         .any(|item| item["doc_id"] == "language-spec"));
+    assert!(docs_index["docs"]
+        .as_array()
+        .expect("docs should be present")
+        .iter()
+        .any(|item| item["doc_id"] == "ai-requirement-refinement-workflow"));
     assert!(docs_index["docs"]
         .as_array()
         .expect("docs should be present")
@@ -443,7 +495,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     let lint =
         structured_content(client.call_tool("valid_lint", json!({ "model_file": model_file_str })));
     assert_eq!(lint["status"], "warn");
-    assert!(lint["findings"].is_array());
+    assert!(lint["findings"]
+        .as_array()
+        .expect("findings should be present")
+        .iter()
+        .any(|finding| finding["code"] == "missing_model_documentation"));
 
     let replay = structured_content(client.call_tool(
         "valid_replay",

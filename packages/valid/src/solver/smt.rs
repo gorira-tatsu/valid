@@ -1473,6 +1473,7 @@ mod tests {
             properties: vec![PropertyIr {
                 property_id: "P_SAFE".to_string(),
                 kind: PropertyKind::Invariant,
+                layer: crate::ir::PropertyLayer::Assert,
                 expr: ExprIr::Binary {
                     op: BinaryOp::Or,
                     left: Box::new(ExprIr::Binary {

@@ -36,10 +36,12 @@ cargo valid distinguish <left-model> --compare=<right-model>
 MCP mode:
 
 1. `valid_docs_get` for this page
-2. `valid_inspect`
-3. `valid_lint`
-4. `valid_explain`
-5. `valid_distinguish` when comparing two candidate models
+2. `refine_requirement_from_evidence` if the failure suggests requirement
+   ambiguity
+3. `valid_inspect`
+4. `valid_lint`
+5. `valid_explain`
+6. `valid_distinguish` when comparing two candidate models
 
 ## What to look for
 
@@ -66,6 +68,7 @@ MCP mode:
 
 ## Next read
 
+- [Requirement Refinement Workflow](./requirement-refinement-workflow.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Conformance Workflow](./conformance-workflow.md)
