@@ -153,6 +153,8 @@ Useful expressions:
 - `String`, `str_contains`, and `regex_match` are explicit-first today
 - `reachability` and `deadlock_freedom` are supported over the finite state
   space
+- `testgen --strategy=deadlock` emits the shortest known replayable deadlock
+  trace when the explicit backend finds one
 - `cover`, `transition`, and scenario-scoped checks are explicit-first today
 - a model can be `explicit_ready` but not `solver_ready`
 - `readiness` / `lint` is the authority for migration hints and degraded

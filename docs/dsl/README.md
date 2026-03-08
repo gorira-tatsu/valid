@@ -346,6 +346,7 @@ solver lowering.
 - `coverage`
 - `explain`
 - `generate-tests --strategy=path`
+- `generate-tests --strategy=deadlock`
 
 Examples:
 
