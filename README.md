@@ -17,9 +17,10 @@ User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
 [docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md)
-and [docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md).
-Project layout and file-splitting guidance lives in
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
+and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
+file-splitting guidance lives in
 [docs/project-organization.md](./docs/project-organization.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
@@ -175,7 +176,7 @@ Desktop, and other MCP clients can call it as tools.
 Recommended AI flow:
 
 1. call `valid_docs_index`
-2. read `ai-authoring-guide` through `valid_docs_get`
+2. read `ai-authoring-guide` and `ai-curriculum` through `valid_docs_get`
 3. read one curated example through `valid_example_get`
 4. move to `valid_inspect`, `valid_lint`, and `valid_check`
 

@@ -9,6 +9,7 @@ This is not the design spec. For requirements and architecture, see the RDD.
 Related documents:
 
 - [AI Authoring Guide](../ai/authoring-guide.md)
+- [AI Docs Curriculum](../ai/curriculum.md)
 - [Model Authoring Best Practices](../ai/model-authoring-best-practices.md)
 - [Project Organization Guide](../project-organization.md)
 - [Current Language Spec](./language-spec.md)

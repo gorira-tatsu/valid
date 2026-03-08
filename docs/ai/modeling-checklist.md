@@ -51,7 +51,12 @@ Related documents:
 
 ## Properties
 
-- Only `invariant` is used
+- Property kinds are chosen intentionally:
+  - `invariant`
+  - `reachability`
+  - `deadlock_freedom`
+  - `cover`
+  - action-scoped `transition`
 - Property ids are stable and descriptive
 - Properties talk about reachable-state semantics, not Rust type-level claims
 
@@ -67,4 +72,9 @@ Related documents:
 - The model can be explained from one example path
 - The finite domains are small enough to inspect mentally
 - The CLI/MCP commands suggested to the user match the chosen mode
+## Task-specific follow-up
+
+- For review: [Review Workflow](./review-workflow.md)
+- For migration: [Migration Guide](./migration-guide.md)
+- For implementation handoff: [Conformance Workflow](./conformance-workflow.md)
 - The model comment still matches the actual behavior after the latest edit
