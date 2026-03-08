@@ -1620,6 +1620,11 @@ fn prompt_messages(
         .join("\n");
     let target_hint = target_prompt_hint(config);
     let body = match entry.name {
+        "clarify_requirement" => format!(
+            "Clarify the requirement before writing or editing a valid model.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and modeling checklist.\n2. Ask only the minimum follow-up questions needed to pin down state, actions, success/failure paths, and out-of-scope behavior.\n3. Separate requirement ambiguity from modeling ambiguity.\n4. End with a compact modeling brief that names likely scenarios, predicates, properties, and verification mode.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
         "author_model" => format!(
             "Author a new valid model for the following domain.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide.\n2. Read one curated example close to the domain.\n3. Prefer declarative transitions unless explicit-first constraints force step.\n4. Use inspect and lint before verify.\n\n{}",
             blank_if_empty(&args),
@@ -1637,6 +1642,11 @@ fn prompt_messages(
         ),
         "explain_readiness_failure" => format!(
             "Explain the readiness or lint failure for the target model and propose the minimum next actions.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and language spec.\n2. Inspect or lint the model if the finding payload is incomplete.\n3. Classify each issue as syntax, capability, unsupported expression, or migration guidance.\n4. Recommend the next doc, tool, or rewrite.\n\n{}",
+            blank_if_empty(&args),
+            target_hint
+        ),
+        "triage_conformance_failure" => format!(
+            "Triage a conformance mismatch between the accepted model and an implementation surface.\n\nProvided arguments:\n{}\n\nWorkflow:\n1. Read the AI authoring guide and modeling checklist.\n2. If the failure payload is partial, gather the conformance result and any linked explain/check output.\n3. Classify each mismatch as likely requirement drift, model bug, implementation bug, or observability gap.\n4. Recommend the next tool, rerun target, or repair surface with the minimum follow-up steps.\n\n{}",
             blank_if_empty(&args),
             target_hint
         ),

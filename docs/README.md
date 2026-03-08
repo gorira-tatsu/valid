@@ -23,7 +23,7 @@
 
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide.
+authoring guide. That guide also links to the built-in MCP prompt workflows.
 If you want to model and verify a system, start with the Rust DSL guide.
 If you want to understand the repository's design and scope, read the
 architecture note and the RDD.

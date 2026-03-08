@@ -17,6 +17,23 @@ pub(crate) struct PromptEntry {
 
 pub(crate) const PROMPTS: &[PromptEntry] = &[
     PromptEntry {
+        name: "clarify_requirement",
+        title: "Clarify Requirement",
+        description: "Guide an LLM through turning an ambiguous requirement into a concrete modeling brief before authoring begins.",
+        arguments: &[
+            PromptArgument {
+                name: "requirement",
+                description: "Natural-language requirement or feature description that still needs clarification.",
+                required: true,
+            },
+            PromptArgument {
+                name: "risk_area",
+                description: "Optional business, compliance, or UX risk area to prioritize while asking follow-up questions.",
+                required: false,
+            },
+        ],
+    },
+    PromptEntry {
         name: "author_model",
         title: "Author Model",
         description: "Guide an LLM through authoring a new valid model from a domain description.",
@@ -85,6 +102,28 @@ pub(crate) const PROMPTS: &[PromptEntry] = &[
             PromptArgument {
                 name: "lint_result",
                 description: "Optional lint/readiness JSON summary or copied finding text.",
+                required: false,
+            },
+        ],
+    },
+    PromptEntry {
+        name: "triage_conformance_failure",
+        title: "Triage Conformance Failure",
+        description: "Guide an LLM through classifying a model-versus-implementation mismatch and deciding the next repair surface.",
+        arguments: &[
+            PromptArgument {
+                name: "target",
+                description: "Model file path, registry model name, or inline source label.",
+                required: true,
+            },
+            PromptArgument {
+                name: "conformance_result",
+                description: "Optional conformance JSON summary or copied mismatch text.",
+                required: false,
+            },
+            PromptArgument {
+                name: "sut_surface",
+                description: "Optional implementation surface such as api, ui, handler, or runner.",
                 required: false,
             },
         ],
