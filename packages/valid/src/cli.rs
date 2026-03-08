@@ -12,6 +12,14 @@ const RUN_RESULT_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/docs/rdd/09_reference/schemas/run_result.schema.json"
 ));
+const CLI_COMPLETED_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/docs/rdd/09_reference/schemas/cli_completed.schema.json"
+));
+const CLI_ERROR_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/docs/rdd/09_reference/schemas/cli_error.schema.json"
+));
 const EVIDENCE_TRACE_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/docs/rdd/09_reference/schemas/evidence_trace.schema.json"
@@ -776,7 +784,7 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         positional: &[MODEL_FILE_ARG],
         options: CHECK_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.check_request", builder: check_request_schema }),
-        response_schema: Some(SchemaRef { id: "schema.run_result", builder: run_result_schema }),
+        response_schema: Some(SchemaRef { id: "schema.cli.completed", builder: cli_completed_schema }),
         supports_json: true,
         supports_progress: true,
     },
@@ -1151,7 +1159,7 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
         positional: &[MODEL_ARG],
         options: CHECK_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.check_request", builder: check_request_schema }),
-        response_schema: Some(SchemaRef { id: "schema.run_result", builder: run_result_schema }),
+        response_schema: Some(SchemaRef { id: "schema.cli.completed", builder: cli_completed_schema }),
         supports_json: true,
         supports_progress: true,
     },
@@ -1406,7 +1414,7 @@ const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
         positional: &[MODEL_ARG],
         options: &[JSON_ARG, PROGRESS_ARG, PROPERTY_ARG, BACKEND_ARG, SOLVER_EXEC_ARG, SOLVER_ARG_ARG, MANIFEST_ARG, REGISTRY_ARG, FILE_ARG, EXAMPLE_ARG, BIN_ARG],
         request_schema: Some(SchemaRef { id: "schema.ai.check_request", builder: check_request_schema }),
-        response_schema: Some(SchemaRef { id: "schema.run_result", builder: run_result_schema }),
+        response_schema: Some(SchemaRef { id: "schema.cli.completed", builder: cli_completed_schema }),
         supports_json: true,
         supports_progress: true,
     },
@@ -1783,6 +1791,14 @@ fn run_result_schema() -> Value {
     parse_schema(RUN_RESULT_SCHEMA)
 }
 
+fn cli_completed_schema() -> Value {
+    parse_schema(CLI_COMPLETED_SCHEMA)
+}
+
+fn cli_error_schema() -> Value {
+    parse_schema(CLI_ERROR_SCHEMA)
+}
+
 fn evidence_trace_schema() -> Value {
     parse_schema(EVIDENCE_TRACE_SCHEMA)
 }
@@ -2152,40 +2168,6 @@ fn schema_response_schema() -> Value {
             "error_schema": { "type": "object" },
             "progress_schema_id": { "type": ["string", "null"] },
             "progress_schema": { "type": ["object", "null"] }
-        }
-    })
-}
-
-fn cli_error_schema() -> Value {
-    json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "schema.cli.error",
-        "type": "object",
-        "required": ["schema_version", "kind", "command", "status", "exit_code", "diagnostics"],
-        "properties": {
-            "schema_version": { "type": "string" },
-            "kind": { "type": "string", "enum": ["cli_error"] },
-            "command": { "type": "string" },
-            "status": { "type": "string", "enum": ["ERROR"] },
-            "exit_code": { "type": "integer", "enum": [3] },
-            "usage": { "type": "string" },
-            "diagnostics": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["error_code", "segment", "severity", "message", "conflicts", "help", "best_practices"],
-                    "properties": {
-                        "error_code": { "type": "string" },
-                        "segment": { "type": "string" },
-                        "severity": { "type": "string" },
-                        "message": { "type": "string" },
-                        "primary_span": { "type": ["object", "null"] },
-                        "conflicts": { "type": "array", "items": { "type": "string" } },
-                        "help": { "type": "array", "items": { "type": "string" } },
-                        "best_practices": { "type": "array", "items": { "type": "string" } }
-                    }
-                }
-            }
         }
     })
 }

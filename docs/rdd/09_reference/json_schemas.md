@@ -146,7 +146,43 @@
 - 定義箇所: `08_specs/ai_solver_selfcheck_specs.md`
 - 本体: [schemas/selfcheck_report.schema.json](schemas/selfcheck_report.schema.json)
 
-## 15. バージョニング規約
+## 15. CLI Error Envelope
+
+- ID: `schema.cli.error`
+- 定義箇所: `05_interfaces/interfaces_cli_api_ci.md`, `08_specs/explicit_engine_and_evidence_specs.md`
+- 本体: [schemas/cli_error.schema.json](schemas/cli_error.schema.json)
+- 用途: `--json` で CLI 側の引数/解決/実行前エラーを返す共通 envelope
+
+主要フィールド:
+
+- `kind`
+- `command`
+- `status`
+- `exit_code`
+- `diagnostics`
+- `usage`
+
+## 16. CLI Completed Envelope
+
+- ID: `schema.cli.completed`
+- 定義箇所: `08_specs/explicit_engine_and_evidence_specs.md`, `05_interfaces/interfaces_cli_api_ci.md`
+- 本体: [schemas/cli_completed.schema.json](schemas/cli_completed.schema.json)
+- 用途: `check` / `verify` などが `--json` で返す共通 completion envelope
+
+主要フィールド:
+
+- `kind`
+- `model_id`
+- `manifest`
+- `status`
+- `assurance_level`
+- `property_result`
+- `trace`
+- `traceback`
+- `ci`
+- `review_summary`
+
+## 17. バージョニング規約
 
 - `schema_version` は `major.minor.patch`
 - major 変更: 互換破壊

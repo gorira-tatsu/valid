@@ -4,6 +4,8 @@
 
 主要ファイル:
 - [run_result.schema.json](run_result.schema.json)
+- [cli_completed.schema.json](cli_completed.schema.json)
+- [cli_error.schema.json](cli_error.schema.json)
 - [evidence_trace.schema.json](evidence_trace.schema.json)
 - [test_vector.schema.json](test_vector.schema.json)
 - [diagnostic_bundle.schema.json](diagnostic_bundle.schema.json)
