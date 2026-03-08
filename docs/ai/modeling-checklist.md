@@ -9,6 +9,7 @@ Use this checklist before returning a generated model or reviewing one.
 - Pick finite enums, bounded integers, and explicit metadata.
 - Decide whether the model is expected to be solver-ready or only
   explicit-ready.
+- Draft a short intent comment that explains the business rule and boundary.
 
 ## State
 
@@ -51,10 +52,12 @@ Use this checklist before returning a generated model or reviewing one.
 - If the model uses `String`, `str_contains`, or `regex_match`, expect
   explicit-first constraints
 - Run `cargo valid readiness <model>` or `valid_lint`
+- Review maintainability findings, not just capability blockers
 - Do not claim solver-ready unless readiness supports it
 
 ## Final review
 
 - The model can be explained from one example path
 - The finite domains are small enough to inspect mentally
+- Repeated guards or property expressions have been extracted into predicates
 - The CLI/MCP commands suggested to the user match the chosen mode

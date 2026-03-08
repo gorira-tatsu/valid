@@ -807,7 +807,7 @@ const VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "lint",
         aliases: &["readiness"],
-        description: "Run model readiness checks.",
+        description: "Run model readiness and maintainability lint checks.",
         usage: "valid lint <model-file> [--json] [--progress=json]",
         positional: &[MODEL_FILE_ARG],
         options: LINT_OPTIONS,
@@ -1050,7 +1050,7 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "lint",
         aliases: &["readiness"],
-        description: "Run readiness checks on a registered model.",
+        description: "Run readiness and maintainability lint checks on a registered model.",
         usage: "<registry-bin> lint <model> [--json] [--progress=json]",
         positional: &[MODEL_ARG],
         options: LINT_OPTIONS,
@@ -1281,7 +1281,7 @@ const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "lint",
         aliases: &["readiness"],
-        description: "Run model readiness checks.",
+        description: "Run model readiness and maintainability lint checks.",
         usage: "cargo valid lint <model> [--json] [--progress=json]",
         positional: &[MODEL_ARG],
         options: &[JSON_ARG, PROGRESS_ARG, MANIFEST_ARG, REGISTRY_ARG, FILE_ARG, EXAMPLE_ARG, BIN_ARG],
@@ -1783,13 +1783,14 @@ fn lint_response_schema() -> Value {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["severity", "code", "message"],
+                    "required": ["category", "severity", "code", "message"],
                     "properties": {
+                        "category": { "type": "string" },
                         "severity": { "type": "string" },
                         "code": { "type": "string" },
                         "message": { "type": "string" },
-                        "field": { "type": ["string", "null"] },
-                        "action": { "type": ["string", "null"] }
+                        "suggestion": { "type": ["string", "null"] },
+                        "snippet": { "type": ["string", "null"] }
                     }
                 }
             }

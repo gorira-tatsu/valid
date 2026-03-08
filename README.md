@@ -27,6 +27,7 @@ The product story is now:
 - declarative `transitions { ... }` models are the canonical analysis path
 - free-form `step` models are still supported, but may remain explicit-only
 - `inspect` reports a capability matrix so you can see which path a model can use
+- `lint` / `readiness` now reports both capability blockers and maintainability guidance
 
 ## What It Can Do
 
@@ -108,6 +109,7 @@ cargo valid models
 cargo valid inspect counter
 cargo valid graph counter
 cargo valid readiness counter
+cargo valid lint counter --json
 cargo valid migrate counter
 cargo valid migrate counter --write
 cargo valid migrate counter --check

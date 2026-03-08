@@ -516,7 +516,7 @@ fn tool_definitions() -> Vec<Value> {
         ),
         tool(
             "valid_lint",
-            "Run static analysis and capability lint checks on a model.",
+            "Run static analysis, readiness, and maintainability lint checks on a model.",
             input_schema_basic(),
             output_schema_with_success_required(&["status", "findings"]),
             true,

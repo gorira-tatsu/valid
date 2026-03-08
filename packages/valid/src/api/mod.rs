@@ -1,5 +1,7 @@
 //! Machine-readable API layer for AI and CLI integration.
 
+use std::collections::BTreeMap;
+
 use tabled::{
     builder::Builder,
     settings::{style::Style, Alignment, Modify, Padding},
@@ -200,6 +202,7 @@ pub struct ExplainResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintFinding {
+    pub category: String,
     pub severity: String,
     pub code: String,
     pub message: String,
@@ -2311,10 +2314,20 @@ fn render_update_effect(updates: &[crate::ir::UpdateIr]) -> String {
 
 pub fn lint_source(request: &InspectRequest) -> Result<LintResponse, Vec<Diagnostic>> {
     let inspect = inspect_source(request)?;
-    Ok(lint_from_inspect(&inspect))
+    Ok(lint_from_inspect_and_source(
+        &inspect,
+        Some(&request.source),
+    ))
 }
 
 pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
+    lint_from_inspect_and_source(inspect, None)
+}
+
+pub fn lint_from_inspect_and_source(
+    inspect: &InspectResponse,
+    source: Option<&str>,
+) -> LintResponse {
     let mut findings = Vec::new();
     let declarative_model = inspect
         .transition_details
@@ -2322,95 +2335,87 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         .any(|transition| transition.guard.is_some() || !transition.updates.is_empty());
     for reason in &inspect.capabilities.reasons {
         match reason.as_str() {
-            "opaque_step_closure" => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: "opaque_step_closure".to_string(),
-                message: "model uses a free-form step closure, so solver lowering is not available".to_string(),
-                suggestion: Some(
-                    "rewrite critical actions with declarative transitions { ... }".to_string(),
+            "opaque_step_closure" => findings.push(capability_finding(
+                "warn",
+                "opaque_step_closure",
+                "model uses a free-form step closure, so solver lowering is not available",
+                Some("rewrite critical actions with declarative transitions { ... }".to_string()),
+                None,
+            )),
+            "missing_declarative_transitions" => findings.push(capability_finding(
+                "warn",
+                "missing_declarative_transitions",
+                "model does not expose declarative transition descriptors",
+                Some(
+                    "add transitions { transition ... } so guard/effect metadata becomes first-class"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "missing_declarative_transitions" => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: "missing_declarative_transitions".to_string(),
-                message: "model does not expose declarative transition descriptors".to_string(),
-                suggestion: Some(
-                    "add transitions { transition ... } so guard/effect metadata becomes first-class".to_string(),
+                None,
+            )),
+            "unsupported_machine_guard_expr" => findings.push(capability_finding(
+                if declarative_model { "error" } else { "warn" },
+                "unsupported_machine_guard_expr",
+                "one or more guard expressions are outside the current solver-neutral subset",
+                Some(
+                    "simplify guards to the current IR subset or extend lowering support"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "unsupported_machine_guard_expr" => findings.push(LintFinding {
-                severity: if declarative_model {
-                    "error".to_string()
-                } else {
-                    "warn".to_string()
-                },
-                code: "unsupported_machine_guard_expr".to_string(),
-                message: "one or more guard expressions are outside the current solver-neutral subset".to_string(),
-                suggestion: Some(
-                    "simplify guards to the current IR subset or extend lowering support".to_string(),
+                None,
+            )),
+            "unsupported_machine_update_expr" => findings.push(capability_finding(
+                if declarative_model { "error" } else { "warn" },
+                "unsupported_machine_update_expr",
+                "one or more transition updates are outside the current solver-neutral subset",
+                Some(
+                    "rewrite updates with supported expressions or extend lowering support"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "unsupported_machine_update_expr" => findings.push(LintFinding {
-                severity: if declarative_model {
-                    "error".to_string()
-                } else {
-                    "warn".to_string()
-                },
-                code: "unsupported_machine_update_expr".to_string(),
-                message: "one or more transition updates are outside the current solver-neutral subset".to_string(),
-                suggestion: Some(
-                    "rewrite updates with supported expressions or extend lowering support".to_string(),
+                None,
+            )),
+            "unsupported_machine_property_expr" => findings.push(capability_finding(
+                if declarative_model { "error" } else { "warn" },
+                "unsupported_machine_property_expr",
+                "one or more properties cannot be lowered into the current machine IR",
+                Some(
+                    "keep properties within the supported boolean/arithmetic subset for solver runs"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "unsupported_machine_property_expr" => findings.push(LintFinding {
-                severity: if declarative_model {
-                    "error".to_string()
-                } else {
-                    "warn".to_string()
-                },
-                code: "unsupported_machine_property_expr".to_string(),
-                message: "one or more properties cannot be lowered into the current machine IR".to_string(),
-                suggestion: Some(
-                    "keep properties within the supported boolean/arithmetic subset for solver runs".to_string(),
+                None,
+            )),
+            "string_fields_require_explicit_backend" => findings.push(capability_finding(
+                "warn",
+                "string_fields_require_explicit_backend",
+                "string fields are currently explicit-only and do not lower to SAT/SMT backends",
+                Some(
+                    "keep password/text policies on backend=explicit, or abstract them into finite enums for solver runs"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "string_fields_require_explicit_backend" => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: "string_fields_require_explicit_backend".to_string(),
-                message: "string fields are currently explicit-only and do not lower to SAT/SMT backends".to_string(),
-                suggestion: Some(
-                    "keep password/text policies on backend=explicit, or abstract them into finite enums for solver runs".to_string(),
+                None,
+            )),
+            "string_ops_require_explicit_backend" => findings.push(capability_finding(
+                "warn",
+                "string_ops_require_explicit_backend",
+                "string operations such as len(...) and str_contains(...) currently require the explicit backend",
+                Some("use backend=explicit for text-heavy models".to_string()),
+                None,
+            )),
+            "regex_match_requires_explicit_backend" => findings.push(capability_finding(
+                "warn",
+                "regex_match_requires_explicit_backend",
+                "regex_match(...) currently requires the explicit backend",
+                Some(
+                    "treat regex-based password policies as explicit-first until solver encoding is added"
+                        .to_string(),
                 ),
-                snippet: None,
-            }),
-            "string_ops_require_explicit_backend" => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: "string_ops_require_explicit_backend".to_string(),
-                message: "string operations such as len(...) and str_contains(...) currently require the explicit backend".to_string(),
-                suggestion: Some("use backend=explicit for text-heavy models".to_string()),
-                snippet: None,
-            }),
-            "regex_match_requires_explicit_backend" => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: "regex_match_requires_explicit_backend".to_string(),
-                message: "regex_match(...) currently requires the explicit backend".to_string(),
-                suggestion: Some(
-                    "treat regex-based password policies as explicit-first until solver encoding is added".to_string(),
-                ),
-                snippet: None,
-            }),
-            other => findings.push(LintFinding {
-                severity: "warn".to_string(),
-                code: other.to_string(),
-                message: format!("model is not fully analysis-ready: {other}"),
-                suggestion: None,
-                snippet: None,
-            }),
+                None,
+            )),
+            other => findings.push(capability_finding(
+                "warn",
+                other,
+                format!("model is not fully analysis-ready: {other}"),
+                None,
+                None,
+            )),
         }
     }
     if inspect
@@ -2418,16 +2423,16 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         .iter()
         .any(|action| action.reads.is_empty() && action.writes.is_empty())
     {
-        findings.push(LintFinding {
-            severity: "info".to_string(),
-            code: "missing_action_metadata".to_string(),
-            message: "some actions do not declare reads/writes metadata".to_string(),
-            suggestion: Some(
+        findings.push(capability_finding(
+            "info",
+            "missing_action_metadata",
+            "some actions do not declare reads/writes metadata",
+            Some(
                 "add reads=[...] and writes=[...] to improve explain, coverage, and testgen"
                     .to_string(),
             ),
-            snippet: None,
-        });
+            None,
+        ));
     }
     if inspect
         .capabilities
@@ -2436,21 +2441,21 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         .any(|reason| reason == "opaque_step_closure")
     {
         for action in &inspect.action_details {
-            findings.push(LintFinding {
-                severity: "info".to_string(),
-                code: "transition_candidate".to_string(),
-                message: format!(
+            findings.push(capability_finding(
+                "info",
+                "transition_candidate",
+                format!(
                     "action {} is a candidate for declarative transition extraction",
                     action.action_id
                 ),
-                suggestion: Some(format!(
+                Some(format!(
                     "start with `transition {} when |state| <guard> => [NextState {{ ... }}];` and carry reads=[{}], writes=[{}]",
                     action.action_id,
                     action.reads.join(", "),
                     action.writes.join(", ")
                 )),
-                snippet: Some(render_transition_migration_snippet(inspect, action)),
-            });
+                Some(render_transition_migration_snippet(inspect, action)),
+            ));
         }
     }
     if inspect
@@ -2458,16 +2463,18 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         .iter()
         .all(|transition| transition.path_tags == ["transition_path".to_string()])
     {
-        findings.push(LintFinding {
-            severity: "info".to_string(),
-            code: "generic_decision_paths".to_string(),
-            message: "decision/path tags are still generic for all transitions".to_string(),
-            suggestion: Some(
-                "use descriptive action ids and metadata so allow/deny/boundary paths become visible".to_string(),
+        findings.push(capability_finding(
+            "info",
+            "generic_decision_paths",
+            "decision/path tags are still generic for all transitions",
+            Some(
+                "use descriptive action ids and metadata so allow/deny/boundary paths become visible"
+                    .to_string(),
             ),
-            snippet: None,
-        });
+            None,
+        ));
     }
+    findings.extend(maintainability_findings(inspect, source));
     let status = if findings
         .iter()
         .any(|finding| finding.severity == "warn" || finding.severity == "error")
@@ -2484,6 +2491,233 @@ pub fn lint_from_inspect(inspect: &InspectResponse) -> LintResponse {
         capabilities: inspect.capabilities.clone(),
         findings,
     }
+}
+
+fn capability_finding(
+    severity: &str,
+    code: &str,
+    message: impl Into<String>,
+    suggestion: Option<String>,
+    snippet: Option<String>,
+) -> LintFinding {
+    lint_finding("capability", severity, code, message, suggestion, snippet)
+}
+
+fn maintainability_finding(
+    severity: &str,
+    code: &str,
+    message: impl Into<String>,
+    suggestion: Option<String>,
+    snippet: Option<String>,
+) -> LintFinding {
+    lint_finding(
+        "maintainability",
+        severity,
+        code,
+        message,
+        suggestion,
+        snippet,
+    )
+}
+
+fn lint_finding(
+    category: &str,
+    severity: &str,
+    code: &str,
+    message: impl Into<String>,
+    suggestion: Option<String>,
+    snippet: Option<String>,
+) -> LintFinding {
+    LintFinding {
+        category: category.to_string(),
+        severity: severity.to_string(),
+        code: code.to_string(),
+        message: message.into(),
+        suggestion,
+        snippet,
+    }
+}
+
+fn maintainability_findings(inspect: &InspectResponse, source: Option<&str>) -> Vec<LintFinding> {
+    const OVERSIZED_FIELD_THRESHOLD: usize = 8;
+    const OVERSIZED_ACTION_THRESHOLD: usize = 8;
+    const OVERSIZED_PROPERTY_THRESHOLD: usize = 6;
+    const OVERSIZED_TRANSITION_THRESHOLD: usize = 10;
+    const SETUP_HEAVY_MIN_COUNT: usize = 3;
+    const SETUP_HEAVY_RATIO_NUMERATOR: usize = 2;
+    const SETUP_HEAVY_RATIO_DENOMINATOR: usize = 5;
+
+    let mut findings = Vec::new();
+
+    if let Some(source) = source.filter(|source| !source.trim().is_empty()) {
+        if !source_has_model_intent_comment(source) {
+            findings.push(maintainability_finding(
+                "warn",
+                "missing_model_documentation",
+                "model source does not start with an intent comment or overview",
+                Some(
+                    "add a short comment block above the model describing the business rule, boundaries, and why the model exists"
+                        .to_string(),
+                ),
+                None,
+            ));
+        }
+    }
+
+    let mut oversize_parts = Vec::new();
+    if inspect.state_fields.len() > OVERSIZED_FIELD_THRESHOLD {
+        oversize_parts.push(format!("{} state fields", inspect.state_fields.len()));
+    }
+    if inspect.action_details.len() > OVERSIZED_ACTION_THRESHOLD {
+        oversize_parts.push(format!("{} actions", inspect.action_details.len()));
+    }
+    if inspect.property_details.len() > OVERSIZED_PROPERTY_THRESHOLD {
+        oversize_parts.push(format!("{} properties", inspect.property_details.len()));
+    }
+    if inspect.transition_details.len() > OVERSIZED_TRANSITION_THRESHOLD {
+        oversize_parts.push(format!("{} transitions", inspect.transition_details.len()));
+    }
+    if !oversize_parts.is_empty() {
+        findings.push(maintainability_finding(
+            "warn",
+            "oversized_model",
+            format!(
+                "model packs too much behavior into one unit: {}",
+                oversize_parts.join(", ")
+            ),
+            Some(
+                "split the model into smaller bounded contexts, move repeated logic into predicates, or separate setup-only behavior from business transitions"
+                    .to_string(),
+            ),
+            None,
+        ));
+    }
+
+    let setup_count = inspect
+        .transition_details
+        .iter()
+        .filter(|transition| transition.role == "setup")
+        .count();
+    let transition_count = inspect.transition_details.len();
+    if transition_count >= SETUP_HEAVY_MIN_COUNT
+        && setup_count * SETUP_HEAVY_RATIO_DENOMINATOR
+            >= transition_count * SETUP_HEAVY_RATIO_NUMERATOR
+    {
+        findings.push(maintainability_finding(
+            "warn",
+            "setup_heavy_model",
+            format!(
+                "setup transitions dominate the model structure ({setup_count} of {transition_count} transitions are marked setup)"
+            ),
+            Some(
+                "move bootstrap-only paths into scenarios or fixtures so business flow coverage and review stay focused"
+                    .to_string(),
+            ),
+            None,
+        ));
+    }
+
+    let repeated_conditions = repeated_conditions(inspect);
+    if !repeated_conditions.is_empty() {
+        let condition_summaries = repeated_conditions
+            .iter()
+            .map(|(expr, count)| format!("`{expr}` ({count} uses)"))
+            .collect::<Vec<_>>();
+        findings.push(maintainability_finding(
+            "info",
+            "repeated_condition_without_predicate",
+            format!(
+                "repeated conditions should likely become named predicates: {}",
+                condition_summaries.join(", ")
+            ),
+            Some(
+                "extract the repeated expression into predicates: so guards, scenarios, and properties share one name"
+                    .to_string(),
+            ),
+            repeated_conditions.first().map(|(expr, _)| expr.clone()),
+        ));
+    }
+
+    findings
+}
+
+fn source_has_model_intent_comment(source: &str) -> bool {
+    for raw_line in source.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("model ") {
+            return false;
+        }
+        if trimmed.starts_with("//") || trimmed.starts_with("//!") || trimmed.starts_with("///") {
+            return true;
+        }
+        if trimmed.starts_with("# ") {
+            return true;
+        }
+        if trimmed.starts_with("use ")
+            || trimmed.starts_with("valid_model!")
+            || trimmed.starts_with("valid_state!")
+            || trimmed.starts_with("valid_actions!")
+            || trimmed.starts_with("struct ")
+            || trimmed.starts_with("enum ")
+        {
+            return false;
+        }
+    }
+    false
+}
+fn repeated_conditions(inspect: &InspectResponse) -> Vec<(String, usize)> {
+    let predicate_exprs = inspect
+        .predicate_details
+        .iter()
+        .map(|predicate| normalize_expr(&predicate.expr))
+        .collect::<Vec<_>>();
+    let mut counts = BTreeMap::new();
+    for expr in inspect
+        .transition_details
+        .iter()
+        .filter_map(|transition| transition.guard.as_ref())
+        .chain(
+            inspect
+                .property_details
+                .iter()
+                .filter_map(|property| property.expr.as_ref()),
+        )
+        .chain(
+            inspect
+                .property_details
+                .iter()
+                .filter_map(|property| property.scope_expr.as_ref()),
+        )
+        .chain(
+            inspect
+                .scenario_details
+                .iter()
+                .map(|scenario| &scenario.expr),
+        )
+    {
+        let normalized = normalize_expr(expr);
+        if normalized.len() < 12 {
+            continue;
+        }
+        if predicate_exprs
+            .iter()
+            .any(|predicate| predicate == &normalized)
+        {
+            continue;
+        }
+        *counts.entry(normalized).or_insert(0usize) += 1;
+    }
+    counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .collect()
+}
+
+fn normalize_expr(expr: &str) -> String {
+    expr.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn explicit_analysis_warning(inspect: &InspectResponse) -> Option<String> {
@@ -2526,7 +2760,8 @@ pub fn render_lint_json(response: &LintResponse) -> String {
         .iter()
         .map(|finding| {
             format!(
-                "{{\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"suggestion\":{},\"snippet\":{}}}",
+                "{{\"category\":\"{}\",\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"suggestion\":{},\"snippet\":{}}}",
+                escape_json(&finding.category),
                 escape_json(&finding.severity),
                 escape_json(&finding.code),
                 escape_json(&finding.message),
@@ -2582,7 +2817,8 @@ pub fn render_lint_text(response: &LintResponse) -> String {
         out.push_str("findings:\n");
         for finding in &response.findings {
             out.push_str(&format!(
-                "- [{}] {}: {}{}\n",
+                "- [{}:{}] {}: {}{}\n",
+                finding.category,
                 finding.severity,
                 finding.code,
                 finding.message,
@@ -3274,13 +3510,14 @@ mod tests {
 
     use super::{
         capabilities_response, check_source, explain_source, explicit_analysis_warning,
-        inspect_source, lint_from_inspect, lint_source, migration_from_inspect, minimize_source,
-        orchestrate_source, render_inspect_json, render_inspect_text, testgen_source,
-        validate_capabilities_request, validate_capabilities_response, validate_check_request,
-        validate_explain_request, validate_explain_response, validate_inspect_request,
-        validate_inspect_response, validate_minimize_request, validate_minimize_response,
-        validate_orchestrate_response, validate_testgen_request, validate_testgen_response,
-        CapabilitiesRequest, CheckRequest, InspectCapabilities, InspectRequest, InspectResponse,
+        inspect_source, lint_from_inspect, lint_from_inspect_and_source, lint_source,
+        migration_from_inspect, minimize_source, orchestrate_source, render_inspect_json,
+        render_inspect_text, render_lint_json, testgen_source, validate_capabilities_request,
+        validate_capabilities_response, validate_check_request, validate_explain_request,
+        validate_explain_response, validate_inspect_request, validate_inspect_response,
+        validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
+        validate_testgen_request, validate_testgen_response, CapabilitiesRequest, CheckRequest,
+        InspectAction, InspectCapabilities, InspectProperty, InspectRequest, InspectResponse,
         InspectTransition, InspectTransitionUpdate, MinimizeRequest, OrchestrateRequest,
         TestgenRequest,
     };
@@ -3484,10 +3721,9 @@ mod tests {
         };
         let response = lint_source(&request).unwrap();
         assert_eq!(response.status, "warn");
-        assert!(response
-            .findings
-            .iter()
-            .any(|finding| finding.code == "opaque_step_closure"));
+        assert!(response.findings.iter().any(
+            |finding| finding.code == "opaque_step_closure" && finding.category == "capability"
+        ));
     }
 
     #[test]
@@ -3555,6 +3791,109 @@ mod tests {
                 && finding.severity == "error"));
         let warning = explicit_analysis_warning(&inspect).expect("warning");
         assert!(warning.contains("cannot fully lower to machine IR"));
+    }
+
+    #[test]
+    fn lint_distinguishes_capability_and_maintainability_findings() {
+        let inspect = InspectResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req-maint".to_string(),
+            status: "ok".to_string(),
+            model_id: "LargeApprovalFlow".to_string(),
+            machine_ir_ready: true,
+            machine_ir_error: None,
+            capabilities: InspectCapabilities {
+                reasons: vec!["missing_declarative_transitions".to_string()],
+                ..InspectCapabilities::fully_ready()
+            },
+            state_fields: (0..9).map(|index| format!("field_{index}")).collect(),
+            actions: (0..9).map(|index| format!("ACTION_{index}")).collect(),
+            predicates: vec![],
+            scenarios: vec!["Deleted".to_string()],
+            properties: (0..7).map(|index| format!("P_{index}")).collect(),
+            state_field_details: vec![],
+            action_details: (0..9)
+                .map(|index| InspectAction {
+                    action_id: format!("ACTION_{index}"),
+                    role: if index < 4 {
+                        "setup".to_string()
+                    } else {
+                        "business".to_string()
+                    },
+                    reads: vec!["approved".to_string()],
+                    writes: vec!["approved".to_string()],
+                })
+                .collect(),
+            predicate_details: vec![],
+            scenario_details: vec![],
+            transition_details: (0..10)
+                .map(|index| InspectTransition {
+                    action_id: format!("ACTION_{index}"),
+                    role: if index < 4 {
+                        "setup".to_string()
+                    } else {
+                        "business".to_string()
+                    },
+                    guard: Some("state.approved == false && state.retries < 2".to_string()),
+                    effect: Some("approved := true".to_string()),
+                    reads: vec!["approved".to_string(), "retries".to_string()],
+                    writes: vec!["approved".to_string()],
+                    path_tags: vec!["allow_path".to_string()],
+                    updates: vec![InspectTransitionUpdate {
+                        field: "approved".to_string(),
+                        expr: "true".to_string(),
+                    }],
+                })
+                .collect(),
+            property_details: (0..7)
+                .map(|index| InspectProperty {
+                    property_id: format!("P_{index}"),
+                    kind: "invariant".to_string(),
+                    expr: Some("state.approved == false && state.retries < 2".to_string()),
+                    scope_expr: None,
+                    action_filter: None,
+                })
+                .collect(),
+        };
+
+        let lint = lint_from_inspect_and_source(
+            &inspect,
+            Some("model ApprovalFlow\nstate:\n  approved: bool\ninit:\n  approved = false\n"),
+        );
+
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.category == "capability"
+                && finding.code == "missing_declarative_transitions"));
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.category == "maintainability"
+                && finding.code == "missing_model_documentation"
+                && finding.severity == "warn"));
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.category == "maintainability"
+                && finding.code == "oversized_model"
+                && finding.severity == "warn"));
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.category == "maintainability"
+                && finding.code == "setup_heavy_model"
+                && finding.severity == "warn"));
+        assert!(lint
+            .findings
+            .iter()
+            .any(|finding| finding.category == "maintainability"
+                && finding.code == "repeated_condition_without_predicate"
+                && finding.severity == "info"));
+        let rendered = render_lint_json(&lint);
+        assert!(rendered.contains("\"category\":\"capability\""));
+        assert!(rendered.contains("\"category\":\"maintainability\""));
+        assert!(rendered.contains("\"severity\":\"info\""));
     }
 
     #[test]
