@@ -17,9 +17,11 @@ User-facing DSL documentation lives in [docs/README.md](./docs/README.md),
 especially [docs/dsl/README.md](./docs/dsl/README.md),
 [docs/dsl/language-spec.md](./docs/dsl/language-spec.md), and
 [docs/dsl/language-evolution.md](./docs/dsl/language-evolution.md). AI-assisted
-authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md)
-and then follow [docs/ai/curriculum.md](./docs/ai/curriculum.md) for review,
-migration, and conformance tasks.
+authoring should start with [docs/ai/authoring-guide.md](./docs/ai/authoring-guide.md),
+[docs/ai/model-authoring-best-practices.md](./docs/ai/model-authoring-best-practices.md),
+and [docs/ai/curriculum.md](./docs/ai/curriculum.md). Project layout and
+file-splitting guidance lives in
+[docs/project-organization.md](./docs/project-organization.md).
 Installation and packaging guidance lives in
 [docs/install.md](./docs/install.md), and the clean-architecture overview lives
 in [docs/architecture.md](./docs/architecture.md).
@@ -101,6 +103,10 @@ benchmark_baseline_dir = "benchmarks/baselines"
 benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
+
+Keep the registry file thin and move real model logic into `src/models/` or
+another explicit module tree. The recommended project layout is documented in
+[docs/project-organization.md](./docs/project-organization.md).
 
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:

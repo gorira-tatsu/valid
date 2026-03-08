@@ -9,12 +9,14 @@ what not to do, and which commands/tools to reach for next.
 Related documents:
 
 - [AI Docs Curriculum](./curriculum.md)
+- [Model Authoring Best Practices](./model-authoring-best-practices.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Examples Curriculum](./examples-curriculum.md)
 - [Review Workflow](./review-workflow.md)
 - [Migration Guide](./migration-guide.md)
 - [Conformance Workflow](./conformance-workflow.md)
+- [Project Organization Guide](../project-organization.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
 
@@ -69,6 +71,12 @@ valid_actions! {
 }
 
 valid_model! {
+    /// Model: CounterModel
+    /// Summary: Minimal bounded counter used as a registry-first starter example.
+    /// In scope: bounded increment and explicit lock transition.
+    /// Out of scope: reset flows, persistence, authorization, and UI concerns.
+    /// Assumptions: lock state is authoritative and there is no concurrent writer.
+    /// Critical properties: P_RANGE.
     model CounterModel<State, Action>;
     init [State {
         x: 0,
@@ -175,6 +183,8 @@ For MCP-driven authoring:
 - Use `.valid` mode only for compatibility fixtures or frontend tests.
 - Always give bounded integer ranges.
 - Add `reads` and `writes` metadata to every action variant when possible.
+- Keep a short source-adjacent comment above each long-lived model explaining
+  summary, scope, assumptions, critical properties, and scenario intent.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
   generated vectors do not overstate business-flow coverage.
 - Prefer `scenarios:` over large fixture-only transition ladders when you need
@@ -184,6 +194,9 @@ For MCP-driven authoring:
 - Keep project-level `critical_properties` and `property_suites` small and
   reviewable. Treat them as CI targeting contracts, not a dump of every
   property in the model.
+- Keep registry files thin. Prefer one model per file and move shared enums or
+  reusable domain vocabulary into a dedicated shared module instead of copying
+  them across models.
 - Use `..state` only as explicit frame-condition sugar.
 - Keep domains finite and obvious.
 - Choose declarative transitions unless you are intentionally staying
@@ -201,11 +214,21 @@ For MCP-driven authoring:
 
 ## Next read
 
+<<<<<<< HEAD
 - If you need the learning path or task map: [AI Docs Curriculum](./curriculum.md)
+||||||| ef02a07
+=======
+- If you need source-adjacent comment guidance: [Model Authoring Best Practices](./model-authoring-best-practices.md)
+>>>>>>> origin/main
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)
 - If you need examples in learning order: [Examples Curriculum](./examples-curriculum.md)
+<<<<<<< HEAD
 - If you need review flow: [Review Workflow](./review-workflow.md)
 - If you need migration flow: [Migration Guide](./migration-guide.md)
 - If you need implementation handoff: [Conformance Workflow](./conformance-workflow.md)
+||||||| ef02a07
+=======
+- If you need project layout guidance: [Project Organization Guide](../project-organization.md)
+>>>>>>> origin/main
 - If you need the full supported surface: [DSL Language Spec](../dsl/language-spec.md)
