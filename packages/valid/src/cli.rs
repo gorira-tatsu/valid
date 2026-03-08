@@ -395,13 +395,13 @@ const TRACE_FORMAT_ARG: ArgSpec = ArgSpec {
 };
 const VIEW_ARG: ArgSpec = ArgSpec {
     name: "view",
-    syntax: "--view=<overview|logic|failure>",
+    syntax: "--view=<overview|logic|failure|deadlock|scc>",
     value_type: "string",
     required: false,
     multiple: false,
     positional: false,
     description: "Graph view to render.",
-    values: &["overview", "logic", "failure"],
+    values: &["overview", "logic", "failure", "deadlock", "scc"],
 };
 const STRATEGY_ARG: ArgSpec = ArgSpec {
     name: "strategy",
@@ -785,7 +785,7 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render the model graph.",
-        usage: "valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>] [--json] [--progress=json]",
+        usage: "valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure|deadlock|scc] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_FILE_ARG],
         options: GRAPH_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),
@@ -1040,7 +1040,7 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render a registered model graph.",
-        usage: "<registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure>] [--property=<id>] [--json] [--progress=json]",
+        usage: "<registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_ARG],
         options: GRAPH_OPTIONS,
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),
@@ -1283,7 +1283,7 @@ const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
         name: "graph",
         aliases: &["diagram"],
         description: "Render a model graph.",
-        usage: "cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure>] [--property=<id>] [--json] [--progress=json]",
+        usage: "cargo valid graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--json] [--progress=json]",
         positional: &[MODEL_ARG],
         options: &[FORMAT_ARG, VIEW_ARG, PROPERTY_ARG, JSON_ARG, PROGRESS_ARG, MANIFEST_ARG, REGISTRY_ARG, FILE_ARG, EXAMPLE_ARG, BIN_ARG],
         request_schema: Some(SchemaRef { id: "schema.ai.inspect_request", builder: inspect_request_schema }),

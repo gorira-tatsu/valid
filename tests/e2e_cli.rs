@@ -98,6 +98,8 @@ fn failing_counter_explains_and_generates_vectors() {
     .expect("explain should succeed");
     assert!(!explain.candidate_causes.is_empty());
     assert!(!explain.repair_hints.is_empty());
+    assert!(!explain.repair_targets.is_empty());
+    assert!(!explain.changed_fields.is_empty());
 
     let testgen = testgen_source(&TestgenRequest {
         request_id: "req-test-testgen".to_string(),
@@ -302,6 +304,31 @@ fn cli_graph_supports_failure_view() {
     assert!(json_stdout.contains("\"graph_view\":\"failure\""));
     assert!(json_stdout.contains("\"graph_slice\""));
     assert!(json_stdout.contains("\"property_id\":\"P_FAIL\""));
+}
+
+#[test]
+fn cli_graph_supports_deadlock_and_scc_views() {
+    let safe = repo_path("tests/fixtures/models/safe_counter.valid");
+    let deadlock_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&safe)
+        .arg("--format=text")
+        .arg("--view=deadlock")
+        .output()
+        .expect("graph deadlock should run");
+    assert_eq!(deadlock_output.status.code(), Some(0));
+    let deadlock = String::from_utf8_lossy(&deadlock_output.stdout);
+    assert!(deadlock.contains("graph_view: deadlock"));
+
+    let scc_output = Command::new(binary_path())
+        .arg("graph")
+        .arg(&safe)
+        .arg("--view=scc")
+        .output()
+        .expect("graph scc should run");
+    assert_eq!(scc_output.status.code(), Some(0));
+    let scc = String::from_utf8_lossy(&scc_output.stdout);
+    assert!(scc.contains("SCC 0"));
 }
 
 #[test]
@@ -598,6 +625,8 @@ fn bundled_rust_models_run_via_main_cli_path() {
     assert_eq!(check.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"property_id\":\"P_FAIL\""));
     assert!(String::from_utf8_lossy(&check.stdout).contains("\"traceback\""));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"changed_fields\""));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("\"breakpoint_kind\""));
 
     let coverage = Command::new(binary_path())
         .arg("coverage")

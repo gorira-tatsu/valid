@@ -48,8 +48,8 @@ use valid::{
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
-        render_model_svg_with_view, render_model_text_failure, render_trace_mermaid,
-        render_trace_sequence_mermaid, GraphView,
+        render_model_svg_with_view, render_model_text_failure, render_model_text_with_view,
+        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     support::artifact_index::{
@@ -947,7 +947,7 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure] [--property=<id>] [--json] [--progress=json]",
+        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure|deadlock|scc] [--property=<id>] [--json] [--progress=json]",
         |_arg, _parsed| false,
     );
     let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
@@ -993,7 +993,7 @@ fn render_graph_output(
     if view != GraphView::Failure {
         return Ok(match render_format {
             "json" => format!("{}\n", render_inspect_json(response)),
-            "text" => render_inspect_text(response),
+            "text" => render_model_text_with_view(response, view),
             "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
             "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
             _ => format!("{}\n", render_model_mermaid_with_view(response, view)),

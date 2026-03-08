@@ -55,6 +55,20 @@ pub struct TraceStep {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FieldDiff {
+    field: String,
+    before: Value,
+    after: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuardReview {
+    decision_id: String,
+    label: String,
+    outcome: String,
+}
+
 pub fn write_outcome_artifacts(
     model_id: &str,
     policy: ArtifactPolicy,
@@ -259,10 +273,16 @@ pub fn render_trace_json(trace: &EvidenceTrace) -> String {
         out.push_str(&format!(",\"depth\":{}", step.depth));
         append_state_map(&mut out, "state_before", &step.state_before);
         append_state_map(&mut out, "state_after", &step.state_after);
+        append_state_diff(&mut out, "state_diff", &state_diff(step));
         if let Some(path) = &step.path {
             out.push_str(&format!(",\"path\":{}", render_path_json(path)));
         } else {
             out.push_str(",\"path\":null");
+        }
+        if let Some(note) = &step.note {
+            out.push_str(&format!(",\"note\":\"{}\"", escape_json(note)));
+        } else {
+            out.push_str(",\"note\":null");
         }
         out.push('}');
     }
@@ -781,13 +801,34 @@ fn append_state_map(out: &mut String, name: &str, state: &BTreeMap<String, Value
     out.push('}');
 }
 
+fn append_state_diff(out: &mut String, name: &str, diffs: &[FieldDiff]) {
+    out.push_str(&format!(",\"{}\":[", name));
+    for (index, diff) in diffs.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str(&format!("\"field\":\"{}\"", escape_json(&diff.field)));
+        out.push_str(&format!(",\"before\":{}", value_json(&diff.before)));
+        out.push_str(&format!(",\"after\":{}", value_json(&diff.after)));
+        out.push('}');
+    }
+    out.push(']');
+}
+
 fn render_traceback_text(trace: &EvidenceTrace) -> String {
     let Some(step) = trace.steps.last() else {
         return String::new();
     };
-    let (reads, writes, path_tags, involved_fields) = traceback_fields(step);
+    let (reads, writes, path_tags, changed_fields, involved_fields, guards) =
+        traceback_fields(step);
+    let state_diff = state_diff(step);
     let mut out = String::new();
     out.push_str("traceback:\n");
+    out.push_str(&format!("  breakpoint_kind: {}\n", breakpoint_kind(step)));
+    if let Some(note) = &step.note {
+        out.push_str(&format!("  breakpoint_note: {}\n", note));
+    }
     out.push_str(&format!("  failure_step_index: {}\n", step.index));
     out.push_str(&format!("  from_state_id: {}\n", step.from_state_id));
     out.push_str(&format!("  to_state_id: {}\n", step.to_state_id));
@@ -801,11 +842,37 @@ fn render_traceback_text(trace: &EvidenceTrace) -> String {
     if !writes.is_empty() {
         out.push_str(&format!("  writes: {}\n", writes.join(", ")));
     }
+    if !changed_fields.is_empty() {
+        out.push_str(&format!(
+            "  changed_fields: {}\n",
+            changed_fields.join(", ")
+        ));
+    }
     if !involved_fields.is_empty() {
         out.push_str(&format!(
             "  involved_fields: {}\n",
             involved_fields.join(", ")
         ));
+    }
+    if !state_diff.is_empty() {
+        out.push_str("  field_diffs:\n");
+        for diff in &state_diff {
+            out.push_str(&format!(
+                "    - {}: {} -> {}\n",
+                diff.field,
+                render_value_text(&diff.before),
+                render_value_text(&diff.after)
+            ));
+        }
+    }
+    if !guards.is_empty() {
+        out.push_str("  relevant_guards:\n");
+        for guard in &guards {
+            out.push_str(&format!(
+                "    - {} [{}] {}\n",
+                guard.decision_id, guard.outcome, guard.label
+            ));
+        }
     }
     if !path_tags.is_empty() {
         out.push_str(&format!("  path_tags: {}\n", path_tags.join(", ")));
@@ -817,14 +884,23 @@ fn render_traceback_json(trace: &EvidenceTrace) -> String {
     let Some(step) = trace.steps.last() else {
         return "null".to_string();
     };
-    let (reads, writes, path_tags, involved_fields) = traceback_fields(step);
+    let (reads, writes, path_tags, changed_fields, involved_fields, guards) =
+        traceback_fields(step);
+    let diffs = state_diff(step);
     let action_id = step
         .action_id
         .as_ref()
         .map(|value| format!("\"{}\"", escape_json(value)))
         .unwrap_or_else(|| "null".to_string());
+    let note = step
+        .note
+        .as_ref()
+        .map(|value| format!("\"{}\"", escape_json(value)))
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"failure_step_index\":{},\"from_state_id\":\"{}\",\"to_state_id\":\"{}\",\"depth\":{},\"action_id\":{},\"reads\":[{}],\"writes\":[{}],\"involved_fields\":[{}],\"path_tags\":[{}]}}",
+        "{{\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"from_state_id\":\"{}\",\"to_state_id\":\"{}\",\"depth\":{},\"action_id\":{},\"reads\":[{}],\"writes\":[{}],\"changed_fields\":[{}],\"involved_fields\":[{}],\"field_diffs\":[{}],\"relevant_guards\":[{}],\"path_tags\":[{}]}}",
+        breakpoint_kind(step),
+        note,
         step.index,
         escape_json(&step.from_state_id),
         escape_json(&step.to_state_id),
@@ -840,9 +916,34 @@ fn render_traceback_json(trace: &EvidenceTrace) -> String {
             .map(|field| format!("\"{}\"", escape_json(field)))
             .collect::<Vec<_>>()
             .join(","),
+        changed_fields
+            .iter()
+            .map(|field| format!("\"{}\"", escape_json(field)))
+            .collect::<Vec<_>>()
+            .join(","),
         involved_fields
             .iter()
             .map(|field| format!("\"{}\"", escape_json(field)))
+            .collect::<Vec<_>>()
+            .join(","),
+        diffs
+            .iter()
+            .map(|diff| format!(
+                "{{\"field\":\"{}\",\"before\":{},\"after\":{}}}",
+                escape_json(&diff.field),
+                value_json(&diff.before),
+                value_json(&diff.after)
+            ))
+            .collect::<Vec<_>>()
+            .join(","),
+        guards
+            .iter()
+            .map(|guard| format!(
+                "{{\"decision_id\":\"{}\",\"label\":\"{}\",\"outcome\":\"{}\"}}",
+                escape_json(&guard.decision_id),
+                escape_json(&guard.label),
+                escape_json(&guard.outcome)
+            ))
             .collect::<Vec<_>>()
             .join(","),
         path_tags
@@ -853,13 +954,34 @@ fn render_traceback_json(trace: &EvidenceTrace) -> String {
     )
 }
 
-fn traceback_fields(step: &TraceStep) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
+fn traceback_fields(
+    step: &TraceStep,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<GuardReview>,
+) {
     let Some(path) = &step.path else {
-        return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let changed_fields = state_diff(step)
+            .into_iter()
+            .map(|diff| diff.field)
+            .collect::<Vec<_>>();
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            changed_fields.clone(),
+            changed_fields,
+            Vec::new(),
+        );
     };
     let mut reads = Vec::new();
     let mut writes = Vec::new();
     let mut path_tags = Vec::new();
+    let mut guards = Vec::new();
     for decision in &path.decisions {
         for field in &decision.point.reads {
             push_unique(&mut reads, field.clone());
@@ -870,17 +992,81 @@ fn traceback_fields(step: &TraceStep) -> (Vec<String>, Vec<String>, Vec<String>,
         for tag in &decision.point.path_tags {
             push_unique(&mut path_tags, tag.clone());
         }
+        if matches!(decision.point.kind, DecisionKind::Guard) {
+            guards.push(GuardReview {
+                decision_id: decision.decision_id(),
+                label: decision.point.label.clone(),
+                outcome: match decision.outcome {
+                    DecisionOutcome::GuardTrue => "guard_true".to_string(),
+                    DecisionOutcome::GuardFalse => "guard_false".to_string(),
+                    DecisionOutcome::UpdateApplied => "update_applied".to_string(),
+                },
+            });
+        }
     }
-    let mut involved_fields = writes.clone();
+    let changed_fields = state_diff(step)
+        .into_iter()
+        .map(|diff| diff.field)
+        .collect::<Vec<_>>();
+    let mut involved_fields = changed_fields.clone();
+    for field in &writes {
+        push_unique(&mut involved_fields, field.clone());
+    }
     for field in &reads {
         push_unique(&mut involved_fields, field.clone());
     }
-    (reads, writes, path_tags, involved_fields)
+    (
+        reads,
+        writes,
+        path_tags,
+        changed_fields,
+        involved_fields,
+        guards,
+    )
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.contains(&value) {
         values.push(value);
+    }
+}
+
+fn state_diff(step: &TraceStep) -> Vec<FieldDiff> {
+    let mut diffs = Vec::new();
+    for (field, before) in &step.state_before {
+        if let Some(after) = step.state_after.get(field) {
+            if before != after {
+                diffs.push(FieldDiff {
+                    field: field.clone(),
+                    before: before.clone(),
+                    after: after.clone(),
+                });
+            }
+        }
+    }
+    diffs
+}
+
+fn breakpoint_kind(step: &TraceStep) -> &'static str {
+    match (step.action_id.as_ref(), step.note.as_deref()) {
+        (_, Some(note)) if note.contains("deadlock") => "deadlock_boundary",
+        (Some(_), _) => "action_boundary",
+        (None, Some(_)) => "terminal_boundary",
+        (None, None) => "state_boundary",
+    }
+}
+
+fn render_value_text(value: &Value) -> String {
+    match value {
+        Value::Bool(value) => value.to_string(),
+        Value::UInt(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::EnumVariant { label, .. } => label.clone(),
+        Value::PairVariant {
+            left_label,
+            right_label,
+            ..
+        } => format!("({}, {})", left_label, right_label),
     }
 }
 
