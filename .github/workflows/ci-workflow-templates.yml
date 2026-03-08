@@ -1,0 +1,56 @@
+name: ci-workflow-templates
+
+on:
+  push:
+    paths:
+      - ".github/workflows/template-*.yml"
+      - ".github/workflows/ci-workflow-templates.yml"
+      - "scripts/ci/template_*.sh"
+      - "tests/fixtures/projects/ci_template_project/**"
+      - "docs/ci/**"
+      - "docs/README.md"
+      - "README.md"
+  pull_request:
+    paths:
+      - ".github/workflows/template-*.yml"
+      - ".github/workflows/ci-workflow-templates.yml"
+      - "scripts/ci/template_*.sh"
+      - "tests/fixtures/projects/ci_template_project/**"
+      - "docs/ci/**"
+      - "docs/README.md"
+      - "README.md"
+  workflow_dispatch:
+
+jobs:
+  inspect-check:
+    uses: ./.github/workflows/template-cargo-valid-inspect-check.yml
+    with:
+      project_manifest: tests/fixtures/projects/ci_template_project/Cargo.toml
+      model: approval-model
+      property_id: P_APPROVAL_IS_BOOLEAN
+      artifact_name: template-fixture-inspect-check
+
+  testgen:
+    uses: ./.github/workflows/template-cargo-valid-testgen.yml
+    with:
+      project_manifest: tests/fixtures/projects/ci_template_project/Cargo.toml
+      model: approval-model
+      property_id: P_APPROVAL_IS_BOOLEAN
+      strategy: witness
+      artifact_name: template-fixture-testgen
+
+  conformance:
+    uses: ./.github/workflows/template-valid-conformance.yml
+    with:
+      model_file: tests/fixtures/projects/ci_template_project/fixtures/models/safe_counter.valid
+      property_id: P_SAFE
+      actions: Inc
+      runner: tests/fixtures/projects/ci_template_project/fixtures/runners/mock_counter_pass.sh
+      artifact_name: template-fixture-conformance
+
+  doc-check:
+    uses: ./.github/workflows/template-valid-doc-check.yml
+    with:
+      model_file: tests/fixtures/projects/ci_template_project/fixtures/models/safe_counter.valid
+      output_path: tests/fixtures/projects/ci_template_project/artifacts/docs/safe_counter.md
+      artifact_name: template-fixture-doc-check

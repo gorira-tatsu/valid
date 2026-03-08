@@ -1,0 +1,49 @@
+name: template-cargo-valid-testgen
+
+on:
+  workflow_call:
+    inputs:
+      project_manifest:
+        description: Path to the fixture or downstream project Cargo.toml.
+        required: true
+        type: string
+      model:
+        description: Registry model id to target.
+        required: true
+        type: string
+      property_id:
+        description: Optional property id passed to `cargo valid generate-tests`.
+        required: false
+        default: ""
+        type: string
+      strategy:
+        description: Test generation strategy.
+        required: false
+        default: witness
+        type: string
+      artifact_name:
+        description: Uploaded artifact name.
+        required: false
+        default: valid-testgen
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  testgen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run testgen template
+        run: ./scripts/ci/template_testgen.sh "${{ inputs.project_manifest }}" "${{ inputs.model }}" "${{ inputs.strategy }}" "${{ inputs.property_id }}"
+      - name: Upload testgen artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: template-artifacts/testgen/

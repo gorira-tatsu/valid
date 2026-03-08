@@ -1,6 +1,10 @@
 /target
 /artifacts
 /generated-tests/*.rs
+/template-artifacts/
+/tests/fixtures/projects/*/target/
+/tests/fixtures/projects/*/artifacts/docs/*.md
+/tests/fixtures/projects/*/generated-tests/*.rs
 .DS_Store
 .claude/worktrees/
 .serena/
