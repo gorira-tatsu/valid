@@ -17,6 +17,8 @@ to separate requirement problems, model problems, and implementation problems.
 4. Read one explanation path or traceback.
 5. If two candidate models or two property interpretations are competing, run
    `distinguish` to find the shortest shared-prefix divergence.
+   Then read the Candidate Comparison Workflow to turn that divergence into a
+   requirement decision instead of just a model diff.
 6. Decide whether the likely repair surface is:
    - requirement clarification
    - model revision
@@ -42,6 +44,8 @@ MCP mode:
 4. `valid_lint`
 5. `valid_explain`
 6. `valid_distinguish` when comparing two candidate models
+7. the Candidate Comparison Workflow when the difference is real but the
+   requirement decision is still open
 
 ## What to look for
 
