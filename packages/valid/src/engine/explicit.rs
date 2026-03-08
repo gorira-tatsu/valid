@@ -842,6 +842,7 @@ mod tests {
                 ActionIr {
                     action_id: "Inc1".to_string(),
                     label: "Inc1".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["guard_path".to_string(), "write_path".to_string()],
@@ -862,6 +863,7 @@ mod tests {
                 ActionIr {
                     action_id: "Jump".to_string(),
                     label: "Jump".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["write_path".to_string()],
@@ -1042,6 +1044,7 @@ mod tests {
         model.actions = vec![ActionIr {
             action_id: "OnlyOnce".to_string(),
             label: "OnlyOnce".to_string(),
+            role: crate::ir::action::ActionRole::Business,
             reads: vec!["x".to_string()],
             writes: vec!["x".to_string()],
             path_tags: vec!["guard_path".to_string()],
@@ -1165,6 +1168,7 @@ mod tests {
                 ActionIr {
                     action_id: "Reach".to_string(),
                     label: "Reach".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["write_path".to_string()],
@@ -1180,6 +1184,7 @@ mod tests {
                 ActionIr {
                     action_id: "Loop".to_string(),
                     label: "Loop".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["write_path".to_string()],

@@ -26,6 +26,7 @@ pub struct ParsedAssignment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedAction {
     pub name: String,
+    pub role: String,
     pub pre: Option<String>,
     pub posts: Vec<ParsedAssignment>,
     pub line: usize,
@@ -92,6 +93,7 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
             let name = rest.trim_end_matches(':').trim().to_string();
             current_action = Some(ParsedAction {
                 name,
+                role: "business".to_string(),
                 pre: None,
                 posts: Vec::new(),
                 line: line_no,
@@ -158,6 +160,9 @@ pub fn parse_model(source: &str) -> Result<ParsedModel, Vec<Diagnostic>> {
                 if let Some(action) = current_action.as_mut() {
                     if let Some(rest) = trimmed.strip_prefix("pre:") {
                         action.pre = Some(rest.trim().to_string());
+                        section = Section::ActionHeader;
+                    } else if let Some(rest) = trimmed.strip_prefix("role:") {
+                        action.role = rest.trim().to_string();
                         section = Section::ActionHeader;
                     } else if trimmed == "post:" {
                         section = Section::ActionPost;

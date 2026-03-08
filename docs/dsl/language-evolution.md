@@ -37,10 +37,14 @@ lists.
 
 ## Candidate 2: richer property kinds
 
-The current surface only supports `Invariant`. Candidates include:
+The current surface now supports:
 
+- `Invariant`
 - `DeadlockFreedom`
 - `Reachability`
+
+Future candidates include:
+
 - future contract/assertion-oriented property kinds
 
 ## Candidate 3: Decision / Path IR

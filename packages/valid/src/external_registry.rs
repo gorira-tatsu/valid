@@ -280,6 +280,7 @@ mod tests {
         discover_external_project, project_root, resolve_external_target, ExternalTargetKind,
         ExternalTargetOptions,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn resolves_example_target_from_file() {

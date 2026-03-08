@@ -52,6 +52,10 @@ pub struct TestVector {
     #[serde(default)]
     pub expected_path_tags: Vec<String>,
     #[serde(default)]
+    pub setup_action_ids: Vec<String>,
+    #[serde(default)]
+    pub business_action_ids: Vec<String>,
+    #[serde(default)]
     pub notes: Vec<String>,
     #[serde(default)]
     pub replay_target: Option<ReplayTarget>,
@@ -144,6 +148,8 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         expected_property_holds: Some(false),
         expected_path,
         expected_path_tags,
+        setup_action_ids: Vec::new(),
+        business_action_ids: Vec::new(),
         notes: Vec::new(),
         replay_target: None,
     })
@@ -1190,6 +1196,32 @@ fn build_model_vector_for_node(
         eval_expr(model, &nodes.get(end_index)?.state, &property.expr).ok(),
         Some(Value::Bool(true))
     );
+    let setup_action_ids = actions
+        .iter()
+        .filter_map(|step| {
+            model
+                .actions
+                .iter()
+                .find(|action| action.action_id == step.action_id)
+                .and_then(|action| {
+                    (action.role == crate::ir::action::ActionRole::Setup)
+                        .then(|| step.action_id.clone())
+                })
+        })
+        .collect::<Vec<_>>();
+    let business_action_ids = actions
+        .iter()
+        .filter_map(|step| {
+            model
+                .actions
+                .iter()
+                .find(|action| action.action_id == step.action_id)
+                .and_then(|action| {
+                    (action.role == crate::ir::action::ActionRole::Business)
+                        .then(|| step.action_id.clone())
+                })
+        })
+        .collect::<Vec<_>>();
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -1225,6 +1257,8 @@ fn build_model_vector_for_node(
         expected_property_holds: Some(property_holds),
         expected_path_tags: path_tags_or_empty(&expected_path),
         expected_path,
+        setup_action_ids,
+        business_action_ids,
         notes,
         replay_target: None,
     })
@@ -1438,6 +1472,7 @@ mod tests {
                 ActionIr {
                     action_id: "Inc".to_string(),
                     label: "Inc".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["write_path".to_string()],
@@ -1454,6 +1489,7 @@ mod tests {
                 ActionIr {
                     action_id: "Jump".to_string(),
                     label: "Jump".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec!["x".to_string()],
                     writes: vec!["x".to_string()],
                     path_tags: vec!["write_path".to_string()],

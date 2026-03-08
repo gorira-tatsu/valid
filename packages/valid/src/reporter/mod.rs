@@ -906,11 +906,13 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 guard: Some("x < 3".to_string()),
                 effect: Some("x := x + 1".to_string()),
                 reads: vec!["x".to_string()],
@@ -959,11 +961,13 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 guard: Some("x < 3".to_string()),
                 effect: Some("x := x + 1".to_string()),
                 reads: vec!["x".to_string()],
@@ -1012,11 +1016,13 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 guard: Some("x < 3".to_string()),
                 effect: Some("x := x + 1".to_string()),
                 reads: vec!["x".to_string()],
@@ -1085,11 +1091,13 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 guard: None,
                 effect: None,
                 reads: vec!["x".to_string()],

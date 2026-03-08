@@ -69,6 +69,11 @@ The current field metadata is:
 Actions are finite enums. Each variant must have an `action_id`, and should
 declare `reads` and `writes` metadata when possible.
 
+Declarative transitions can also declare:
+
+- `role = business` (default)
+- `role = setup`
+
 This metadata feeds:
 
 - `inspect`
@@ -77,6 +82,10 @@ This metadata feeds:
 - `explain`
 - `coverage`
 - `generate-tests`
+
+Role metadata is reporting-oriented. It does not change the transition
+semantics, but it does change how `coverage`, `inspect`, `explain`, and
+`testgen` classify the transition.
 
 ### Model definition
 
@@ -103,6 +112,7 @@ This is the canonical path.
 ```rust
 transitions {
     on SetStrongPassword {
+        [role = business]
         [tags = ["password_policy_path"]]
         when |state| state.password_set == false
         => [PasswordState {
@@ -126,6 +136,9 @@ with `..state`.
 `..state` is frame-condition sugar. The lowering keeps only explicitly updated
 fields in the flat guarded transition IR.
 
+Use `role = setup` for fixture/bootstrap transitions that prepare a state space
+but should not inflate business-action coverage.
+
 ### Step
 
 ```rust
@@ -144,12 +157,23 @@ This is supported, but not canonical.
 
 ### Properties
 
-The current `PropertyKind` surface contains only `Invariant`.
+The current `PropertyKind` surface contains:
+
+- `Invariant`
+- `Reachability`
+- `DeadlockFreedom`
 
 ```rust
 properties {
     invariant P_EXPORT_REQUIRES_ENTERPRISE |state|
         state.export_enabled == false || state.plan == Plan::Enterprise;
+}
+```
+
+```rust
+properties {
+    reachability P_RECOVERED |state| state.retry_scheduled == false;
+    deadlock_freedom P_NO_DEADLOCK;
 }
 ```
 

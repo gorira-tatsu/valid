@@ -50,6 +50,7 @@ mod tests {
             actions: vec![ActionIr {
                 action_id: "Inc".to_string(),
                 label: "Inc".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["write_path".to_string()],

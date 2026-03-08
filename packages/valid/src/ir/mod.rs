@@ -8,7 +8,7 @@ pub mod path;
 pub mod property;
 pub mod value;
 
-pub use action::{ActionIr, UpdateIr};
+pub use action::{ActionIr, ActionRole, UpdateIr};
 pub use decision::{Decision, DecisionKind, DecisionOutcome, DecisionPoint};
 pub use expr::{BinaryOp, ExprIr, UnaryOp};
 pub use model::{FieldId, FieldType, InitAssignment, ModelIr, PropertyId, SourceSpan, StateField};

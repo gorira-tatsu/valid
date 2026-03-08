@@ -102,6 +102,7 @@ pub fn build_vector_from_actions(
         }
     });
 
+    let business_action_ids = actions.iter().map(|step| step.action_id.clone()).collect();
     Ok(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!("vec-conformance-{}", model.model_id),
@@ -124,6 +125,8 @@ pub fn build_vector_from_actions(
         expected_property_holds,
         expected_path: Path::default(),
         expected_path_tags: Vec::new(),
+        setup_action_ids: Vec::new(),
+        business_action_ids,
         notes: vec!["generated from spec replay for implementation conformance".to_string()],
         replay_target: None,
     })
@@ -261,6 +264,8 @@ mod tests {
             expected_property_holds: Some(false),
             expected_path: Path::default(),
             expected_path_tags: Vec::new(),
+            setup_action_ids: Vec::new(),
+            business_action_ids: vec!["Jump".to_string()],
             notes: Vec::new(),
             replay_target: None,
         }

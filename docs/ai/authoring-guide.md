@@ -114,6 +114,8 @@ Use these first:
   - `String` with explicit-first helpers
 - property kind:
   - `invariant`
+  - `reachability`
+  - `deadlock_freedom`
 
 Useful expressions:
 
@@ -129,6 +131,8 @@ Useful expressions:
 ## Capability constraints you must respect
 
 - `String`, `str_contains`, and `regex_match` are explicit-first today
+- `reachability` and `deadlock_freedom` are supported over the finite state
+  space
 - a model can be `explicit_ready` but not `solver_ready`
 - `readiness` / `lint` is the authority for migration hints and degraded
   capability reasons
@@ -161,6 +165,8 @@ For MCP-driven authoring:
 - Use `.valid` mode only for compatibility fixtures or frontend tests.
 - Always give bounded integer ranges.
 - Add `reads` and `writes` metadata to every action variant when possible.
+- Mark bootstrap/fixture transitions with `role = setup` so coverage and
+  generated vectors do not overstate business-flow coverage.
 - Use `..state` only as explicit frame-condition sugar.
 - Keep domains finite and obvious.
 - Choose declarative transitions unless you are intentionally staying

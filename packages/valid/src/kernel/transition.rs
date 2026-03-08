@@ -316,6 +316,7 @@ mod tests {
             actions: vec![ActionIr {
                 action_id: "Swap".to_string(),
                 label: "Swap".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string(), "y".to_string()],
                 writes: vec!["x".to_string(), "y".to_string()],
                 path_tags: vec!["read_path".to_string(), "write_path".to_string()],

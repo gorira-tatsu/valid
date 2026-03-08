@@ -10,7 +10,12 @@
       "type": "object",
       "required": [
         "transition_coverage_percent",
+        "business_transition_coverage_percent",
+        "setup_transition_coverage_percent",
+        "decision_coverage_percent",
         "guard_full_coverage_percent",
+        "business_guard_full_coverage_percent",
+        "setup_guard_full_coverage_percent",
         "visited_state_count",
         "repeated_state_count",
         "step_count",
@@ -18,7 +23,12 @@
       ],
       "properties": {
         "transition_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "business_transition_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "setup_transition_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "decision_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "guard_full_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "business_guard_full_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "setup_guard_full_coverage_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "visited_state_count": { "type": "integer", "minimum": 0 },
         "repeated_state_count": { "type": "integer", "minimum": 0 },
         "step_count": { "type": "integer", "minimum": 0 },
@@ -29,9 +39,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["action_id", "covered", "count"],
+        "required": ["action_id", "role", "covered", "count"],
         "properties": {
           "action_id": { "type": "string" },
+          "role": { "type": "string", "enum": ["business", "setup"] },
           "covered": { "type": "boolean" },
           "count": { "type": "integer", "minimum": 0 }
         }

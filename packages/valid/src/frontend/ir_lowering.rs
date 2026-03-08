@@ -1,8 +1,8 @@
 use crate::{
     frontend::typecheck::TypedModel,
     ir::{
-        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, PropertyKind,
-        SourceSpan, StateField, UpdateIr, Value,
+        ActionIr, ActionRole, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
+        PropertyKind, SourceSpan, StateField, UpdateIr, Value,
     },
     support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span},
 };
@@ -81,6 +81,7 @@ pub fn lower_model(typed: TypedModel) -> Result<ModelIr, Vec<Diagnostic>> {
         actions.push(ActionIr {
             action_id: action.name.clone(),
             label: action.name.clone(),
+            role: ActionRole::parse(&action.role).unwrap_or(ActionRole::Business),
             reads,
             writes,
             path_tags: crate::modeling::decision_path_tags(

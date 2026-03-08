@@ -107,6 +107,7 @@ pub struct InspectStateField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectAction {
     pub action_id: String,
+    pub role: String,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
 }
@@ -114,6 +115,7 @@ pub struct InspectAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectTransition {
     pub action_id: String,
+    pub role: String,
     pub guard: Option<String>,
     pub effect: Option<String>,
     pub reads: Vec<String>,
@@ -169,6 +171,7 @@ pub struct ExplainResponse {
     pub property_id: String,
     pub failure_step_index: usize,
     pub failing_action_id: Option<String>,
+    pub failing_action_role: Option<String>,
     pub decision_path: Path,
     pub failing_action_reads: Vec<String>,
     pub failing_action_writes: Vec<String>,
@@ -426,6 +429,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .iter()
             .map(|action| InspectAction {
                 action_id: action.action_id.clone(),
+                role: action.role.as_str().to_string(),
                 reads: action.reads.clone(),
                 writes: action.writes.clone(),
             })
@@ -435,6 +439,7 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
             .iter()
             .map(|action| InspectTransition {
                 action_id: action.action_id.clone(),
+                role: action.role.as_str().to_string(),
                 guard: Some(render_expr_ir(&action.guard)),
                 effect: Some(render_update_effect(&action.updates)),
                 reads: action.reads.clone(),
@@ -833,6 +838,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             let action_metadata = compiled_model.as_ref().and_then(|model| {
                 let state = machine_state_from_snapshot(model, &failure_step.state_before)?;
                 failure_step.action_id.as_ref().map(|action_id| {
+                    let mut roles = std::collections::BTreeSet::new();
                     let mut reads = std::collections::BTreeSet::new();
                     let mut writes = std::collections::BTreeSet::new();
                     let traced_path = failure_step.path.clone();
@@ -843,6 +849,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         .filter(|action| &action.action_id == action_id)
                     {
                         if matches!(evaluate_guard(model, &state, action), Ok(true)) {
+                            roles.insert(action.role.as_str().to_string());
                             reads.extend(action.reads.iter().cloned());
                             writes.extend(action.writes.iter().cloned());
                             if traced_path.is_none() {
@@ -851,6 +858,10 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                         }
                     }
                     (
+                        roles
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| "business".to_string()),
                         action_id.clone(),
                         reads.into_iter().collect::<Vec<_>>(),
                         writes.into_iter().collect::<Vec<_>>(),
@@ -873,7 +884,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 .unwrap_or(crate::ir::PropertyKind::Invariant);
             let write_overlap = action_metadata
                 .as_ref()
-                .map(|(_, _, writes, _)| {
+                .map(|(_, _, _, writes, _)| {
                     involved_fields
                         .iter()
                         .filter(|field| writes.contains(*field))
@@ -927,7 +938,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 ]
             } else {
                 let mut causes = Vec::new();
-                if let Some((action_id, reads, writes, decision_path)) = &action_metadata {
+                if let Some((_, action_id, reads, writes, decision_path)) = &action_metadata {
                     let path_tags = decision_path.legacy_path_tags();
                     if property_kind == crate::ir::PropertyKind::Reachability {
                         causes.push(ExplainCandidateCause {
@@ -1066,22 +1077,25 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 property_id: trace.property_id.clone(),
                 failure_step_index: failure_step.index,
                 failing_action_id: failure_step.action_id.clone(),
+                failing_action_role: action_metadata
+                    .as_ref()
+                    .map(|(role, _, _, _, _)| role.clone()),
                 decision_path: action_metadata
                     .as_ref()
-                    .map(|(_, _, _, path)| path.clone())
+                    .map(|(_, _, _, _, path)| path.clone())
                     .or_else(|| failure_step.path.clone())
                     .unwrap_or_default(),
                 failing_action_reads: action_metadata
                     .as_ref()
-                    .map(|(_, reads, _, _)| reads.clone())
+                    .map(|(_, _, reads, _, _)| reads.clone())
                     .unwrap_or_default(),
                 failing_action_writes: action_metadata
                     .as_ref()
-                    .map(|(_, _, writes, _)| writes.clone())
+                    .map(|(_, _, _, writes, _)| writes.clone())
                     .unwrap_or_default(),
                 failing_action_path_tags: action_metadata
                     .as_ref()
-                    .map(|(_, _, _, path)| path.legacy_path_tags())
+                    .map(|(_, _, _, _, path)| path.legacy_path_tags())
                     .unwrap_or_default(),
                 write_overlap_fields: write_overlap.clone(),
                 involved_fields,
@@ -1555,8 +1569,9 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"reads\":{},\"writes\":{}}}",
+            "{{\"action_id\":\"{}\",\"role\":\"{}\",\"reads\":{},\"writes\":{}}}",
             escape_json(&action.action_id),
+            escape_json(&action.role),
             render_string_array(&action.reads),
             render_string_array(&action.writes)
         ));
@@ -1568,8 +1583,9 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{},\"updates\":[{}]}}",
+            "{{\"action_id\":\"{}\",\"role\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{},\"updates\":[{}]}}",
             escape_json(&transition.action_id),
+            escape_json(&transition.role),
             transition
                 .guard
                 .as_ref()
@@ -1700,13 +1716,14 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             .map(|action| {
                 vec![
                     action.action_id.clone(),
+                    action.role.clone(),
                     render_csv_or_none(&action.reads),
                     render_csv_or_none(&action.writes),
                 ]
             })
             .collect::<Vec<_>>();
         out.push_str(&indent_block(
-            &render_text_table(&["action", "reads", "writes"], &rows),
+            &render_text_table(&["action", "role", "reads", "writes"], &rows),
             2,
         ));
         out.push('\n');
@@ -1715,6 +1732,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
         out.push_str("transitions:\n");
         for transition in &response.transition_details {
             out.push_str(&format!("- {}\n", transition.action_id));
+            out.push_str(&format!("  role: {}\n", transition.role));
             if let Some(guard) = &transition.guard {
                 out.push_str(&format!(
                     "  guard:\n{}\n",
@@ -1773,7 +1791,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"write_overlap_fields\":{},\"involved_fields\":{},\"candidate_causes\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
@@ -1782,6 +1800,11 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
         response.failure_step_index,
         response
             .failing_action_id
+            .as_ref()
+            .map(|value| format!("\"{}\"", escape_json(value)))
+            .unwrap_or_else(|| "null".to_string()),
+        response
+            .failing_action_role
             .as_ref()
             .map(|value| format!("\"{}\"", escape_json(value)))
             .unwrap_or_else(|| "null".to_string()),
@@ -1834,6 +1857,9 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     ));
     if let Some(action_id) = &response.failing_action_id {
         out.push_str(&format!("failing_action_id: {}\n", action_id));
+    }
+    if let Some(role) = &response.failing_action_role {
+        out.push_str(&format!("failing_action_role: {}\n", role));
     }
     if !response.decision_path.decisions.is_empty() {
         out.push_str("decision_path:\n");
@@ -3206,6 +3232,7 @@ mod tests {
             action_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "STEP".to_string(),
+                role: "business".to_string(),
                 guard: Some("(i % 3 == 0)".to_string()),
                 effect: Some("[]".to_string()),
                 reads: vec!["i".to_string()],
@@ -3303,6 +3330,7 @@ mod tests {
             ],
             action_details: vec![super::InspectAction {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
+                role: "business".to_string(),
                 reads: vec!["password_set".to_string()],
                 writes: vec![
                     "password".to_string(),
@@ -3312,6 +3340,7 @@ mod tests {
             }],
             transition_details: vec![InspectTransition {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
+                role: "business".to_string(),
                 guard: Some("state.password_set == false".to_string()),
                 effect: Some(
                     "PasswordState { password: \"Str0ngPass!\".to_string(), password_set: true, compliant: true }"
@@ -3368,13 +3397,14 @@ mod tests {
           │ password_set │ bool   │ -      │ -     │ -        │
           ╰──────────────┴────────┴────────┴───────┴──────────╯
         actions:
-          ╭─────────────────────┬──────────────┬───────────────────────────────────╮
-          │       action        │    reads     │              writes               │
-          ├─────────────────────┼──────────────┼───────────────────────────────────┤
-          │ SET_STRONG_PASSWORD │ password_set │ password, password_set, compliant │
-          ╰─────────────────────┴──────────────┴───────────────────────────────────╯
+          ╭─────────────────────┬──────────┬──────────────┬───────────────────────────────────╮
+          │       action        │   role   │    reads     │              writes               │
+          ├─────────────────────┼──────────┼──────────────┼───────────────────────────────────┤
+          │ SET_STRONG_PASSWORD │ business │ password_set │ password, password_set, compliant │
+          ╰─────────────────────┴──────────┴──────────────┴───────────────────────────────────╯
         transitions:
         - SET_STRONG_PASSWORD
+          role: business
           guard:
             state.password_set == false
           updates:

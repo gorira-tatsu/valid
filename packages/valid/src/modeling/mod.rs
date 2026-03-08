@@ -672,6 +672,7 @@ pub struct ActionDescriptor {
 pub struct TransitionDescriptor {
     pub action_variant: &'static str,
     pub action_id: &'static str,
+    pub role: crate::ir::action::ActionRole,
     pub guard: &'static str,
     pub effect: &'static str,
     pub reads: &'static [&'static str],
@@ -733,6 +734,7 @@ impl CapabilityDetail {
 pub struct MachineTransitionIr {
     pub action_variant: &'static str,
     pub action_id: &'static str,
+    pub role: crate::ir::action::ActionRole,
     pub guard: Option<&'static str>,
     pub effect: Option<&'static str>,
     pub reads: &'static [&'static str],
@@ -989,6 +991,7 @@ pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
             .map(|descriptor| MachineTransitionIr {
                 action_variant: descriptor.action_variant,
                 action_id: descriptor.action_id,
+                role: descriptor.role,
                 guard: Some(descriptor.guard),
                 effect: Some(descriptor.effect),
                 reads: descriptor.reads,
@@ -1011,6 +1014,7 @@ pub fn machine_transition_ir<M: ModelSpec>() -> Vec<MachineTransitionIr> {
         .map(|descriptor| MachineTransitionIr {
             action_variant: descriptor.variant,
             action_id: descriptor.action_id,
+            role: crate::ir::action::ActionRole::Business,
             guard: None,
             effect: None,
             reads: descriptor.reads,
@@ -1770,10 +1774,25 @@ macro_rules! valid_model_path_tags {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! valid_model_transition_role {
+    (setup) => {
+        $crate::ir::action::ActionRole::Setup
+    };
+    (business) => {
+        $crate::ir::action::ActionRole::Business
+    };
+    () => {
+        $crate::ir::action::ActionRole::Business
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! valid_model_transition_descriptor {
     (
         [$action_ty:ty]
         $transition_action:ident
+        $( [ role = $role:ident ] )?
         $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
         |$guard_state:ident| $guard_expr:expr
         => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $rest_state:ident $(,)? }]
@@ -1784,6 +1803,7 @@ macro_rules! valid_model_transition_descriptor {
         $crate::modeling::TransitionDescriptor {
             action_variant: descriptor.variant,
             action_id: descriptor.action_id,
+            role: $crate::valid_model_transition_role!($($role)?),
             guard: stringify!($guard_expr),
             effect: stringify!($state_ctor { $($field: $update_expr,)* ..$rest_state }),
             reads: descriptor.reads,
@@ -1802,6 +1822,7 @@ macro_rules! valid_model_transition_descriptor {
     (
         [$action_ty:ty]
         $transition_action:ident
+        $( [ role = $role:ident ] )?
         $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
         |$guard_state:ident| $guard_expr:expr
         => [$state_ctor:ident { $($field:ident : $update_expr:expr,)* .. $($unsupported_rest:tt)+ }]
@@ -1813,6 +1834,7 @@ macro_rules! valid_model_transition_descriptor {
     (
         [$action_ty:ty]
         $transition_action:ident
+        $( [ role = $role:ident ] )?
         $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
         |$guard_state:ident| $guard_expr:expr
         => [$state_ctor:ident { $($field:ident : $update_expr:expr),* $(,)? }]
@@ -1823,6 +1845,7 @@ macro_rules! valid_model_transition_descriptor {
         $crate::modeling::TransitionDescriptor {
             action_variant: descriptor.variant,
             action_id: descriptor.action_id,
+            role: $crate::valid_model_transition_role!($($role)?),
             guard: stringify!($guard_expr),
             effect: stringify!($state_ctor { $($field: $update_expr),* }),
             reads: descriptor.reads,
@@ -1841,6 +1864,7 @@ macro_rules! valid_model_transition_descriptor {
     (
         [$action_ty:ty]
         $transition_action:ident
+        $( [ role = $role:ident ] )?
         $( [ tags = [$($path_tag:literal),* $(,)?] ] )?
         |$guard_state:ident| $guard_expr:expr
         => [$($next_state:expr),* $(,)?]
@@ -1851,6 +1875,7 @@ macro_rules! valid_model_transition_descriptor {
         $crate::modeling::TransitionDescriptor {
             action_variant: descriptor.variant,
             action_id: descriptor.action_id,
+            role: $crate::valid_model_transition_role!($($role)?),
             guard: stringify!($guard_expr),
             effect: stringify!([$($next_state),*]),
             reads: descriptor.reads,
@@ -1889,7 +1914,7 @@ macro_rules! valid_model {
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
-            $(transition $transition_action:ident $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:tt)+];)+
+            $(transition $transition_action:ident $( [ role = $role:ident ] )? $( [ tags = [$($path_tag:literal),* $(,)?] ] )? when |$guard_state:ident| $guard_expr:expr => [$($next_state:tt)+];)+
         }
         properties {
             $($property_tokens:tt)+
@@ -1934,6 +1959,7 @@ macro_rules! valid_model {
                         $crate::valid_model_transition_descriptor!(
                             [$action_ty]
                             $transition_action
+                            $( [ role = $role ] )?
                             $( [ tags = [$($path_tag),*] ] )?
                             |$guard_state| $guard_expr
                             => [$($next_state)+]
@@ -2191,10 +2217,72 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
             guard_true_actions.contains(*action_id) && guard_false_actions.contains(*action_id)
         })
         .count();
+    let action_roles = machine_transition_ir::<M>()
+        .into_iter()
+        .map(|transition| {
+            (
+                transition.action_id.to_string(),
+                transition.role.as_str().to_string(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let business_actions = total_actions
+        .iter()
+        .filter(|action_id| {
+            action_roles
+                .get(*action_id)
+                .map(|role| role == "business")
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let setup_actions = total_actions
+        .iter()
+        .filter(|action_id| {
+            action_roles
+                .get(*action_id)
+                .map(|role| role == "setup")
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let guard_full_coverage_percent = if total_actions.is_empty() {
         100
     } else {
         ((fully_covered_guards * 100) / total_actions.len()) as u32
+    };
+    let business_transition_coverage_percent = if business_actions.is_empty() {
+        100
+    } else {
+        ((covered_actions.intersection(&business_actions).count() * 100) / business_actions.len())
+            as u32
+    };
+    let setup_transition_coverage_percent = if setup_actions.is_empty() {
+        100
+    } else {
+        ((covered_actions.intersection(&setup_actions).count() * 100) / setup_actions.len()) as u32
+    };
+    let business_fully_covered_guards = business_actions
+        .iter()
+        .filter(|action| {
+            guard_true_actions.contains(*action) && guard_false_actions.contains(*action)
+        })
+        .count();
+    let business_guard_full_coverage_percent = if business_actions.is_empty() {
+        100
+    } else {
+        ((business_fully_covered_guards * 100) / business_actions.len()) as u32
+    };
+    let setup_fully_covered_guards = setup_actions
+        .iter()
+        .filter(|action| {
+            guard_true_actions.contains(*action) && guard_false_actions.contains(*action)
+        })
+        .count();
+    let setup_guard_full_coverage_percent = if setup_actions.is_empty() {
+        100
+    } else {
+        ((setup_fully_covered_guards * 100) / setup_actions.len()) as u32
     };
     let uncovered_guards = total_actions
         .iter()
@@ -2215,12 +2303,17 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         schema_version: "1.0.0".to_string(),
         model_id: M::model_id().to_string(),
         transition_coverage_percent,
+        business_transition_coverage_percent,
+        setup_transition_coverage_percent,
         decision_coverage_percent,
         guard_full_coverage_percent,
+        business_guard_full_coverage_percent,
+        setup_guard_full_coverage_percent,
         covered_actions,
         covered_decisions,
         total_actions,
         total_decisions,
+        action_roles,
         action_execution_counts,
         decision_counts,
         visited_state_count: exploration.nodes.len(),
@@ -2319,6 +2412,9 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
             message: format!("guard coverage for action {action_id} is incomplete: {uncovered}"),
         });
     }
+    let failing_action_role = transition
+        .as_ref()
+        .map(|transition| transition.role.as_str().to_string());
     if let Some(transition) = transition {
         action_reads = transition
             .reads
@@ -2403,6 +2499,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         property_id: trace.property_id,
         failure_step_index: failure_step.index,
         failing_action_id: Some(action_id.clone()),
+        failing_action_role,
         decision_path,
         failing_action_reads: action_reads,
         failing_action_writes: action_writes,
@@ -2444,9 +2541,23 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
 
     let mut seen_sequences = BTreeSet::new();
     let mut vectors = Vec::new();
+    let action_roles = machine_transition_ir::<M>()
+        .into_iter()
+        .map(|transition| {
+            (
+                transition.action_id.to_string(),
+                transition.role.as_str().to_string(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     for edge in &exploration.edges {
         let first_sequence = vec![edge.action.action_id()];
         if seen_sequences.insert(first_sequence.clone()) {
+            let action_id = edge.action.action_id();
+            let role = action_roles
+                .get(&action_id)
+                .map(String::as_str)
+                .unwrap_or("business");
             vectors.push(TestVector {
                 schema_version: "1.0.0".to_string(),
                 vector_id: format!(
@@ -2463,7 +2574,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 seed: None,
                 actions: vec![VectorActionStep {
                     index: 0,
-                    action_id: edge.action.action_id(),
+                    action_id: action_id.clone(),
                     action_label: edge.action.action_label(),
                 }],
                 initial_state: Some(edge.state_before.snapshot()),
@@ -2471,18 +2582,23 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 expected_states: vec![format!("{:?}", edge.state_after.snapshot())],
                 property_id: property.property_id.to_string(),
                 minimized: false,
-                focus_action_id: Some(edge.action.action_id()),
+                focus_action_id: Some(action_id.clone()),
                 focus_field: None,
                 expected_guard_enabled: Some(true),
                 expected_property_holds: Some(true),
-                expected_path: machine_transition_path_for_action::<M>(
-                    &edge.action.action_id(),
-                    true,
-                ),
-                expected_path_tags: machine_transition_tags_for_action::<M>(
-                    &edge.action.action_id(),
-                ),
-                notes: machine_transition_tags_for_action::<M>(&edge.action.action_id())
+                expected_path: machine_transition_path_for_action::<M>(&action_id, true),
+                expected_path_tags: machine_transition_tags_for_action::<M>(&action_id),
+                setup_action_ids: if role == "setup" {
+                    vec![action_id.clone()]
+                } else {
+                    Vec::new()
+                },
+                business_action_ids: if role == "business" {
+                    vec![action_id.clone()]
+                } else {
+                    Vec::new()
+                },
+                notes: machine_transition_tags_for_action::<M>(&action_id)
                     .into_iter()
                     .map(|tag| format!("path_tag:{tag}"))
                     .collect(),
@@ -2828,6 +2944,35 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
     } else {
         expected_path.legacy_path_tags()
     };
+    let action_roles = machine_transition_ir::<M>()
+        .into_iter()
+        .map(|transition| {
+            (
+                transition.action_id.to_string(),
+                transition.role.as_str().to_string(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let setup_action_ids = actions
+        .iter()
+        .filter(|step| {
+            action_roles
+                .get(&step.action_id)
+                .map(|role| role == "setup")
+                .unwrap_or(false)
+        })
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>();
+    let business_action_ids = actions
+        .iter()
+        .filter(|step| {
+            action_roles
+                .get(&step.action_id)
+                .map(|role| role == "business")
+                .unwrap_or(true)
+        })
+        .map(|step| step.action_id.clone())
+        .collect::<Vec<_>>();
     Some(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
@@ -2882,6 +3027,8 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         expected_property_holds: Some(property_holds),
         expected_path,
         expected_path_tags,
+        setup_action_ids,
+        business_action_ids,
         notes,
         replay_target: None,
     })
@@ -2972,6 +3119,7 @@ pub fn lower_machine_model<M: VerifiedMachine>() -> Result<ModelIr, String> {
             Ok(ActionIr {
                 action_id: transition.action_id.to_string(),
                 label: transition.action_id.to_string(),
+                role: transition.role,
                 reads: transition
                     .reads
                     .iter()

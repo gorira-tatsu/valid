@@ -1,4 +1,5 @@
 use crate::frontend::resolver::ResolvedModel;
+use crate::ir::action::ActionRole;
 use crate::support::diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode, Span};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,12 @@ pub fn typecheck_model(resolved: ResolvedModel) -> Result<TypedModel, Vec<Diagno
     }
 
     for action in &resolved.parsed.actions {
+        if ActionRole::parse(&action.role).is_none() {
+            errors.push(type_error(
+                format!("unsupported action role `{}`", action.role),
+                action.line,
+            ));
+        }
         if let Some(pre) = &action.pre {
             if pre.contains(" + ") {
                 errors.push(type_error(

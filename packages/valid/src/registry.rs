@@ -778,6 +778,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         .into_iter()
         .map(|action| InspectAction {
             action_id: action.action_id.to_string(),
+            role: "business".to_string(),
             reads: action.reads.iter().map(|item| item.to_string()).collect(),
             writes: action.writes.iter().map(|item| item.to_string()).collect(),
         })
@@ -786,6 +787,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         .into_iter()
         .map(|transition| InspectTransition {
             action_id: transition.action_id.to_string(),
+            role: transition.role.as_str().to_string(),
             guard: transition.guard.map(str::to_string),
             effect: transition.effect.map(str::to_string),
             reads: transition

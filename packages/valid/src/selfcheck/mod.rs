@@ -304,6 +304,7 @@ fn selfcheck_model() -> ModelIr {
         actions: vec![ActionIr {
             action_id: "Jump".to_string(),
             label: "Jump".to_string(),
+            role: crate::ir::action::ActionRole::Business,
             reads: vec!["x".to_string()],
             writes: vec!["x".to_string()],
             path_tags: vec!["write_path".to_string()],
@@ -343,6 +344,7 @@ fn predecessor_selfcheck_model() -> ModelIr {
             ActionIr {
                 action_id: "Step".to_string(),
                 label: "Step".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["step_path".to_string()],
@@ -363,6 +365,7 @@ fn predecessor_selfcheck_model() -> ModelIr {
             ActionIr {
                 action_id: "Jump".to_string(),
                 label: "Jump".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["jump_path".to_string()],
@@ -407,6 +410,7 @@ fn coverage_selfcheck_model() -> ModelIr {
             ActionIr {
                 action_id: "Inc".to_string(),
                 label: "Inc".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["inc_path".to_string()],
@@ -427,6 +431,7 @@ fn coverage_selfcheck_model() -> ModelIr {
             ActionIr {
                 action_id: "Reset".to_string(),
                 label: "Reset".to_string(),
+                role: crate::ir::action::ActionRole::Business,
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
                 path_tags: vec!["reset_path".to_string()],

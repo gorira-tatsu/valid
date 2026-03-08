@@ -1364,6 +1364,7 @@ mod tests {
                 ActionIr {
                     action_id: "SYNC".to_string(),
                     label: "SYNC".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec![memberships.clone(), pending.clone(), plans.clone()],
                     writes: vec![
                         memberships.clone(),
@@ -1415,6 +1416,7 @@ mod tests {
                 ActionIr {
                     action_id: "UPGRADE".to_string(),
                     label: "UPGRADE".to_string(),
+                    role: crate::ir::action::ActionRole::Business,
                     reads: vec![plans.clone(), memberships.clone()],
                     writes: vec![
                         plans.clone(),

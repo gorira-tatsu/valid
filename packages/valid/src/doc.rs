@@ -329,11 +329,13 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
             }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                role: "business".to_string(),
                 guard: Some("state.x < 3".to_string()),
                 effect: Some("x = state.x + 1".to_string()),
                 reads: vec!["x".to_string()],

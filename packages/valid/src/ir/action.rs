@@ -1,9 +1,33 @@
 use crate::ir::{expr::ExprIr, Path};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ActionRole {
+    Business,
+    Setup,
+}
+
+impl ActionRole {
+    pub fn parse(input: &str) -> Option<Self> {
+        match input {
+            "business" => Some(Self::Business),
+            "setup" => Some(Self::Setup),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Business => "business",
+            Self::Setup => "setup",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionIr {
     pub action_id: String,
     pub label: String,
+    pub role: ActionRole,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
     pub path_tags: Vec<String>,
