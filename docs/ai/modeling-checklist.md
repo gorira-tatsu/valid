@@ -2,6 +2,13 @@
 
 Use this checklist before returning a generated model or reviewing one.
 
+Related documents:
+
+- [AI Authoring Guide](./authoring-guide.md)
+- [Model Authoring Best Practices](./model-authoring-best-practices.md)
+- [Common Pitfalls](./common-pitfalls.md)
+- [Examples Curriculum](./examples-curriculum.md)
+
 ## Before writing
 
 - Choose registry mode unless the task explicitly targets `.valid` fixtures.
@@ -31,6 +38,8 @@ Use this checklist before returning a generated model or reviewing one.
 - The header is `model Name<State, Action>;`
 - `init [ ... ];` exists
 - Declarative solver-ready models use a single initial state
+- A short source-adjacent comment explains summary, scope, assumptions, and
+  critical properties
 
 ## Transitions
 
@@ -58,3 +67,4 @@ Use this checklist before returning a generated model or reviewing one.
 - The model can be explained from one example path
 - The finite domains are small enough to inspect mentally
 - The CLI/MCP commands suggested to the user match the chosen mode
+- The model comment still matches the actual behavior after the latest edit

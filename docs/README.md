@@ -4,6 +4,9 @@
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
 - [AI Authoring Guide](./ai/authoring-guide.md)
   Short canonical entrypoint for LLM agents and AI-assisted authoring flows.
+- [Model Authoring Best Practices](./ai/model-authoring-best-practices.md)
+  Guidance for documenting model intent, scope, assumptions, scenarios, and
+  critical properties close to the source.
 - [Project Organization Guide](./project-organization.md)
   Recommended layout for model files, registries, shared types, integration
   models, and generated artifacts.
@@ -27,6 +30,8 @@
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
 authoring guide.
+If you want models to stay readable for review and long-term maintenance, read
+the model authoring best-practice guide alongside the AI guide.
 If you want to keep a `valid` project maintainable as it grows, read the
 project organization guide next.
 If you want to model and verify a system, start with the Rust DSL guide.
