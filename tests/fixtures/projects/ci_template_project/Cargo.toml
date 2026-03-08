@@ -1,0 +1,9 @@
+[package]
+name = "valid-ci-template-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+valid = { path = "../../../..", features = ["verification-runtime"] }
+
+[workspace]
