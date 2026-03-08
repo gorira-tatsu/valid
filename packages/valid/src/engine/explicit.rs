@@ -747,7 +747,7 @@ fn fail_result(
             unknown_reason: None,
             terminal_state_id: Some(format!("s-{failing_index:06}")),
             evidence_id: Some(evidence_id.clone()),
-            summary: fail_summary(property),
+            summary: fail_summary(property, assurance),
         },
         explored_states: nodes.len(),
         explored_transitions: nodes.len().saturating_sub(1),
@@ -759,7 +759,7 @@ fn fail_result(
             property_evidence_kind(property.kind),
             nodes,
             failing_index,
-            Some(fail_note(property.kind).to_string()),
+            Some(fail_note(property.kind, assurance).to_string()),
             assurance,
         )),
     }
@@ -847,10 +847,7 @@ fn unknown_result(
             unknown_reason: Some(reason),
             terminal_state_id: Some(format!("s-{last_index:06}")),
             evidence_id: None,
-            summary: format!(
-                "search stopped before completion: {}",
-                unknown_reason_label(reason)
-            ),
+            summary: unknown_summary(property.as_ref().map(|property| property.kind), reason),
         },
         explored_states: nodes.len(),
         explored_transitions,
@@ -865,7 +862,10 @@ fn unknown_result(
             EvidenceKind::Trace,
             nodes,
             last_index,
-            Some(format!("search stopped: {}", unknown_reason_label(reason))),
+            Some(unknown_note(
+                property.as_ref().map(|property| property.kind),
+                reason,
+            )),
             AssuranceLevel::Incomplete,
         )),
     }
@@ -1081,27 +1081,33 @@ fn pass_reason_code(kind: PropertyKind, assurance: AssuranceLevel) -> &'static s
     }
 }
 
-fn fail_summary(property: &PropertyIr) -> String {
-    match property.kind {
-        PropertyKind::Invariant => format!(
+fn fail_summary(property: &PropertyIr, assurance: AssuranceLevel) -> String {
+    match (property.kind, assurance) {
+        (PropertyKind::Invariant, _) => format!(
             "property `{}` failed during explicit exploration",
             property.property_id
         ),
-        PropertyKind::Reachability => format!(
+        (PropertyKind::Reachability, _) => format!(
             "reachability target for `{}` was reached during explicit exploration",
             property.property_id
         ),
-        PropertyKind::Cover => format!("cover target `{}` was not reached", property.property_id),
-        PropertyKind::Transition => format!(
+        (PropertyKind::Cover, _) => {
+            format!("cover target `{}` was not reached", property.property_id)
+        }
+        (PropertyKind::Transition, _) => format!(
             "transition property `{}` failed during explicit exploration",
             property.property_id
         ),
-        PropertyKind::DeadlockFreedom => format!(
+        (PropertyKind::DeadlockFreedom, _) => format!(
             "deadlock found for `{}` during explicit exploration",
             property.property_id
         ),
-        PropertyKind::Temporal => format!(
-            "temporal property `{}` failed during explicit exploration",
+        (PropertyKind::Temporal, AssuranceLevel::Bounded) => format!(
+            "temporal property `{}` failed within the configured exploration bound",
+            property.property_id
+        ),
+        (PropertyKind::Temporal, _) => format!(
+            "temporal property `{}` failed on the explored reachable graph",
             property.property_id
         ),
     }
@@ -1147,14 +1153,40 @@ fn pass_summary(property: &PropertyIr, assurance: AssuranceLevel, vacuous: bool)
     }
 }
 
-fn fail_note(kind: PropertyKind) -> &'static str {
+fn fail_note(kind: PropertyKind, assurance: AssuranceLevel) -> &'static str {
+    match (kind, assurance) {
+        (PropertyKind::Invariant, _) => "property violated",
+        (PropertyKind::Reachability, _) => "reachability target reached",
+        (PropertyKind::Cover, _) => "cover target unreached",
+        (PropertyKind::Transition, _) => "transition property violated",
+        (PropertyKind::DeadlockFreedom, _) => "deadlock reached",
+        (PropertyKind::Temporal, AssuranceLevel::Bounded) => {
+            "temporal property violated within the configured exploration bound"
+        }
+        (PropertyKind::Temporal, _) => "temporal property violated on the explored reachable graph",
+    }
+}
+
+fn unknown_summary(kind: Option<PropertyKind>, reason: UnknownReason) -> String {
     match kind {
-        PropertyKind::Invariant => "property violated",
-        PropertyKind::Reachability => "reachability target reached",
-        PropertyKind::Cover => "cover target unreached",
-        PropertyKind::Transition => "transition property violated",
-        PropertyKind::DeadlockFreedom => "deadlock reached",
-        PropertyKind::Temporal => "temporal property violated",
+        Some(PropertyKind::Temporal) => format!(
+            "temporal search stopped before completing the requested semantics: {}",
+            unknown_reason_label(reason)
+        ),
+        _ => format!(
+            "search stopped before completion: {}",
+            unknown_reason_label(reason)
+        ),
+    }
+}
+
+fn unknown_note(kind: Option<PropertyKind>, reason: UnknownReason) -> String {
+    match kind {
+        Some(PropertyKind::Temporal) => format!(
+            "temporal exploration stopped before the reachable-graph evaluation completed: {}",
+            unknown_reason_label(reason)
+        ),
+        _ => format!("search stopped: {}", unknown_reason_label(reason)),
     }
 }
 

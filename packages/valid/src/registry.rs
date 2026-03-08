@@ -934,6 +934,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
                 explicit_status: "not_applicable".to_string(),
                 solver_status: "not_applicable".to_string(),
                 reason: String::new(),
+                backend_statuses: Vec::new(),
             },
             reasons: capabilities.reasons.clone(),
         },

@@ -1232,6 +1232,14 @@ fn cmd_capabilities(args: Vec<String>) {
                 );
                 println!("temporal.status: {}", response.capabilities.temporal.status);
                 println!(
+                    "temporal.semantics: {}",
+                    response.capabilities.temporal.semantics
+                );
+                println!(
+                    "temporal.assurance_levels: {}",
+                    response.capabilities.temporal.assurance_levels.join(", ")
+                );
+                println!(
                     "temporal.supported_operators: {}",
                     response
                         .capabilities
@@ -2090,7 +2098,7 @@ fn resolve_project_dir(
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {
     println!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
         response.schema_version,
         response.request_id,
         response.backend,
@@ -2102,6 +2110,8 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         response.capabilities.supports_witness,
         response.capabilities.selfcheck_compatible,
         response.capabilities.temporal.status,
+        response.capabilities.temporal.semantics,
+        render_string_array(&response.capabilities.temporal.assurance_levels),
         render_string_array(&response.capabilities.temporal.supported_operators),
         render_string_array(&response.capabilities.temporal.unsupported_operators),
         render_string_array(&response.capabilities.temporal.notes),

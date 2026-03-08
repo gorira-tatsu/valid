@@ -623,6 +623,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
                 explicit_status: "not_applicable".to_string(),
                 solver_status: "not_applicable".to_string(),
                 reason: String::new(),
+                backend_statuses: Vec::new(),
             },
             reasons: capabilities.reasons.clone(),
         },
