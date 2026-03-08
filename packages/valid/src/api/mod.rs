@@ -441,6 +441,7 @@ pub struct TestgenResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestgenVectorSummary {
     pub vector_id: String,
+    pub run_id: String,
     pub strictness: String,
     pub derivation: String,
     pub source_kind: String,
@@ -2131,6 +2132,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .iter()
             .map(|vector| TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
+                run_id: vector.run_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),

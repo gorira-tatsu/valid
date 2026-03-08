@@ -2687,6 +2687,11 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                     stable_hash_hex(&(M::model_id().to_string() + &first_sequence.join(",")))
                         .replace("sha256:", "")
                 ),
+                run_id: format!(
+                    "run-transition-{}",
+                    stable_hash_hex(&(M::model_id().to_string() + &first_sequence.join(",")))
+                        .replace("sha256:", "")
+                ),
                 source_kind: "witness".to_string(),
                 strictness: "heuristic".to_string(),
                 derivation: "transition_search".to_string(),
@@ -3110,6 +3115,11 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
                     ))
             )
             .replace("sha256:", "")
+        ),
+        run_id: format!(
+            "run-vector-{}",
+            stable_hash_hex(&(M::model_id().to_string() + property_id + &signature))
+                .replace("sha256:", "")
         ),
         source_kind: source_kind.to_string(),
         strictness: match strategy {
