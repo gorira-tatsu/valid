@@ -7,9 +7,9 @@ use std::{
 };
 
 use valid::api::{
-    check_source, explain_source, inspect_source, lint_source, orchestrate_source,
-    render_inspect_json, testgen_source, CheckRequest, InspectRequest, OrchestrateRequest,
-    TestgenRequest,
+    check_source, distinguish_source, explain_source, inspect_source, lint_source,
+    orchestrate_source, render_inspect_json, testgen_source, CheckRequest, DistinguishRequest,
+    InspectRequest, OrchestrateRequest, TestgenRequest,
 };
 use valid::engine::CheckOutcome;
 
@@ -139,6 +139,61 @@ fn multi_property_orchestrate_returns_aggregate_coverage() {
 }
 
 #[test]
+fn distinguish_source_finds_divergence_between_models() {
+    let left = "\
+model ResetCounter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Inc:
+  pre: x <= 1
+  post:
+    x = x + 1
+action Reset:
+  pre: x <= 2
+  post:
+    x = 0
+";
+    let right = "\
+model StayCounter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Inc:
+  pre: x <= 1
+  post:
+    x = x + 1
+action Reset:
+  pre: x <= 2
+  post:
+    x = x
+";
+    let response = distinguish_source(&DistinguishRequest {
+        request_id: "req-distinguish".to_string(),
+        source_name: "left.valid".to_string(),
+        source: left.to_string(),
+        compare_source_name: Some("right.valid".to_string()),
+        compare_source: Some(right.to_string()),
+        property_id: None,
+        compare_property_id: None,
+        max_depth: Some(4),
+    })
+    .expect("distinguish should succeed");
+    assert_eq!(response.comparison_kind, "models");
+    assert_eq!(response.trace.divergence_kind, "state_transition");
+    assert_eq!(
+        response
+            .trace
+            .checkpoints
+            .last()
+            .and_then(|item| item.action_id.as_deref()),
+        Some("Reset")
+    );
+}
+
+#[test]
 fn inspect_includes_metadata_details() {
     let source = read_fixture("tests/fixtures/models/safe_counter.valid");
     let response = inspect_source(&InspectRequest {
@@ -174,6 +229,63 @@ fn cli_capabilities_reports_temporal_backend_details() {
     assert!(
         stdout.contains("\"supported_operators\":[\"always\",\"eventually\",\"next\",\"until\"]")
     );
+}
+
+#[test]
+fn cli_distinguish_reports_divergence_as_json() {
+    let temp_root = unique_temp_dir("valid-cli-distinguish");
+    fs::create_dir_all(&temp_root).expect("temp root");
+    let left = temp_root.join("left.valid");
+    let right = temp_root.join("right.valid");
+    fs::write(
+        &left,
+        "\
+model ResetCounter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Inc:
+  pre: x <= 1
+  post:
+    x = x + 1
+action Reset:
+  pre: x <= 2
+  post:
+    x = 0
+",
+    )
+    .expect("left model");
+    fs::write(
+        &right,
+        "\
+model StayCounter
+state:
+  x: u8[0..2]
+init:
+  x = 0
+action Inc:
+  pre: x <= 1
+  post:
+    x = x + 1
+action Reset:
+  pre: x <= 2
+  post:
+    x = x
+",
+    )
+    .expect("right model");
+    let output = Command::new(binary_path())
+        .arg("distinguish")
+        .arg(&left)
+        .arg(format!("--compare={}", right.display()))
+        .arg("--json")
+        .output()
+        .expect("distinguish should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"comparison_kind\":\"models\""));
+    assert!(stdout.contains("\"divergence_kind\":\"state_transition\""));
 }
 
 #[test]

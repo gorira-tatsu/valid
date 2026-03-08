@@ -577,6 +577,26 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("generated file should be present");
     assert!(temp.path().join(generated_file).exists() || PathBuf::from(generated_file).exists());
 
+    let distinguish = structured_content(client.call_tool(
+        "valid_distinguish",
+        json!({
+            "source_name": "left.valid",
+            "source": "model ResetCounter\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Inc:\n  pre: x <= 1\n  post:\n    x = x + 1\naction Reset:\n  pre: x <= 2\n  post:\n    x = 0\n",
+            "compare_source_name": "right.valid",
+            "compare_source": "model StayCounter\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Inc:\n  pre: x <= 1\n  post:\n    x = x + 1\naction Reset:\n  pre: x <= 2\n  post:\n    x = x\n",
+            "max_depth": 4
+        }),
+    ));
+    assert_eq!(distinguish["comparison_kind"], "models");
+    assert_eq!(distinguish["trace"]["divergence_kind"], "state_transition");
+    assert_eq!(
+        distinguish["trace"]["checkpoints"]
+            .as_array()
+            .and_then(|items| items.last())
+            .and_then(|item| item["action_id"].as_str()),
+        Some("Reset")
+    );
+
     let bundled = structured_content(client.call_tool("valid_list_models", json!({})));
     assert!(bundled["models"]
         .as_array()

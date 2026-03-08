@@ -2,6 +2,7 @@
 
 use crate::{
     ir::{FieldType, ModelIr, PropertyKind},
+    project::RerunSuggestion,
     support::{hash::stable_hash_hex, io::write_text_file},
 };
 
@@ -31,6 +32,9 @@ pub struct ContractDriftReport {
     pub changes: Vec<String>,
     pub affected_critical_properties: Vec<String>,
     pub affected_property_suites: Vec<String>,
+    pub affected_artifacts: Vec<String>,
+    pub repair_surfaces: Vec<String>,
+    pub suggested_reruns: Vec<RerunSuggestion>,
 }
 
 pub fn snapshot_model(model: &ModelIr) -> ContractSnapshot {
@@ -127,36 +131,61 @@ pub fn render_lock_json(lock: &ContractLockFile) -> String {
 }
 
 pub fn render_drift_json(report: &ContractDriftReport) -> String {
-    let mut out = String::from("{");
-    out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
-    out.push_str(&format!(",\"status\":\"{}\"", report.status));
-    out.push_str(&format!(",\"contract_id\":\"{}\"", report.contract_id));
-    out.push_str(&format!(",\"old_hash\":\"{}\"", report.old_hash));
-    out.push_str(&format!(",\"new_hash\":\"{}\"", report.new_hash));
-    out.push_str(",\"changes\":[");
-    for (index, change) in report.changes.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&format!("\"{}\"", change));
+    serde_json::json!({
+        "schema_version": report.schema_version,
+        "status": report.status,
+        "contract_id": report.contract_id,
+        "old_hash": report.old_hash,
+        "new_hash": report.new_hash,
+        "changes": report.changes,
+        "affected_critical_properties": report.affected_critical_properties,
+        "affected_property_suites": report.affected_property_suites,
+        "affected_artifacts": report.affected_artifacts,
+        "repair_surfaces": report.repair_surfaces,
+        "suggested_reruns": report.suggested_reruns,
+    })
+    .to_string()
+}
+
+pub fn render_drift_text(report: &ContractDriftReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("status: {}\n", report.status));
+    out.push_str(&format!("contract_id: {}\n", report.contract_id));
+    out.push_str(&format!("old_hash: {}\n", report.old_hash));
+    out.push_str(&format!("new_hash: {}\n", report.new_hash));
+    if !report.changes.is_empty() {
+        out.push_str(&format!("changes: {}\n", report.changes.join(",")));
     }
-    out.push_str("]");
-    out.push_str(",\"affected_critical_properties\":[");
-    for (index, property) in report.affected_critical_properties.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&format!("\"{}\"", property));
+    if !report.affected_artifacts.is_empty() {
+        out.push_str(&format!(
+            "affected_artifacts: {}\n",
+            report.affected_artifacts.join(",")
+        ));
     }
-    out.push(']');
-    out.push_str(",\"affected_property_suites\":[");
-    for (index, suite_name) in report.affected_property_suites.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&format!("\"{}\"", suite_name));
+    if !report.repair_surfaces.is_empty() {
+        out.push_str(&format!(
+            "repair_surfaces: {}\n",
+            report.repair_surfaces.join(",")
+        ));
     }
-    out.push_str("]}");
+    if !report.affected_critical_properties.is_empty() {
+        out.push_str(&format!(
+            "affected_critical_properties: {}\n",
+            report.affected_critical_properties.join(",")
+        ));
+    }
+    if !report.affected_property_suites.is_empty() {
+        out.push_str(&format!(
+            "affected_property_suites: {}\n",
+            report.affected_property_suites.join(",")
+        ));
+    }
+    for suggestion in &report.suggested_reruns {
+        out.push_str(&format!(
+            "suggested_rerun: {} target={} reason={}\n",
+            suggestion.action, suggestion.target, suggestion.reason
+        ));
+    }
     out
 }
 
@@ -188,6 +217,9 @@ pub fn compare_snapshot(
         changes,
         affected_critical_properties: Vec::new(),
         affected_property_suites: Vec::new(),
+        affected_artifacts: Vec::new(),
+        repair_surfaces: Vec::new(),
+        suggested_reruns: Vec::new(),
     }
 }
 

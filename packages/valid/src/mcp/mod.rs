@@ -14,9 +14,10 @@ mod prompts_catalog;
 
 use crate::{
     api::{
-        check_source, compile_source, explain_source, inspect_source, lint_source,
-        orchestrate_source, render_explain_json, render_inspect_json, render_lint_json,
-        testgen_source, CheckRequest, InspectRequest, OrchestrateRequest, TestgenRequest,
+        check_source, compile_source, distinguish_source, explain_source, inspect_source,
+        lint_source, render_distinguish_json, render_explain_json, render_inspect_json,
+        render_lint_json, testgen_source, CheckRequest, DistinguishRequest, InspectRequest,
+        OrchestrateRequest, TestgenRequest, orchestrate_source,
     },
     bundled_models::list_bundled_models,
     contract::{compare_snapshot, parse_lock_file, snapshot_model},
@@ -484,6 +485,13 @@ fn tool_definitions() -> Vec<Value> {
             false,
         ),
         tool(
+            "valid_distinguish",
+            "Generate a trace that separates two models or two property interpretations.",
+            input_schema_with_distinguish(),
+            output_schema_with_success_required(&["status", "comparison_kind", "trace"]),
+            true,
+        ),
+        tool(
             "valid_replay",
             "Replay an action sequence and report the terminal state and property result.",
             input_schema_with_replay(),
@@ -821,6 +829,28 @@ fn input_schema_with_testgen() -> Value {
     })
 }
 
+fn input_schema_with_distinguish() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "model_file": { "type": "string" },
+            "source_name": { "type": "string" },
+            "source": { "type": "string" },
+            "compare_model_file": { "type": "string" },
+            "compare_source_name": { "type": "string" },
+            "compare_source": { "type": "string" },
+            "property_id": { "type": "string" },
+            "compare_property_id": { "type": "string" },
+            "max_depth": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+            { "required": ["model_file"] },
+            { "required": ["source"] }
+        ]
+    })
+}
+
 fn input_schema_with_replay() -> Value {
     let mut properties = common_target_properties();
     properties.insert("property_id".to_string(), json!({ "type": "string" }));
@@ -1012,6 +1042,13 @@ fn handle_tool_call(config: &ServerConfig, params: &Value) -> ToolResult {
                 Err(error) => Ok(ToolResult::error_message(error)),
             }
         }
+        "valid_distinguish" => {
+            let args = parse_args::<DistinguishArgs>(&arguments);
+            match args {
+                Ok(args) => distinguish_tool(&args),
+                Err(error) => Ok(ToolResult::error_message(error)),
+            }
+        }
         "valid_replay" => {
             let args = parse_args::<ReplayArgs>(&arguments);
             match args {
@@ -1166,6 +1203,19 @@ struct TestgenArgs {
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct DistinguishArgs {
+    #[serde(flatten)]
+    target: TargetArgs,
+    compare_model_file: Option<String>,
+    compare_source_name: Option<String>,
+    compare_source: Option<String>,
+    property_id: Option<String>,
+    compare_property_id: Option<String>,
+    max_depth: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -2190,6 +2240,64 @@ fn testgen_tool(config: &ServerConfig, args: &TestgenArgs) -> Result<ToolResult,
     }
 }
 
+fn distinguish_tool(args: &DistinguishArgs) -> Result<ToolResult, String> {
+    let left = read_distinguish_target(&args.target)?;
+    let right = read_distinguish_compare_target(args, &left)?;
+    let request = DistinguishRequest {
+        request_id: "mcp-distinguish".to_string(),
+        source_name: left.0,
+        source: left.1,
+        compare_source_name: Some(right.0),
+        compare_source: Some(right.1),
+        property_id: args.property_id.clone(),
+        compare_property_id: args.compare_property_id.clone(),
+        max_depth: args.max_depth,
+    };
+    match distinguish_source(&request) {
+        Ok(response) => Ok(ToolResult::success(parse_embedded_json(
+            "distinguish response",
+            &render_distinguish_json(&response),
+        )?)),
+        Err(error) => Ok(ToolResult::error(parse_embedded_json(
+            "diagnostics",
+            &render_diagnostics_json(&error.diagnostics),
+        )?)),
+    }
+}
+
+fn read_distinguish_target(target: &TargetArgs) -> Result<(String, String), String> {
+    if let Some(model_file) = normalized_option(&target.model_file) {
+        return Ok((
+            model_file.clone(),
+            fs::read_to_string(model_file).map_err(|error| error.to_string())?,
+        ));
+    }
+    if let Some(source) = normalized_option(&target.source) {
+        let name = normalized_option(&target.source_name)
+            .unwrap_or_else(|| "inline-left.valid".to_string());
+        return Ok((name, source));
+    }
+    Err("valid_distinguish requires model_file or source".to_string())
+}
+
+fn read_distinguish_compare_target(
+    args: &DistinguishArgs,
+    default_left: &(String, String),
+) -> Result<(String, String), String> {
+    if let Some(compare_model_file) = normalized_option(&args.compare_model_file) {
+        return Ok((
+            compare_model_file.clone(),
+            fs::read_to_string(compare_model_file).map_err(|error| error.to_string())?,
+        ));
+    }
+    if let Some(compare_source) = normalized_option(&args.compare_source) {
+        let name = normalized_option(&args.compare_source_name)
+            .unwrap_or_else(|| "inline-right.valid".to_string());
+        return Ok((name, compare_source));
+    }
+    Ok(default_left.clone())
+}
+
 fn replay_tool(config: &ServerConfig, args: &ReplayArgs) -> Result<ToolResult, String> {
     match args.target.resolve(config)? {
         ResolvedTarget::Dsl {
@@ -2411,6 +2519,9 @@ fn contract_check_tool(
                     .unwrap_or_default();
                 drift.affected_critical_properties = recommendations.affected_critical_properties;
                 drift.affected_property_suites = recommendations.affected_property_suites;
+                drift.affected_artifacts = recommendations.affected_artifacts;
+                drift.repair_surfaces = recommendations.repair_surfaces;
+                drift.suggested_reruns = recommendations.suggested_reruns;
                 json!({
                     "schema_version": "1.0.0",
                     "status": drift.status,
@@ -2420,6 +2531,9 @@ fn contract_check_tool(
                     "changes": drift.changes,
                     "affected_critical_properties": drift.affected_critical_properties,
                     "affected_property_suites": drift.affected_property_suites,
+                    "affected_artifacts": drift.affected_artifacts,
+                    "repair_surfaces": drift.repair_surfaces,
+                    "suggested_reruns": drift.suggested_reruns,
                     "lock_file": args.lock_file
                 })
             } else {
@@ -2437,6 +2551,9 @@ fn contract_check_tool(
                     "changes": ["missing_from_lock_file"],
                     "affected_critical_properties": recommendations.affected_critical_properties,
                     "affected_property_suites": recommendations.affected_property_suites,
+                    "affected_artifacts": recommendations.affected_artifacts,
+                    "repair_surfaces": recommendations.repair_surfaces,
+                    "suggested_reruns": recommendations.suggested_reruns,
                     "lock_file": args.lock_file
                 })
             };
@@ -2664,6 +2781,18 @@ fn augment_contract_check_value(config: &ServerConfig, mut value: Value) -> Valu
                         "affected_property_suites".to_string(),
                         json!(recommendations.affected_property_suites),
                     );
+                    object.insert(
+                        "affected_artifacts".to_string(),
+                        json!(recommendations.affected_artifacts),
+                    );
+                    object.insert(
+                        "repair_surfaces".to_string(),
+                        json!(recommendations.repair_surfaces),
+                    );
+                    object.insert(
+                        "suggested_reruns".to_string(),
+                        json!(recommendations.suggested_reruns),
+                    );
                 }
             }
         }
@@ -2677,6 +2806,18 @@ fn augment_contract_check_value(config: &ServerConfig, mut value: Value) -> Valu
             object.insert(
                 "affected_property_suites".to_string(),
                 json!(recommendations.affected_property_suites),
+            );
+            object.insert(
+                "affected_artifacts".to_string(),
+                json!(recommendations.affected_artifacts),
+            );
+            object.insert(
+                "repair_surfaces".to_string(),
+                json!(recommendations.repair_surfaces),
+            );
+            object.insert(
+                "suggested_reruns".to_string(),
+                json!(recommendations.suggested_reruns),
             );
         }
     }

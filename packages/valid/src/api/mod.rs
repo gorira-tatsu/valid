@@ -1,5 +1,6 @@
 //! Machine-readable API layer for AI and CLI integration.
 
+use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
@@ -16,6 +17,7 @@ use crate::{
     coverage::{
         collect_coverage, machine_state_from_snapshot, validate_coverage_report, CoverageReport,
     },
+    distinguish::{find_distinguishing_trace, DistinguishOptions, DistinguishingTrace},
     engine::{build_run_manifest, CheckErrorEnvelope, CheckOutcome, PropertySelection, RunPlan},
     frontend,
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, PropertyLayer},
@@ -444,6 +446,18 @@ pub struct TestgenRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DistinguishRequest {
+    pub request_id: String,
+    pub source_name: String,
+    pub source: String,
+    pub compare_source_name: Option<String>,
+    pub compare_source: Option<String>,
+    pub property_id: Option<String>,
+    pub compare_property_id: Option<String>,
+    pub max_depth: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestgenResponse {
     pub schema_version: String,
     pub request_id: String,
@@ -461,6 +475,17 @@ pub struct TestgenVectorSummary {
     pub derivation: String,
     pub source_kind: String,
     pub strategy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DistinguishResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub status: String,
+    pub comparison_kind: String,
+    pub left_source_name: String,
+    pub right_source_name: String,
+    pub trace: DistinguishingTrace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2209,6 +2234,100 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
     })
 }
 
+pub fn distinguish_source(
+    request: &DistinguishRequest,
+) -> Result<DistinguishResponse, CheckErrorEnvelope> {
+    let right_source_name = request
+        .compare_source_name
+        .clone()
+        .unwrap_or_else(|| request.source_name.clone());
+    let right_source = request
+        .compare_source
+        .clone()
+        .unwrap_or_else(|| request.source.clone());
+    let left_model = frontend::compile_model(&request.source)
+        .map_err(|diagnostics| distinguish_compile_error(request, &request.source, &diagnostics))?;
+    let right_model = frontend::compile_model(&right_source)
+        .map_err(|diagnostics| distinguish_compile_error(request, &right_source, &diagnostics))?;
+    let trace = find_distinguishing_trace(
+        &left_model,
+        &right_model,
+        &DistinguishOptions {
+            left_property_id: request.property_id.clone(),
+            right_property_id: request
+                .compare_property_id
+                .clone()
+                .or_else(|| request.property_id.clone()),
+            max_depth: request.max_depth.unwrap_or(8),
+        },
+    )
+    .map_err(|message| CheckErrorEnvelope {
+        manifest: build_run_manifest(
+            request.request_id.clone(),
+            format!(
+                "run-{}",
+                stable_hash_hex(&request.request_id).replace("sha256:", "")
+            ),
+            stable_hash_hex(&request.source),
+            stable_hash_hex(&right_source),
+            crate::engine::BackendKind::Explicit,
+            env!("CARGO_PKG_VERSION").to_string(),
+            None,
+        ),
+        status: crate::engine::ErrorStatus::Error,
+        assurance_level: crate::engine::AssuranceLevel::Incomplete,
+        diagnostics: vec![Diagnostic::new(
+            crate::support::diagnostics::ErrorCode::SearchError,
+            crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+            message,
+        )],
+    })?;
+    let comparison_kind = if request.compare_source.is_some() {
+        if request.property_id.is_some() || request.compare_property_id.is_some() {
+            "models_and_interpretations"
+        } else {
+            "models"
+        }
+    } else if request.property_id.is_some() || request.compare_property_id.is_some() {
+        "interpretations"
+    } else {
+        "models"
+    };
+    Ok(DistinguishResponse {
+        schema_version: "1.0.0".to_string(),
+        request_id: request.request_id.clone(),
+        status: "ok".to_string(),
+        comparison_kind: comparison_kind.to_string(),
+        left_source_name: request.source_name.clone(),
+        right_source_name,
+        trace,
+    })
+}
+
+fn distinguish_compile_error(
+    request: &DistinguishRequest,
+    source: &str,
+    diagnostics: &[Diagnostic],
+) -> CheckErrorEnvelope {
+    CheckErrorEnvelope {
+        manifest: build_run_manifest(
+            request.request_id.clone(),
+            format!(
+                "run-{}",
+                stable_hash_hex(&request.request_id).replace("sha256:", "")
+            ),
+            stable_hash_hex(source),
+            "sha256:unknown".to_string(),
+            crate::engine::BackendKind::Explicit,
+            env!("CARGO_PKG_VERSION").to_string(),
+            None,
+        ),
+        status: crate::engine::ErrorStatus::Error,
+        assurance_level: crate::engine::AssuranceLevel::Incomplete,
+        diagnostics: diagnostics.to_vec(),
+    }
+}
+
 fn annotate_model_replay_targets(
     source_name: &str,
     property_id: &str,
@@ -2984,6 +3103,72 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     out
 }
 
+pub fn render_distinguish_json(response: &DistinguishResponse) -> String {
+    serde_json::to_string(response).expect("distinguish response should serialize")
+}
+
+pub fn render_distinguish_text(response: &DistinguishResponse) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("comparison_kind: {}\n", response.comparison_kind));
+    out.push_str(&format!("left_source: {}\n", response.left_source_name));
+    out.push_str(&format!("right_source: {}\n", response.right_source_name));
+    out.push_str(&format!("summary: {}\n", response.trace.summary));
+    out.push_str(&format!(
+        "divergence_kind: {}\n",
+        response.trace.divergence_kind
+    ));
+    out.push_str(&format!(
+        "divergence_index: {}\n",
+        response.trace.divergence_index
+    ));
+    if let Some(property_id) = &response.trace.left_property_id {
+        out.push_str(&format!("left_property_id: {property_id}\n"));
+    }
+    if let Some(property_id) = &response.trace.right_property_id {
+        out.push_str(&format!("right_property_id: {property_id}\n"));
+    }
+    out.push_str("checkpoints:\n");
+    for checkpoint in &response.trace.checkpoints {
+        out.push_str(&format!("- [{}] ", checkpoint.index));
+        if let Some(action_id) = &checkpoint.action_id {
+            out.push_str(&format!("action={action_id} "));
+        } else {
+            out.push_str("action=<initial> ");
+        }
+        if let (Some(left), Some(right)) = (
+            checkpoint.left_property_holds,
+            checkpoint.right_property_holds,
+        ) {
+            out.push_str(&format!("properties={left}/{right} "));
+        }
+        if let (Some(left), Some(right)) = (
+            checkpoint.left_guard_enabled,
+            checkpoint.right_guard_enabled,
+        ) {
+            out.push_str(&format!("guards={left}/{right} "));
+        }
+        if let Some(note) = &checkpoint.note {
+            out.push_str(&format!("note={note}"));
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "  left_state: {}\n",
+            serde_json::to_string(&checkpoint.left_state).expect("left state should serialize")
+        ));
+        out.push_str(&format!(
+            "  right_state: {}\n",
+            serde_json::to_string(&checkpoint.right_state).expect("right state should serialize")
+        ));
+    }
+    if !response.trace.review_hints.is_empty() {
+        out.push_str("review_hints:\n");
+        for hint in &response.trace.review_hints {
+            out.push_str(&format!("- {hint}\n"));
+        }
+    }
+    out
+}
+
 pub fn render_review_json(response: &ReviewResponse) -> String {
     format!(
         "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"selected_property_id\":{},\"assumptions\":[{}],\"ambiguities\":[{}],\"dead_actions\":[{}],\"candidate_disagreements\":[{}],\"property_reports\":[{}],\"review_summary\":{}}}",
@@ -3204,7 +3389,6 @@ pub fn render_review_text(response: &ReviewResponse) -> String {
     }
     out
 }
-
 fn render_review_context_json(context: &ExplainReviewContext) -> String {
     format!(
         "{{\"scenario_id\":{},\"scenario_expr\":{},\"scenario_match_before\":{},\"scenario_match_after\":{},\"property_scope_expr\":{},\"property_scope_match_before\":{},\"property_scope_match_after\":{},\"vacuous\":{}}}",
@@ -4984,6 +5168,51 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
         "vector_ids",
         "generated_files",
     )?;
+    Ok(())
+}
+
+pub fn validate_distinguish_request(request: &DistinguishRequest) -> Result<(), String> {
+    require_non_empty(&request.request_id, "request_id")?;
+    require_non_empty(&request.source_name, "source_name")?;
+    require_non_empty(&request.source, "source")?;
+    if request.compare_source.is_some() {
+        require_non_empty(
+            request
+                .compare_source_name
+                .as_deref()
+                .unwrap_or(&request.source_name),
+            "compare_source_name",
+        )?;
+        require_non_empty(
+            request.compare_source.as_deref().unwrap_or_default(),
+            "compare_source",
+        )?;
+    }
+    if let Some(max_depth) = request.max_depth {
+        if max_depth == 0 {
+            return Err("max_depth must be greater than zero".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_distinguish_response(response: &DistinguishResponse) -> Result<(), String> {
+    require_schema_version(&response.schema_version)?;
+    require_non_empty(&response.request_id, "request_id")?;
+    require_non_empty(&response.status, "status")?;
+    require_non_empty(&response.comparison_kind, "comparison_kind")?;
+    require_non_empty(&response.left_source_name, "left_source_name")?;
+    require_non_empty(&response.right_source_name, "right_source_name")?;
+    require_schema_version(&response.trace.schema_version)?;
+    require_non_empty(&response.trace.left_model_id, "trace.left_model_id")?;
+    require_non_empty(&response.trace.right_model_id, "trace.right_model_id")?;
+    require_non_empty(&response.trace.divergence_kind, "trace.divergence_kind")?;
+    require_non_empty(&response.trace.summary, "trace.summary")?;
+    for (expected_index, checkpoint) in response.trace.checkpoints.iter().enumerate() {
+        if checkpoint.index != expected_index {
+            return Err("trace.checkpoints indexes must be contiguous and zero-based".to_string());
+        }
+    }
     Ok(())
 }
 
