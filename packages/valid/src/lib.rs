@@ -15,6 +15,8 @@ pub mod contract;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod coverage;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
+pub mod distinguish;
+#[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod doc;
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]
 pub mod engine;

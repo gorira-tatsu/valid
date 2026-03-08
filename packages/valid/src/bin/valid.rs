@@ -9,15 +9,16 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 use serde_json::Value;
 use valid::{
     api::{
-        capabilities_response, check_source, explain_source, inspect_source, lint_source,
-        minimize_source, orchestrate_source, render_explain_json, render_explain_text,
-        render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
-        testgen_source, validate_capabilities_request, validate_capabilities_response,
-        validate_check_request, validate_explain_response, validate_inspect_request,
-        validate_inspect_response, validate_minimize_response, validate_orchestrate_request,
-        validate_orchestrate_response, validate_testgen_request, validate_testgen_response,
-        CapabilitiesRequest, CapabilitiesResponse, CheckRequest, InspectRequest, MinimizeRequest,
-        OrchestrateRequest, TestgenRequest,
+        capabilities_response, check_source, distinguish_source, explain_source, inspect_source,
+        lint_source, minimize_source, orchestrate_source, render_distinguish_json,
+        render_distinguish_text, render_explain_json, render_explain_text, render_inspect_json,
+        render_inspect_text, render_lint_json, render_lint_text, testgen_source,
+        validate_capabilities_request, validate_capabilities_response, validate_check_request,
+        validate_distinguish_request, validate_distinguish_response, validate_explain_response,
+        validate_inspect_request, validate_inspect_response, validate_minimize_response,
+        validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
+        validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
+        DistinguishRequest, InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, is_bundled_model_ref},
     cli::{
@@ -84,6 +85,7 @@ enum ValidCommand {
     Orchestrate(CommonModelArgs),
     #[command(alias = "generate-tests")]
     Testgen(TestgenArgs),
+    Distinguish(DistinguishArgs),
     Replay(ReplayArgs),
     Coverage(CommonModelArgs),
     Conformance(ConformanceArgs),
@@ -222,6 +224,21 @@ struct TestgenArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+struct DistinguishArgs {
+    path: String,
+    #[arg(long = "compare")]
+    compare_path: Option<String>,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long = "compare-property")]
+    compare_property: Option<String>,
+    #[arg(long = "max-depth")]
+    max_depth: Option<usize>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
 struct ReplayArgs {
     path: String,
     #[arg(long)]
@@ -313,6 +330,7 @@ fn main() {
             cmd_orchestrate_from_parsed(common_to_parsed(args))
         }
         Some(ValidCommand::Testgen(args)) => cmd_testgen_from_parsed(testgen_to_parsed(args)),
+        Some(ValidCommand::Distinguish(args)) => cmd_distinguish_from_args(args),
         Some(ValidCommand::Replay(args)) => cmd_replay_from_parsed(replay_to_parsed(args)),
         Some(ValidCommand::Coverage(args)) => cmd_coverage_from_parsed(common_to_parsed(args)),
         Some(ValidCommand::Conformance(args)) => {
@@ -329,7 +347,7 @@ fn main() {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|schema|batch> ...",
+                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|schema|batch> ...",
             );
         }
     }
@@ -512,6 +530,9 @@ fn cmd_trace_from_parsed(parsed: ParsedArgs) {
 }
 fn cmd_testgen_from_parsed(parsed: ParsedArgs) {
     cmd_testgen(args_from_parsed(&parsed));
+}
+fn cmd_distinguish_from_args(args: DistinguishArgs) {
+    cmd_distinguish(args);
 }
 fn cmd_replay_from_parsed(parsed: ParsedArgs) {
     cmd_replay(args_from_parsed(&parsed));
@@ -1468,6 +1489,55 @@ fn cmd_testgen(args: Vec<String>) {
         Err(error) => {
             diagnostics_exit("testgen", parsed.json, &error.diagnostics, None);
         }
+    }
+}
+
+fn cmd_distinguish(args: DistinguishArgs) {
+    let progress = ProgressReporter::new(
+        "distinguish",
+        progress_flag(args.json_progress.progress.as_deref()),
+    );
+    progress.start(None);
+    let source = read_source(&args.path, "distinguish", args.json_progress.json);
+    let compare_source_name = args
+        .compare_path
+        .clone()
+        .unwrap_or_else(|| args.path.clone());
+    let compare_source = args
+        .compare_path
+        .as_deref()
+        .map(|path| read_source(path, "distinguish", args.json_progress.json));
+    let request = DistinguishRequest {
+        request_id: "req-local-distinguish".to_string(),
+        source_name: args.path.clone(),
+        source,
+        compare_source_name: Some(compare_source_name),
+        compare_source,
+        property_id: args.property.clone(),
+        compare_property_id: args.compare_property.clone(),
+        max_depth: args.max_depth,
+    };
+    if let Err(message) = validate_distinguish_request(&request) {
+        message_exit("distinguish", args.json_progress.json, &message, None);
+    }
+    match distinguish_source(&request) {
+        Ok(response) => {
+            if let Err(message) = validate_distinguish_response(&response) {
+                message_exit("distinguish", args.json_progress.json, &message, None);
+            }
+            if args.json_progress.json {
+                println!("{}", render_distinguish_json(&response));
+            } else {
+                println!("{}", render_distinguish_text(&response));
+            }
+            progress.finish(ExitCode::Success);
+        }
+        Err(error) => diagnostics_exit(
+            "distinguish",
+            args.json_progress.json,
+            &error.diagnostics,
+            None,
+        ),
     }
 }
 

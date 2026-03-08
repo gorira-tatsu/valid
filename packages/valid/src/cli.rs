@@ -902,6 +902,18 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         supports_progress: true,
     },
     CommandSpec {
+        name: "distinguish",
+        aliases: &[],
+        description: "Find a trace that separates two models or two property interpretations.",
+        usage: "valid distinguish <model-file> [--compare=<other-model-file>] [--property=<id>] [--compare-property=<id>] [--max-depth=<n>] [--json] [--progress=json]",
+        positional: &[MODEL_FILE_ARG],
+        options: &[JSON_ARG, PROGRESS_ARG],
+        request_schema: None,
+        response_schema: None,
+        supports_json: true,
+        supports_progress: true,
+    },
+    CommandSpec {
         name: "replay",
         aliases: &[],
         description: "Replay a sequence of actions.",

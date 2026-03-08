@@ -15,7 +15,9 @@ to separate requirement problems, model problems, and implementation problems.
 3. Run `lint` or readiness-oriented checks before claiming that a failure is a
    semantic bug.
 4. Read one explanation path or traceback.
-5. Decide whether the likely repair surface is:
+5. If two candidate models or two property interpretations are competing, run
+   `distinguish` to find the shortest shared-prefix divergence.
+6. Decide whether the likely repair surface is:
    - requirement clarification
    - model revision
    - implementation/conformance follow-up
@@ -28,6 +30,7 @@ Registry mode:
 cargo valid inspect <model>
 cargo valid lint <model>
 cargo valid explain <model>
+cargo valid distinguish <left-model> --compare=<right-model>
 ```
 
 MCP mode:
@@ -38,6 +41,7 @@ MCP mode:
 3. `valid_inspect`
 4. `valid_lint`
 5. `valid_explain`
+6. `valid_distinguish` when comparing two candidate models
 
 ## What to look for
 
