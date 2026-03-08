@@ -11,7 +11,7 @@ use crate::{
         eval::eval_expr,
         transition::{apply_action_transition, build_initial_state},
     },
-    testgen::{TestVector, VectorActionStep},
+    testgen::{TestVector, VectorActionStep, VectorGrouping},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +182,7 @@ pub fn build_vector_from_actions(
         setup_action_ids: Vec::new(),
         business_action_ids,
         notes: vec!["generated from spec replay for implementation conformance".to_string()],
+        grouping: VectorGrouping::default(),
         replay_target: None,
     })
 }
@@ -419,7 +420,7 @@ mod tests {
     use crate::{
         frontend::compile_model,
         ir::{Path, Value},
-        testgen::{TestVector, VectorActionStep},
+        testgen::{TestVector, VectorActionStep, VectorGrouping},
     };
 
     use super::{
@@ -458,6 +459,7 @@ mod tests {
             setup_action_ids: Vec::new(),
             business_action_ids: vec!["Jump".to_string()],
             notes: Vec::new(),
+            grouping: VectorGrouping::default(),
             replay_target: None,
         }
     }

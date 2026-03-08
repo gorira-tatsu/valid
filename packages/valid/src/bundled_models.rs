@@ -301,8 +301,11 @@ pub fn testgen_bundled_model(
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
+                requirement_clusters: vector.grouping.requirement_clusters.clone(),
+                risk_clusters: vector.grouping.risk_clusters.clone(),
             })
             .collect(),
+        vector_groups: crate::api::summarize_testgen_groups(&vectors),
         generated_files,
     })
 }

@@ -1633,7 +1633,7 @@ fn cmd_testgen(args: Vec<String>) {
             }
             if parsed.json {
                 println!(
-                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"generated_files\":[{}]}}",
+                    "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"vector_ids\":[{}],\"vectors\":[{}],\"vector_groups\":[{}],\"generated_files\":[{}]}}",
                     response.schema_version,
                     response.request_id,
                     response.status,
@@ -1647,13 +1647,41 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\"}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
-                            vector.strategy
+                            vector.strategy,
+                            vector
+                                .requirement_clusters
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(","),
+                            vector
+                                .risk_clusters
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    response
+                        .vector_groups
+                        .iter()
+                        .map(|group| format!(
+                            "{{\"group_kind\":\"{}\",\"group_id\":\"{}\",\"vector_ids\":[{}]}}",
+                            group.group_kind,
+                            group.group_id,
+                            group
+                                .vector_ids
+                                .iter()
+                                .map(|s| format!("\"{}\"", s))
+                                .collect::<Vec<_>>()
+                                .join(",")
                         ))
                         .collect::<Vec<_>>()
                         .join(","),
@@ -1668,14 +1696,35 @@ fn cmd_testgen(args: Vec<String>) {
                 println!("generated {} vector(s)", response.vector_ids.len());
                 for vector in &response.vectors {
                     println!(
-                        "  {} run_id={} strictness={} derivation={} source={} strategy={}",
+                        "  {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={}",
                         vector.vector_id,
                         vector.run_id,
                         vector.strictness,
                         vector.derivation,
                         vector.source_kind,
-                        vector.strategy
+                        vector.strategy,
+                        if vector.requirement_clusters.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.requirement_clusters.join(",")
+                        },
+                        if vector.risk_clusters.is_empty() {
+                            "-".to_string()
+                        } else {
+                            vector.risk_clusters.join(",")
+                        }
                     );
+                }
+                if !response.vector_groups.is_empty() {
+                    println!("grouped output:");
+                    for group in &response.vector_groups {
+                        println!(
+                            "  {}:{} -> {}",
+                            group.group_kind,
+                            group.group_id,
+                            group.vector_ids.join(",")
+                        );
+                    }
                 }
                 for path in &response.generated_files {
                     println!("  {path}");

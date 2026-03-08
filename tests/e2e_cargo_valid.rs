@@ -1086,9 +1086,12 @@ fn cargo_valid_testgen_path_generates_tagged_files() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"generated_files\":["));
+    assert!(stdout.contains("\"vector_groups\":["));
+    assert!(stdout.contains("\"group_kind\":\"requirement\""));
     for path in extract_generated_files(&stdout) {
         let body = fs::read_to_string(&path).expect("generated file must exist");
         assert!(body.contains("path_tag:"));
+        assert!(body.contains("valid-requirement-clusters:"));
     }
     cleanup_generated_files(&stdout);
 }

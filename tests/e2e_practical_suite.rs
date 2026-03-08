@@ -185,14 +185,21 @@ fn practical_suite_coverage_and_path_testgen_surface_business_paths() {
     assert!(testgen.status.success());
     let testgen_stdout = String::from_utf8_lossy(&testgen.stdout);
     assert!(testgen_stdout.contains("\"generated_files\":["));
+    assert!(testgen_stdout.contains("\"vector_groups\":["));
+    assert!(testgen_stdout.contains("\"group_kind\":\"requirement\""));
     let mut saw_business_tag = false;
+    let mut saw_group_comment = false;
     for path in extract_generated_files(&testgen_stdout) {
         let body = fs::read_to_string(&path).expect("generated file must exist");
         assert!(body.contains("path_tag:"));
+        if body.contains("valid-requirement-clusters:") {
+            saw_group_comment = true;
+        }
         if body.contains("finance_path") || body.contains("risk_path") {
             saw_business_tag = true;
         }
     }
     assert!(saw_business_tag);
+    assert!(saw_group_comment);
     cleanup_generated_files(&testgen_stdout);
 }
