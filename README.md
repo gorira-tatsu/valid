@@ -104,10 +104,15 @@ benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
 
+Reusable CI workflow templates for `inspect`, `check`, `generate-tests`,
+`conformance`, and `doc --check` now live in
+[`.github/workflows/`](.github/workflows/) with usage notes under
+[docs/ci/README.md](docs/ci/README.md). The repository validates them against a
+fixture project in
+[`tests/fixtures/projects/ci_template_project/`](tests/fixtures/projects/ci_template_project/).
 Keep the registry file thin and move real model logic into `src/models/` or
 another explicit module tree. The recommended project layout is documented in
 [docs/project-organization.md](./docs/project-organization.md).
-
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
 

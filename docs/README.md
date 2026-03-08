@@ -2,6 +2,9 @@
 
 - [Install Guide](./install.md)
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
+- [CI Workflow Templates](./ci/README.md)
+  Reusable GitHub Actions patterns plus shell command equivalents for inspect,
+  check, testgen, conformance, and doc drift checks.
 - [AI Authoring Guide](./ai/authoring-guide.md)
   Short canonical entrypoint for LLM agents and AI-assisted authoring flows.
 - [AI Docs Curriculum](./ai/curriculum.md)
