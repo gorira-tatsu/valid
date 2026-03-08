@@ -2141,6 +2141,8 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
     let mut guard_true_counts = BTreeMap::new();
     let mut guard_false_counts = BTreeMap::new();
     let mut path_tag_counts = BTreeMap::new();
+    let mut covered_requirement_tags = BTreeSet::new();
+    let mut requirement_tag_counts = BTreeMap::new();
     let mut depth_histogram = BTreeMap::new();
     let mut repeated_state_count = 0usize;
 
@@ -2196,6 +2198,19 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         {
             *path_tag_counts.entry(tag).or_insert(0) += 1;
         }
+        for tag in machine_transition_path_for_action::<M>(&edge.action.action_id(), true)
+            .legacy_path_tags()
+            .into_iter()
+            .filter(|tag| {
+                !matches!(
+                    tag.as_str(),
+                    "guard_path" | "read_path" | "write_path" | "transition_path"
+                )
+            })
+        {
+            covered_requirement_tags.insert(tag.clone());
+            *requirement_tag_counts.entry(tag).or_insert(0) += 1;
+        }
         if edge.to_index <= edge.from_index {
             repeated_state_count += 1;
         }
@@ -2246,6 +2261,19 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         })
         .cloned()
         .collect::<BTreeSet<_>>();
+    let total_requirement_tags = machine_transition_ir::<M>()
+        .into_iter()
+        .filter(|transition| transition.role.as_str() == "business")
+        .flat_map(|transition| {
+            transition.path_tags.into_iter().filter(|tag| {
+                !matches!(
+                    *tag,
+                    "guard_path" | "read_path" | "write_path" | "transition_path"
+                )
+            })
+        })
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
     let guard_full_coverage_percent = if total_actions.is_empty() {
         100
     } else {
@@ -2261,6 +2289,11 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         100
     } else {
         ((covered_actions.intersection(&setup_actions).count() * 100) / setup_actions.len()) as u32
+    };
+    let requirement_tag_coverage_percent = if total_requirement_tags.is_empty() {
+        100
+    } else {
+        ((covered_requirement_tags.len() * 100) / total_requirement_tags.len()) as u32
     };
     let business_fully_covered_guards = business_actions
         .iter()
@@ -2305,6 +2338,7 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         transition_coverage_percent,
         business_transition_coverage_percent,
         setup_transition_coverage_percent,
+        requirement_tag_coverage_percent,
         decision_coverage_percent,
         guard_full_coverage_percent,
         business_guard_full_coverage_percent,
@@ -2316,6 +2350,9 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         action_roles,
         action_execution_counts,
         decision_counts,
+        covered_requirement_tags,
+        total_requirement_tags,
+        requirement_tag_counts,
         visited_state_count: exploration.nodes.len(),
         repeated_state_count,
         max_depth_observed: exploration

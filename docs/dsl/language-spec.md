@@ -137,7 +137,8 @@ with `..state`.
 fields in the flat guarded transition IR.
 
 Use `role = setup` for fixture/bootstrap transitions that prepare a state space
-but should not inflate business-action coverage.
+but should not inflate business-action coverage. Coverage reporting separates
+overall action coverage, business/setup coverage, and requirement-tag coverage.
 
 ### Step
 

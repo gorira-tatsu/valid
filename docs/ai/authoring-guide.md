@@ -187,6 +187,8 @@ For MCP-driven authoring:
   summary, scope, assumptions, critical properties, and scenario intent.
 - Mark bootstrap/fixture transitions with `role = setup` so coverage and
   generated vectors do not overstate business-flow coverage.
+- Add business-facing path tags early. Coverage treats specific path tags as
+  requirement-facing coverage, separate from setup/business action counts.
 - Prefer `scenarios:` over large fixture-only transition ladders when you need
   a focused deleted/error/recovered state slice.
 - Extract repeated guard/property conditions into `predicates:` so drift stays
