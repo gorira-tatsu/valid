@@ -158,6 +158,10 @@ path remains the compatibility path for non-Rust or process-boundary SUTs.
 Keep the registry file thin and move real model logic into `src/models/` or
 another explicit module tree. The recommended project layout is documented in
 [docs/project-organization.md](./docs/project-organization.md).
+That guide now also defines the pre-compose integration-model pattern:
+standalone models for local rules, dedicated integration models for shared-state
+cross-domain checks, and contract-only checks when the uncertainty is in the
+implementation boundary instead of model composition.
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
 

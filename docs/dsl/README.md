@@ -430,20 +430,24 @@ the repo. It exercises:
 - multiple invariants
 - graph / inspect / verify on a solver-ready registry
 
-`examples/saas_multi_tenant_registry.rs` is the smallest service-oriented grouped
-transition example. It exercises:
+`examples/saas_multi_tenant_registry.rs` is the smallest service-oriented
+integration-model example with grouped transitions. It exercises:
 
 - `on Action { ... }` grouped transitions
 - enterprise entitlement checks with `FiniteEnumSet`
 - multi-tenant isolation properties
+- explicit shared-state review across review, entitlement, and isolation
+  concerns without requiring full compose syntax
 - a safe model and an intentional regression model
 
-`examples/tenant_relation_registry.rs` is the smallest relation/map example. It
-exercises:
+`examples/tenant_relation_registry.rs` is the smallest relation/map
+integration-model example. It exercises:
 
 - `FiniteRelation<Member, Tenant>`
 - `FiniteMap<Tenant, Plan>`
 - combined guards using relation and map membership
+- shared-state checks that cross membership and plan domains in one focused
+  review surface
 - strict counterexample generation for cross-tenant regressions
 
 Run it with:

@@ -20,7 +20,8 @@ Current examples:
 - `fizzbuzz.rs`
   Small declarative arithmetic model using grouped `on Action { ... }`.
 - `tenant_relation_registry.rs`
-  Small declarative relation/map model for tenant membership and tenant plan checks.
+  Small declarative integration model that demonstrates the shared-state
+  pattern for tenant membership plus tenant plan checks.
 - `password_policy.rs`
   Small declarative string/password-policy model using `len` and
   `regex_match`. Its strong/weak split is a bounded teaching fixture, not the
@@ -30,7 +31,8 @@ Current examples:
 - `iam_transition_registry.rs`
   Small declarative policy model with explicit path tags.
 - `saas_multi_tenant_registry.rs`
-  Medium-sized grouped example for tenant isolation and shared-service access.
+  Medium-sized integration model that demonstrates the same shared-state
+  pattern for tenant isolation and shared-service access.
 
 Heavy or fixture-like inputs live elsewhere:
 
@@ -80,3 +82,12 @@ cargo valid verify failing-counter
 Generated tests are written under `generated-tests/`, not under `tests/`.
 Registry files should stay small enough that a reviewer can tell which models
 they export without reading pages of transition logic.
+
+The two tenant-oriented registries are the canonical integration-model
+examples. They show how to restate the minimum shared state for a cross-domain
+check before full compose semantics exist:
+
+- `tenant_relation_registry.rs`
+  membership plus plan checks over shared relation/map state
+- `saas_multi_tenant_registry.rs`
+  entitlement plus isolation review checks over one shared service slice
