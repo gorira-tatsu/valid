@@ -4,6 +4,9 @@
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
 - [AI Authoring Guide](./ai/authoring-guide.md)
   Short canonical entrypoint for LLM agents and AI-assisted authoring flows.
+- [AI Docs Curriculum](./ai/curriculum.md)
+  Learning-order and task-order map for authoring, review, migration, and
+  conformance workflows.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
@@ -23,7 +26,7 @@
 
 If you want to install or distribute the tool, start with the install guide.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide.
+authoring guide, then move through the AI docs curriculum.
 If you want to model and verify a system, start with the Rust DSL guide.
 If you want to understand the repository's design and scope, read the
 architecture note and the RDD.

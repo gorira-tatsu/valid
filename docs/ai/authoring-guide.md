@@ -8,9 +8,13 @@ what not to do, and which commands/tools to reach for next.
 
 Related documents:
 
+- [AI Docs Curriculum](./curriculum.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Common Pitfalls](./common-pitfalls.md)
 - [Examples Curriculum](./examples-curriculum.md)
+- [Review Workflow](./review-workflow.md)
+- [Migration Guide](./migration-guide.md)
+- [Conformance Workflow](./conformance-workflow.md)
 - [Rust DSL Guide](../dsl/README.md)
 - [DSL Language Spec](../dsl/language-spec.md)
 
@@ -157,7 +161,8 @@ cargo valid verify <model>
 For MCP-driven authoring:
 
 1. Call `valid_docs_index`
-2. Read this guide with `valid_docs_get`
+2. Read this guide and the [AI Docs Curriculum](./curriculum.md) with
+   `valid_docs_get`
 3. Read one example with `valid_example_get`
 4. Inspect or lint the concrete model
 5. Use `valid_suite_run` when the project declares critical properties or
@@ -196,7 +201,11 @@ For MCP-driven authoring:
 
 ## Next read
 
+- If you need the learning path or task map: [AI Docs Curriculum](./curriculum.md)
 - If you need a generation checklist: [Modeling Checklist](./modeling-checklist.md)
 - If you need anti-patterns: [Common Pitfalls](./common-pitfalls.md)
 - If you need examples in learning order: [Examples Curriculum](./examples-curriculum.md)
+- If you need review flow: [Review Workflow](./review-workflow.md)
+- If you need migration flow: [Migration Guide](./migration-guide.md)
+- If you need implementation handoff: [Conformance Workflow](./conformance-workflow.md)
 - If you need the full supported surface: [DSL Language Spec](../dsl/language-spec.md)

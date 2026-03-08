@@ -9,6 +9,7 @@ This is not the design spec. For requirements and architecture, see the RDD.
 Related documents:
 
 - [AI Authoring Guide](../ai/authoring-guide.md)
+- [AI Docs Curriculum](../ai/curriculum.md)
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)

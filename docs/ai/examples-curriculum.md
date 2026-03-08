@@ -3,6 +3,9 @@
 Use these examples in this order when teaching an LLM how to work with
 `valid`.
 
+If you need the higher-level document order first, start with
+[AI Docs Curriculum](./curriculum.md).
+
 ## 1. Counter basics
 
 - Source: `examples/valid_models.rs`
@@ -60,3 +63,21 @@ For each example:
 
 Do not jump into larger relation or string models before learning the counter
 and one declarative transition example.
+
+## Where each example fits
+
+- authoring:
+  start with counter basics, then one declarative transition example
+- review:
+  use the declarative registry examples so `inspect`, `graph`, and `explain`
+  stay readable
+- migration:
+  compare the counter registry shape with older step-heavy models
+- conformance:
+  prefer smaller registry examples before running implementation-facing flows
+
+## Next read
+
+- [Review Workflow](./review-workflow.md)
+- [Migration Guide](./migration-guide.md)
+- [Conformance Workflow](./conformance-workflow.md)
