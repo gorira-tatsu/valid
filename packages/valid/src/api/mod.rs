@@ -1,7 +1,7 @@
 //! Machine-readable API layer for AI and CLI integration.
 
-use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use tabled::{
     builder::Builder,
     settings::{style::Style, Alignment, Modify, Padding},
@@ -1693,12 +1693,10 @@ pub fn distinguish_source(
         .compare_source
         .clone()
         .unwrap_or_else(|| request.source.clone());
-    let left_model = frontend::compile_model(&request.source).map_err(|diagnostics| {
-        distinguish_compile_error(request, &request.source, &diagnostics)
-    })?;
-    let right_model = frontend::compile_model(&right_source).map_err(|diagnostics| {
-        distinguish_compile_error(request, &right_source, &diagnostics)
-    })?;
+    let left_model = frontend::compile_model(&request.source)
+        .map_err(|diagnostics| distinguish_compile_error(request, &request.source, &diagnostics))?;
+    let right_model = frontend::compile_model(&right_source)
+        .map_err(|diagnostics| distinguish_compile_error(request, &right_source, &diagnostics))?;
     let trace = find_distinguishing_trace(
         &left_model,
         &right_model,
@@ -2543,8 +2541,14 @@ pub fn render_distinguish_text(response: &DistinguishResponse) -> String {
     out.push_str(&format!("left_source: {}\n", response.left_source_name));
     out.push_str(&format!("right_source: {}\n", response.right_source_name));
     out.push_str(&format!("summary: {}\n", response.trace.summary));
-    out.push_str(&format!("divergence_kind: {}\n", response.trace.divergence_kind));
-    out.push_str(&format!("divergence_index: {}\n", response.trace.divergence_index));
+    out.push_str(&format!(
+        "divergence_kind: {}\n",
+        response.trace.divergence_kind
+    ));
+    out.push_str(&format!(
+        "divergence_index: {}\n",
+        response.trace.divergence_index
+    ));
     if let Some(property_id) = &response.trace.left_property_id {
         out.push_str(&format!("left_property_id: {property_id}\n"));
     }
@@ -2559,14 +2563,16 @@ pub fn render_distinguish_text(response: &DistinguishResponse) -> String {
         } else {
             out.push_str("action=<initial> ");
         }
-        if let (Some(left), Some(right)) =
-            (checkpoint.left_property_holds, checkpoint.right_property_holds)
-        {
+        if let (Some(left), Some(right)) = (
+            checkpoint.left_property_holds,
+            checkpoint.right_property_holds,
+        ) {
             out.push_str(&format!("properties={left}/{right} "));
         }
-        if let (Some(left), Some(right)) =
-            (checkpoint.left_guard_enabled, checkpoint.right_guard_enabled)
-        {
+        if let (Some(left), Some(right)) = (
+            checkpoint.left_guard_enabled,
+            checkpoint.right_guard_enabled,
+        ) {
             out.push_str(&format!("guards={left}/{right} "));
         }
         if let Some(note) = &checkpoint.note {

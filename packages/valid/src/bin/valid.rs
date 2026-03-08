@@ -11,15 +11,14 @@ use valid::{
     api::{
         capabilities_response, check_source, distinguish_source, explain_source, inspect_source,
         lint_source, minimize_source, orchestrate_source, render_distinguish_json,
-        render_distinguish_text, render_explain_json, render_explain_text,
-        render_inspect_json, render_inspect_text, render_lint_json, render_lint_text,
-        testgen_source, validate_capabilities_request, validate_capabilities_response,
-        validate_check_request, validate_distinguish_request, validate_distinguish_response,
-        validate_explain_response, validate_inspect_request, validate_inspect_response,
-        validate_minimize_response, validate_orchestrate_request, validate_orchestrate_response,
-        validate_testgen_request, validate_testgen_response, CapabilitiesRequest,
-        CapabilitiesResponse, CheckRequest, DistinguishRequest, InspectRequest, MinimizeRequest,
-        OrchestrateRequest, TestgenRequest,
+        render_distinguish_text, render_explain_json, render_explain_text, render_inspect_json,
+        render_inspect_text, render_lint_json, render_lint_text, testgen_source,
+        validate_capabilities_request, validate_capabilities_response, validate_check_request,
+        validate_distinguish_request, validate_distinguish_response, validate_explain_response,
+        validate_inspect_request, validate_inspect_response, validate_minimize_response,
+        validate_orchestrate_request, validate_orchestrate_response, validate_testgen_request,
+        validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
+        DistinguishRequest, InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     },
     bundled_models::{coverage_bundled_model, is_bundled_model_ref},
     cli::{
@@ -1452,10 +1451,16 @@ fn cmd_testgen(args: Vec<String>) {
 }
 
 fn cmd_distinguish(args: DistinguishArgs) {
-    let progress = ProgressReporter::new("distinguish", progress_flag(args.json_progress.progress.as_deref()));
+    let progress = ProgressReporter::new(
+        "distinguish",
+        progress_flag(args.json_progress.progress.as_deref()),
+    );
     progress.start(None);
     let source = read_source(&args.path, "distinguish", args.json_progress.json);
-    let compare_source_name = args.compare_path.clone().unwrap_or_else(|| args.path.clone());
+    let compare_source_name = args
+        .compare_path
+        .clone()
+        .unwrap_or_else(|| args.path.clone());
     let compare_source = args
         .compare_path
         .as_deref()
@@ -1485,7 +1490,12 @@ fn cmd_distinguish(args: DistinguishArgs) {
             }
             progress.finish(ExitCode::Success);
         }
-        Err(error) => diagnostics_exit("distinguish", args.json_progress.json, &error.diagnostics, None),
+        Err(error) => diagnostics_exit(
+            "distinguish",
+            args.json_progress.json,
+            &error.diagnostics,
+            None,
+        ),
     }
 }
 

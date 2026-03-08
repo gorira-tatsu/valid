@@ -65,7 +65,8 @@ pub fn find_distinguishing_trace(
     let right_property = resolve_property(right_model, options.right_property_id.as_deref())?;
 
     let left_initial = build_initial_state(left_model).map_err(|diagnostic| diagnostic.message)?;
-    let right_initial = build_initial_state(right_model).map_err(|diagnostic| diagnostic.message)?;
+    let right_initial =
+        build_initial_state(right_model).map_err(|diagnostic| diagnostic.message)?;
 
     let initial_checkpoint = DistinguishCheckpoint {
         index: 0,
@@ -112,12 +113,8 @@ pub fn find_distinguishing_trace(
         checkpoints: vec![initial_checkpoint],
         depth: 0,
     }]);
-    let mut visited = BTreeSet::from([(state_pair_key(
-        left_model,
-        &left_initial,
-        right_model,
-        &right_initial,
-    ))]);
+    let mut visited =
+        BTreeSet::from([(state_pair_key(left_model, &left_initial, right_model, &right_initial))]);
 
     while let Some(node) = queue.pop_front() {
         if node.depth >= options.max_depth {
@@ -125,8 +122,7 @@ pub fn find_distinguishing_trace(
         }
 
         for action_id in &action_ids {
-            let left_variants =
-                collect_variants(left_model, &node.left, action_id, left_property)?;
+            let left_variants = collect_variants(left_model, &node.left, action_id, left_property)?;
             let right_variants =
                 collect_variants(right_model, &node.right, action_id, right_property)?;
 
@@ -159,10 +155,18 @@ pub fn find_distinguishing_trace(
                     right_guard_enabled: Some(!right_variants.is_empty()),
                     left_property_holds: left_choice
                         .map(|variant| variant.property_holds)
-                        .unwrap_or(node.checkpoints.last().and_then(|item| item.left_property_holds)),
+                        .unwrap_or(
+                            node.checkpoints
+                                .last()
+                                .and_then(|item| item.left_property_holds),
+                        ),
                     right_property_holds: right_choice
                         .map(|variant| variant.property_holds)
-                        .unwrap_or(node.checkpoints.last().and_then(|item| item.right_property_holds)),
+                        .unwrap_or(
+                            node.checkpoints
+                                .last()
+                                .and_then(|item| item.right_property_holds),
+                        ),
                     left_path: left_choice.and_then(|variant| variant.path.clone()),
                     right_path: right_choice.and_then(|variant| variant.path.clone()),
                     note: Some(format!(
@@ -260,10 +264,7 @@ pub fn find_distinguishing_trace(
                         checkpoints,
                     ));
                 }
-                let pair_key = (
-                    key.clone(),
-                    key.clone(),
-                );
+                let pair_key = (key.clone(), key.clone());
                 if visited.insert(pair_key) {
                     let mut checkpoints = node.checkpoints.clone();
                     checkpoints.push(checkpoint);
@@ -309,7 +310,9 @@ fn collect_variants(
     }
     let mut variants = Vec::new();
     for action in matching {
-        match apply_action_transition(model, state, action).map_err(|diagnostic| diagnostic.message)? {
+        match apply_action_transition(model, state, action)
+            .map_err(|diagnostic| diagnostic.message)?
+        {
             Some(next_state) => {
                 let property_holds = eval_property(model, property, &next_state)?;
                 variants.push(VariantObservation {
@@ -369,8 +372,10 @@ fn review_hints(divergence_kind: &str) -> Vec<String> {
             "use the last checkpoint to review which field values changed the interpretation"
                 .to_string(),
         ],
-        _ => vec!["review the last checkpoint because it contains the first observable divergence"
-            .to_string()],
+        _ => vec![
+            "review the last checkpoint because it contains the first observable divergence"
+                .to_string(),
+        ],
     }
 }
 
@@ -393,7 +398,12 @@ fn resolve_property<'a>(
         .iter()
         .find(|property| property.property_id == property_id)
         .map(Some)
-        .ok_or_else(|| format!("unknown property `{property_id}` for model `{}`", model.model_id))
+        .ok_or_else(|| {
+            format!(
+                "unknown property `{property_id}` for model `{}`",
+                model.model_id
+            )
+        })
 }
 
 fn eval_property(
@@ -418,15 +428,18 @@ fn collect_action_ids(left_model: &ModelIr, right_model: &ModelIr) -> Vec<String
         .actions
         .iter()
         .map(|action| action.action_id.clone())
-        .chain(right_model.actions.iter().map(|action| action.action_id.clone()))
+        .chain(
+            right_model
+                .actions
+                .iter()
+                .map(|action| action.action_id.clone()),
+        )
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
 }
 
-fn keyed_variants(
-    variants: &[VariantObservation],
-) -> BTreeMap<String, &VariantObservation> {
+fn keyed_variants(variants: &[VariantObservation]) -> BTreeMap<String, &VariantObservation> {
     variants
         .iter()
         .map(|variant| (state_key(&variant.state), variant))
@@ -499,7 +512,10 @@ property P_STRICT:
         assert_eq!(trace.divergence_kind, "property_value");
         assert_eq!(trace.divergence_index, 2);
         assert_eq!(
-            trace.checkpoints.last().and_then(|item| item.action_id.as_deref()),
+            trace
+                .checkpoints
+                .last()
+                .and_then(|item| item.action_id.as_deref()),
             Some("Inc")
         );
         assert_eq!(
@@ -553,7 +569,10 @@ action Reset:
         let trace = compare(left, right, None, None);
         assert_eq!(trace.divergence_kind, "state_transition");
         assert_eq!(
-            trace.checkpoints.last().and_then(|item| item.action_id.as_deref()),
+            trace
+                .checkpoints
+                .last()
+                .and_then(|item| item.action_id.as_deref()),
             Some("Reset")
         );
     }
