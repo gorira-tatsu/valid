@@ -217,9 +217,10 @@ Pick the smallest review surface that answers the real question:
   interface or implementation conformance where the model itself is not the
   main uncertainty
 
-This pattern is intentionally usable before full compose semantics exist. The
-integration model is allowed to restate the minimum shared state and the
-cross-domain transitions needed for the review.
+This pattern still matters even after first-class composition support. Use the
+integration-model pattern when the review surface is small and explicit. Use
+the compose helper when you need deterministic shared-state synchronization
+across existing models without manually restating all transitions.
 
 ## What Goes Where
 

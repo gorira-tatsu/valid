@@ -621,19 +621,7 @@ pub struct OrchestrateResponse {
     pub aggregate_coverage: Option<CoverageReport>,
 }
 
-pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
-    if is_bundled_model_ref(&request.source_name) {
-        return inspect_bundled_model(&request.request_id, &request.source_name).map_err(
-            |message| {
-                vec![Diagnostic::new(
-                    crate::support::diagnostics::ErrorCode::SearchError,
-                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                    message,
-                )]
-            },
-        );
-    }
-    let model = frontend::compile_model(&request.source)?;
+pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
     let supports_solver = model.properties.iter().all(|property| {
         !matches!(
             property.kind,
@@ -672,9 +660,9 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 .collect(),
         }
     };
-    Ok(InspectResponse {
+    InspectResponse {
         schema_version: "1.0.0".to_string(),
-        request_id: request.request_id.clone(),
+        request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: model.model_id.clone(),
         machine_ir_ready: true,
@@ -814,7 +802,23 @@ pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<D
                 action_filter: property.action_filter.clone(),
             })
             .collect(),
-    })
+    }
+}
+
+pub fn inspect_source(request: &InspectRequest) -> Result<InspectResponse, Vec<Diagnostic>> {
+    if is_bundled_model_ref(&request.source_name) {
+        return inspect_bundled_model(&request.request_id, &request.source_name).map_err(
+            |message| {
+                vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )]
+            },
+        );
+    }
+    let model = frontend::compile_model(&request.source)?;
+    Ok(inspect_model(&request.request_id, &model))
 }
 
 pub fn compile_source(source: &str) -> Result<ModelIr, Vec<Diagnostic>> {
@@ -1007,6 +1011,75 @@ pub fn orchestrate_source(
     })
 }
 
+pub fn check_model(request: &CheckRequest, model: &ModelIr, source_hash: String) -> CheckOutcome {
+    let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
+    let snapshot = snapshot_model(model);
+    let property_id = request
+        .property_id
+        .clone()
+        .or_else(|| {
+            model
+                .properties
+                .first()
+                .map(|property| property.property_id.clone())
+        })
+        .unwrap_or_else(|| "P_SAFE".to_string());
+    let mut plan = RunPlan::default();
+    plan.manifest = build_run_manifest(
+        request.request_id.clone(),
+        format!(
+            "run-{}",
+            stable_hash_hex(&(request.request_id.clone() + &property_id)).replace("sha256:", "")
+        ),
+        source_hash,
+        snapshot.contract_hash,
+        backend_kind_for_config(&adapter),
+        backend_version_for_config(&adapter),
+        request.seed,
+    );
+    plan.property_selection = PropertySelection::ExactlyOne(property_id);
+    plan.scenario_selection = request.scenario_id.clone();
+    let selected_property = model
+        .properties
+        .iter()
+        .find(|property| {
+            property.property_id
+                == *match &plan.property_selection {
+                    PropertySelection::ExactlyOne(id) => id,
+                }
+        })
+        .expect("selected property exists");
+    let requires_explicit = matches!(
+        selected_property.kind,
+        PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
+    ) || request.scenario_id.is_some();
+    if requires_explicit && !matches!(adapter, AdapterConfig::Explicit) {
+        return CheckOutcome::Errored(CheckErrorEnvelope {
+            manifest: plan.manifest.clone(),
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                "selected property/scenario currently requires backend=explicit",
+            )],
+        });
+    }
+    match run_with_adapter(model, &plan, &adapter) {
+        Ok(normalized) => normalized.outcome,
+        Err(message) => CheckOutcome::Errored(CheckErrorEnvelope {
+            manifest: plan.manifest.clone(),
+            status: crate::engine::ErrorStatus::Error,
+            assurance_level: crate::engine::AssuranceLevel::Incomplete,
+            diagnostics: vec![Diagnostic::new(
+                crate::support::diagnostics::ErrorCode::SearchError,
+                crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                message,
+            )],
+        }),
+    }
+}
+
 pub fn check_source(request: &CheckRequest) -> CheckOutcome {
     if is_bundled_model_ref(&request.source_name) {
         let adapter = match backend_config_from_request(request) {
@@ -1067,76 +1140,8 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
         });
     }
     let source_hash = stable_hash_hex(&request.source);
-    let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
     match frontend::compile_model(&request.source) {
-        Ok(model) => {
-            let snapshot = snapshot_model(&model);
-            let property_id = request
-                .property_id
-                .clone()
-                .or_else(|| {
-                    model
-                        .properties
-                        .first()
-                        .map(|property| property.property_id.clone())
-                })
-                .unwrap_or_else(|| "P_SAFE".to_string());
-            let mut plan = RunPlan::default();
-            plan.manifest = build_run_manifest(
-                request.request_id.clone(),
-                format!(
-                    "run-{}",
-                    stable_hash_hex(&(request.request_id.clone() + &property_id))
-                        .replace("sha256:", "")
-                ),
-                source_hash,
-                snapshot.contract_hash,
-                backend_kind_for_config(&adapter),
-                backend_version_for_config(&adapter),
-                request.seed,
-            );
-            plan.property_selection = PropertySelection::ExactlyOne(property_id);
-            plan.scenario_selection = request.scenario_id.clone();
-            let selected_property = model
-                .properties
-                .iter()
-                .find(|property| {
-                    property.property_id
-                        == *match &plan.property_selection {
-                            PropertySelection::ExactlyOne(id) => id,
-                        }
-                })
-                .expect("selected property exists");
-            let requires_explicit = matches!(
-                selected_property.kind,
-                PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
-            ) || request.scenario_id.is_some();
-            if requires_explicit && !matches!(adapter, AdapterConfig::Explicit) {
-                return CheckOutcome::Errored(CheckErrorEnvelope {
-                    manifest: plan.manifest.clone(),
-                    status: crate::engine::ErrorStatus::Error,
-                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                    diagnostics: vec![Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        "selected property/scenario currently requires backend=explicit",
-                    )],
-                });
-            }
-            match run_with_adapter(&model, &plan, &adapter) {
-                Ok(normalized) => normalized.outcome,
-                Err(message) => CheckOutcome::Errored(CheckErrorEnvelope {
-                    manifest: plan.manifest.clone(),
-                    status: crate::engine::ErrorStatus::Error,
-                    assurance_level: crate::engine::AssuranceLevel::Incomplete,
-                    diagnostics: vec![Diagnostic::new(
-                        crate::support::diagnostics::ErrorCode::SearchError,
-                        crate::support::diagnostics::DiagnosticSegment::EngineSearch,
-                        message,
-                    )],
-                }),
-            }
-        }
+        Ok(model) => check_model(request, &model, source_hash),
         Err(diagnostics) => CheckOutcome::Errored(CheckErrorEnvelope {
             manifest: build_run_manifest(
                 request.request_id.clone(),
@@ -1146,8 +1151,8 @@ pub fn check_source(request: &CheckRequest) -> CheckOutcome {
                 ),
                 source_hash,
                 "sha256:unknown".to_string(),
-                backend_kind_for_config(&adapter),
-                backend_version_for_config(&adapter),
+                backend_kind_for_config(&AdapterConfig::Explicit),
+                backend_version_for_config(&AdapterConfig::Explicit),
                 request.seed,
             ),
             status: crate::engine::ErrorStatus::Error,

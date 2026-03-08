@@ -167,6 +167,9 @@ Useful expressions:
 - for cross-domain reviews, use lint guidance to decide whether a big model
   should stay standalone, split into smaller standalone models, or move the
   shared-state question into a dedicated integration model
+- when two existing models already capture the right local behavior, prefer the
+  compose helper over cloning both into a new monolith; synced fields stay
+  shared, while non-synced fields and action/property ids are namespaced
 - declarative models with unsupported expressions will be flagged by readiness
   and may fail solver-backed verification
 
