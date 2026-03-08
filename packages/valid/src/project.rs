@@ -15,6 +15,24 @@ pub struct RerunRecommendations {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct CoverageGates {
+    pub minimum_overall_coverage_percent: Option<u32>,
+    pub minimum_business_coverage_percent: Option<u32>,
+    pub minimum_setup_coverage_percent: Option<u32>,
+    pub minimum_requirement_coverage_percent: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct VerificationPolicy {
+    pub suite_models: Vec<String>,
+    pub critical_properties: BTreeMap<String, Vec<String>>,
+    pub property_suites: BTreeMap<String, Vec<PropertySuiteEntry>>,
+    pub preferred_backends: Vec<String>,
+    pub default_suite: Option<String>,
+    pub coverage_gates: CoverageGates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct ProjectConfig {
     pub registry: Option<String>,
     pub default_backend: Option<String>,
@@ -24,6 +42,9 @@ pub struct ProjectConfig {
     pub suite_models: Vec<String>,
     pub critical_properties: BTreeMap<String, Vec<String>>,
     pub property_suites: BTreeMap<String, Vec<PropertySuiteEntry>>,
+    pub preferred_backends: Vec<String>,
+    pub default_suite: Option<String>,
+    pub coverage_gates: CoverageGates,
     pub benchmark_models: Vec<String>,
     pub benchmark_repeats: Option<usize>,
     pub generated_tests_dir: Option<String>,
@@ -113,9 +134,20 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
     Ok(config)
 }
 
+pub fn verification_policy(config: &ProjectConfig) -> VerificationPolicy {
+    VerificationPolicy {
+        suite_models: config.suite_models.clone(),
+        critical_properties: config.critical_properties.clone(),
+        property_suites: config.property_suites.clone(),
+        preferred_backends: config.preferred_backends.clone(),
+        default_suite: config.default_suite.clone(),
+        coverage_gates: config.coverage_gates.clone(),
+    }
+}
+
 pub fn render_project_config_template(registry: &str) -> String {
     format!(
-        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
+        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\npreferred_backends = [\"explicit\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 80\nminimum_business_coverage_percent = 75\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 70\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
         registry
     )
 }
@@ -205,6 +237,21 @@ fn assign_top_level_key(
         }
         "default_solver_args" => config.default_solver_args = parse_string_array(value, line)?,
         "suite_models" => config.suite_models = parse_string_array(value, line)?,
+        "preferred_backends" => config.preferred_backends = parse_string_array(value, line)?,
+        "default_suite" => config.default_suite = Some(parse_string(value, line)?),
+        "minimum_overall_coverage_percent" => {
+            config.coverage_gates.minimum_overall_coverage_percent = Some(parse_u32(value, line)?)
+        }
+        "minimum_business_coverage_percent" => {
+            config.coverage_gates.minimum_business_coverage_percent = Some(parse_u32(value, line)?)
+        }
+        "minimum_setup_coverage_percent" => {
+            config.coverage_gates.minimum_setup_coverage_percent = Some(parse_u32(value, line)?)
+        }
+        "minimum_requirement_coverage_percent" => {
+            config.coverage_gates.minimum_requirement_coverage_percent =
+                Some(parse_u32(value, line)?)
+        }
         "benchmark_models" => config.benchmark_models = parse_string_array(value, line)?,
         "benchmark_repeats" => config.benchmark_repeats = Some(parse_usize(value, line)?),
         "generated_tests_dir" => config.generated_tests_dir = Some(parse_string(value, line)?),
@@ -352,7 +399,8 @@ mod tests {
 
     use super::{
         parse_project_config, render_project_config_template, render_registry_source_template,
-        rerun_recommendations, ProjectConfig, PropertySuiteEntry, RerunRecommendations,
+        rerun_recommendations, verification_policy, CoverageGates, ProjectConfig,
+        PropertySuiteEntry, RerunRecommendations, VerificationPolicy,
     };
 
     #[test]
@@ -365,6 +413,12 @@ default_property = "P_SAFE"
 default_solver_executable = "cvc5"
 default_solver_args = ["--lang", "smt2"]
 suite_models = ["counter", "failing-counter"]
+preferred_backends = ["explicit", "smt-cvc5"]
+default_suite = "smoke"
+minimum_overall_coverage_percent = 90
+minimum_business_coverage_percent = 80
+minimum_setup_coverage_percent = 100
+minimum_requirement_coverage_percent = 70
 
 [critical_properties]
 counter = ["P_SAFE", "P_STRONG"]
@@ -392,6 +446,14 @@ default_graph_format = "mermaid"
                 default_solver_executable: Some("cvc5".to_string()),
                 default_solver_args: vec!["--lang".to_string(), "smt2".to_string()],
                 suite_models: vec!["counter".to_string(), "failing-counter".to_string()],
+                preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+                default_suite: Some("smoke".to_string()),
+                coverage_gates: CoverageGates {
+                    minimum_overall_coverage_percent: Some(90),
+                    minimum_business_coverage_percent: Some(80),
+                    minimum_setup_coverage_percent: Some(100),
+                    minimum_requirement_coverage_percent: Some(70),
+                },
                 critical_properties: BTreeMap::from([(
                     "counter".to_string(),
                     vec!["P_SAFE".to_string(), "P_STRONG".to_string()],
@@ -423,6 +485,9 @@ default_graph_format = "mermaid"
         assert!(body.contains("generated_tests_dir = \"generated-tests\""));
         assert!(body.contains("benchmark_repeats = 3"));
         assert!(body.contains("benchmark_baseline_dir = \"benchmarks/baselines\""));
+        assert!(body.contains("preferred_backends = [\"explicit\"]"));
+        assert!(body.contains("default_suite = \"smoke\""));
+        assert!(body.contains("minimum_overall_coverage_percent = 80"));
         assert!(body.contains("[critical_properties]"));
         assert!(body.contains("[property_suites.smoke]"));
     }
@@ -455,6 +520,58 @@ default_graph_format = "mermaid"
             RerunRecommendations {
                 affected_critical_properties: vec!["P_SAFE".to_string()],
                 affected_property_suites: vec!["smoke".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn builds_verification_policy_view() {
+        let config = ProjectConfig {
+            suite_models: vec!["counter".to_string()],
+            critical_properties: BTreeMap::from([(
+                "counter".to_string(),
+                vec!["P_SAFE".to_string()],
+            )]),
+            property_suites: BTreeMap::from([(
+                "smoke".to_string(),
+                vec![PropertySuiteEntry {
+                    model: "counter".to_string(),
+                    properties: vec!["P_SAFE".to_string()],
+                }],
+            )]),
+            preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+            default_suite: Some("smoke".to_string()),
+            coverage_gates: CoverageGates {
+                minimum_overall_coverage_percent: Some(80),
+                minimum_business_coverage_percent: Some(70),
+                minimum_setup_coverage_percent: Some(100),
+                minimum_requirement_coverage_percent: Some(60),
+            },
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            verification_policy(&config),
+            VerificationPolicy {
+                suite_models: vec!["counter".to_string()],
+                critical_properties: BTreeMap::from([(
+                    "counter".to_string(),
+                    vec!["P_SAFE".to_string()],
+                )]),
+                property_suites: BTreeMap::from([(
+                    "smoke".to_string(),
+                    vec![PropertySuiteEntry {
+                        model: "counter".to_string(),
+                        properties: vec!["P_SAFE".to_string()],
+                    }],
+                )]),
+                preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+                default_suite: Some("smoke".to_string()),
+                coverage_gates: CoverageGates {
+                    minimum_overall_coverage_percent: Some(80),
+                    minimum_business_coverage_percent: Some(70),
+                    minimum_setup_coverage_percent: Some(100),
+                    minimum_requirement_coverage_percent: Some(60),
+                },
             }
         );
     }

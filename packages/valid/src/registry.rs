@@ -35,7 +35,7 @@ use crate::{
         collect_machine_coverage, explain_machine, lower_machine_model, machine_capability_report,
         property_ids, replay_machine_actions, ActionSpec, StateSpec, VerifiedMachine,
     },
-    project::{load_project_config, rerun_recommendations},
+    project::{load_project_config, rerun_recommendations, verification_policy},
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
@@ -191,6 +191,7 @@ fn cmd_list(models: &[RegisteredModel], args: Vec<String>) {
         if let Some(config) = registry_project_config() {
             body["critical_properties"] = serde_json::json!(config.critical_properties);
             body["property_suites"] = serde_json::json!(config.property_suites);
+            body["verification_policy"] = serde_json::json!(verification_policy(&config));
         }
         println!(
             "{}",

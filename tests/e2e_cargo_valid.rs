@@ -1274,6 +1274,70 @@ fn cargo_valid_suite_can_run_named_property_suite_from_valid_toml() {
 }
 
 #[test]
+fn cargo_valid_list_exposes_verification_policy_from_valid_toml() {
+    let _guard = cargo_guard();
+    let project_dir = unique_temp_project_dir("valid-list-policy");
+    write_multi_property_fixture(&project_dir, "policy-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\nsuite_models = [\"policy-model\"]\npreferred_backends = [\"explicit\", \"smt-cvc5\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 85\nminimum_business_coverage_percent = 70\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 65\n\n[critical_properties]\npolicy-model = [\"P_READY_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = [{ model = \"policy-model\", properties = [\"P_RETRIES_BOUNDED\"] }]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("list")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid list should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"verification_policy\""));
+    assert!(stdout.contains("\"default_suite\":\"smoke\""));
+    assert!(stdout.contains("\"preferred_backends\":[\"explicit\",\"smt-cvc5\"]"));
+    assert!(stdout.contains("\"minimum_overall_coverage_percent\":85"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cargo_valid_suite_uses_default_suite_from_project_policy() {
+    let _guard = cargo_guard();
+    let project_dir = unique_temp_project_dir("valid-default-suite");
+    write_multi_property_fixture(&project_dir, "policy-default-suite-model");
+    fs::write(
+        project_dir.join("valid.toml"),
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\ndefault_suite = \"smoke\"\n\n[property_suites.smoke]\nentries = [{ model = \"policy-default-suite-model\", properties = [\"P_RETRIES_BOUNDED\"] }]\n",
+    )
+    .expect("valid.toml");
+
+    let output = Command::new(cargo_valid_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("suite")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid suite should honor default suite");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"selection_mode\":\"named_suite\""));
+    assert!(stdout.contains("\"suite_name\":\"smoke\""));
+    assert!(stdout.contains("\"property_id\":\"P_RETRIES_BOUNDED\""));
+    assert!(stdout.contains("\"verification_policy\""));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
 fn cargo_valid_benchmark_uses_project_config_targets() {
     let _guard = cargo_guard();
     let output = Command::new(cargo_valid_path())

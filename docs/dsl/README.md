@@ -443,6 +443,12 @@ Project-level verification targeting can also live in `valid.toml`:
 ```toml
 registry = "examples/valid_models.rs"
 suite_models = ["refund-control", "approval-model"]
+preferred_backends = ["explicit", "smt-cvc5"]
+default_suite = "smoke"
+minimum_overall_coverage_percent = 80
+minimum_business_coverage_percent = 75
+minimum_setup_coverage_percent = 100
+minimum_requirement_coverage_percent = 70
 
 [critical_properties]
 refund-control = ["P_EXPORT_REQUIRES_ENTERPRISE"]
@@ -453,6 +459,17 @@ entries = [
   { model = "refund-control", properties = ["P_EXPORT_REQUIRES_ENTERPRISE"] }
 ]
 ```
+
+This turns `valid.toml` into a project-level verification policy file, not only
+a registry pointer. Clients can read the effective policy through:
+
+- `cargo valid list --json`
+- registry `list --json`
+- MCP `valid_list_models`
+
+If `default_suite` is set, `cargo valid suite --json` and MCP
+`valid_suite_run` will use that suite when no explicit `--suite` or
+`suite_name` is given.
 
 ## CLI Workflow
 

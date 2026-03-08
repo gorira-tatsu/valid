@@ -83,6 +83,12 @@ default_property = ""
 default_solver_executable = ""
 default_solver_args = []
 suite_models = []
+preferred_backends = ["explicit"]
+default_suite = "smoke"
+minimum_overall_coverage_percent = 80
+minimum_business_coverage_percent = 75
+minimum_setup_coverage_percent = 100
+minimum_requirement_coverage_percent = 70
 
 [critical_properties]
 # approval-model = ["P_APPROVAL_IS_BOOLEAN"]
@@ -99,6 +105,23 @@ benchmark_baseline_dir = "benchmarks/baselines"
 benchmark_regression_threshold_percent = 25
 default_graph_format = "mermaid"
 ```
+
+Treat `valid.toml` as the single source of truth for project verification
+policy. In addition to `critical_properties` and `property_suites`, you can
+declare:
+
+- `preferred_backends`
+- `default_suite`
+- coverage gates such as
+  `minimum_overall_coverage_percent`,
+  `minimum_business_coverage_percent`,
+  `minimum_setup_coverage_percent`, and
+  `minimum_requirement_coverage_percent`
+
+`cargo valid list --json`, registry `list --json`, and MCP `valid_list_models`
+now expose the same `verification_policy` object, and `cargo valid suite
+--json` / `valid_suite_run` honor `default_suite` when no explicit suite is
+selected.
 
 This repository already includes a `valid.toml`, so from the repo root the
 default `cargo valid` workflow points at the smallest step-first example:
