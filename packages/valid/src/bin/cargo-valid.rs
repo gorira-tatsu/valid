@@ -39,7 +39,11 @@ use valid::{
         resolve_external_target as resolve_external_registry_target, ExternalTarget,
         ExternalTargetKind, ExternalTargetOptions,
     },
-    project::{render_project_config_template, render_registry_source_template, ProjectConfig},
+    project::{
+        render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
+        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
+        render_project_config_template, render_registry_source_template, ProjectConfig,
+    },
     reporter::{
         render_model_dot_with_view, render_model_mermaid_with_view, render_model_svg_with_view,
         GraphView,
@@ -2120,6 +2124,110 @@ fn cmd_init(parsed: &CliArgs) -> ! {
             )
         });
     }
+    let artifacts_dir = root.join("artifacts");
+    fs::create_dir_all(&artifacts_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", artifacts_dir.display()),
+            None,
+        )
+    });
+    let artifacts_gitkeep = artifacts_dir.join(".gitkeep");
+    if !artifacts_gitkeep.exists() {
+        fs::write(&artifacts_gitkeep, "").unwrap_or_else(|err| {
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", artifacts_gitkeep.display()),
+                None,
+            )
+        });
+    }
+    let benchmark_baseline_dir = root.join("benchmarks").join("baselines");
+    fs::create_dir_all(&benchmark_baseline_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!(
+                "failed to create `{}`: {err}",
+                benchmark_baseline_dir.display()
+            ),
+            None,
+        )
+    });
+    let baseline_gitkeep = benchmark_baseline_dir.join(".gitkeep");
+    if !baseline_gitkeep.exists() {
+        fs::write(&baseline_gitkeep, "").unwrap_or_else(|err| {
+            message_exit(
+                "init",
+                parsed.json,
+                &format!("failed to write `{}`: {err}", baseline_gitkeep.display()),
+                None,
+            )
+        });
+    }
+    let mcp_dir = root.join(".mcp");
+    fs::create_dir_all(&mcp_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", mcp_dir.display()),
+            None,
+        )
+    });
+    let codex_config = mcp_dir.join("codex.toml");
+    fs::write(&codex_config, render_bootstrap_codex_config()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", codex_config.display()),
+            None,
+        )
+    });
+    let claude_code_config = mcp_dir.join("claude-code.json");
+    fs::write(&claude_code_config, render_bootstrap_claude_code_config()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", claude_code_config.display()),
+            None,
+        )
+    });
+    let claude_desktop_config = mcp_dir.join("claude-desktop.json");
+    fs::write(
+        &claude_desktop_config,
+        render_bootstrap_claude_desktop_config(),
+    )
+    .unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!(
+                "failed to write `{}`: {err}",
+                claude_desktop_config.display()
+            ),
+            None,
+        )
+    });
+    let docs_ai_dir = root.join("docs").join("ai");
+    fs::create_dir_all(&docs_ai_dir).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to create `{}`: {err}", docs_ai_dir.display()),
+            None,
+        )
+    });
+    let bootstrap_readme = docs_ai_dir.join("bootstrap.md");
+    fs::write(&bootstrap_readme, render_bootstrap_ai_readme()).unwrap_or_else(|err| {
+        message_exit(
+            "init",
+            parsed.json,
+            &format!("failed to write `{}`: {err}", bootstrap_readme.display()),
+            None,
+        )
+    });
     fs::write(&config_path, body).unwrap_or_else(|err| {
         message_exit(
             "init",
@@ -2130,17 +2238,35 @@ fn cmd_init(parsed: &CliArgs) -> ! {
     });
     if parsed.json {
         println!(
-            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\"}}",
+            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\",\"artifacts_dir\":\"{}\",\"benchmarks_baseline_dir\":\"{}\",\"mcp_configs\":[\"{}\",\"{}\",\"{}\"],\"ai_bootstrap_guide\":\"{}\"}}",
             config_path.display(),
             registry,
             registry_path.display(),
             generated_dir.display(),
+            artifacts_dir.display(),
+            benchmark_baseline_dir.display(),
+            codex_config.display(),
+            claude_code_config.display(),
+            claude_desktop_config.display(),
+            bootstrap_readme.display(),
         );
     } else {
         println!("created: {}", config_path.display());
         println!("registry: {registry}");
         println!("scaffolded_registry: {}", registry_path.display());
         println!("generated_tests_dir: {}", generated_dir.display());
+        println!("artifacts_dir: {}", artifacts_dir.display());
+        println!(
+            "benchmarks_baseline_dir: {}",
+            benchmark_baseline_dir.display()
+        );
+        println!("mcp_config_codex: {}", codex_config.display());
+        println!("mcp_config_claude_code: {}", claude_code_config.display());
+        println!(
+            "mcp_config_claude_desktop: {}",
+            claude_desktop_config.display()
+        );
+        println!("ai_bootstrap_guide: {}", bootstrap_readme.display());
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());

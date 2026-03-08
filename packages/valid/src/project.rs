@@ -177,6 +177,82 @@ fn main() {
     .to_string()
 }
 
+pub fn render_bootstrap_codex_config() -> String {
+    r#"[mcp_servers.valid_registry]
+command = "valid"
+args = ["mcp", "--project", "."]
+"#
+    .to_string()
+}
+
+pub fn render_bootstrap_claude_code_config() -> String {
+    r#"{
+  "mcpServers": {
+    "valid-registry": {
+      "command": "valid",
+      "args": [
+        "mcp",
+        "--project",
+        "."
+      ]
+    }
+  }
+}
+"#
+    .to_string()
+}
+
+pub fn render_bootstrap_claude_desktop_config() -> String {
+    r#"{
+  "mcpServers": {
+    "valid-registry": {
+      "command": "valid",
+      "args": [
+        "mcp",
+        "--project",
+        "."
+      ],
+      "env": {}
+    }
+  }
+}
+"#
+    .to_string()
+}
+
+pub fn render_bootstrap_ai_readme() -> String {
+    r#"# AI Bootstrap
+
+This project was initialized with `cargo valid init`.
+
+Recommended first steps:
+
+1. Run `cargo valid models` to confirm the registry loads.
+2. Run `cargo valid inspect approval-model`.
+3. Review `valid.toml` and set:
+   - `suite_models`
+   - `critical_properties`
+   - `property_suites`
+4. Copy one of the MCP snippets from `.mcp/` into your client config.
+
+Generated bootstrap files:
+
+- `.mcp/codex.toml`
+- `.mcp/claude-code.json`
+- `.mcp/claude-desktop.json`
+
+These snippets keep the project-first path canonical by using:
+
+```text
+valid mcp --project .
+```
+
+That avoids hard-coded local build paths and lets the MCP server discover
+`valid.toml` and the registry target from the current project.
+"#
+    .to_string()
+}
+
 fn parse_section_header(input: &str, line: usize) -> Result<ConfigSection, String> {
     let body = &input[1..input.len() - 1];
     match body.trim() {
@@ -351,8 +427,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        parse_project_config, render_project_config_template, render_registry_source_template,
-        rerun_recommendations, ProjectConfig, PropertySuiteEntry, RerunRecommendations,
+        parse_project_config, render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
+        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
+        render_project_config_template, render_registry_source_template, rerun_recommendations,
+        ProjectConfig, PropertySuiteEntry, RerunRecommendations,
     };
 
     #[test]
@@ -432,6 +510,21 @@ default_graph_format = "mermaid"
         let body = render_registry_source_template();
         assert!(body.contains("valid_model!"));
         assert!(body.contains("\"approval-model\""));
+    }
+
+    #[test]
+    fn renders_project_bootstrap_templates() {
+        let codex = render_bootstrap_codex_config();
+        let claude_code = render_bootstrap_claude_code_config();
+        let claude_desktop = render_bootstrap_claude_desktop_config();
+        let guide = render_bootstrap_ai_readme();
+        assert!(codex.contains("command = \"valid\""));
+        assert!(codex.contains("\"mcp\""));
+        assert!(codex.contains("--project"));
+        assert!(claude_code.contains("\"valid-registry\""));
+        assert!(claude_desktop.contains("\"env\": {}"));
+        assert!(guide.contains(".mcp/codex.toml"));
+        assert!(guide.contains("critical_properties"));
     }
 
     #[test]
