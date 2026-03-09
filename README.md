@@ -29,6 +29,11 @@ Installation and packaging guidance lives in
 in [docs/architecture.md](./docs/architecture.md).
 Artifact inventory and run-history guidance lives in
 [docs/artifacts.md](./docs/artifacts.md).
+Test-spec and handoff guidance lives in
+[docs/testgen-and-handoff.md](./docs/testgen-and-handoff.md),
+[docs/testgen-strategies.md](./docs/testgen-strategies.md), and
+[docs/graph-and-review.md](./docs/graph-and-review.md). The current supported
+composition story lives in [docs/composition.md](./docs/composition.md).
 
 The product story is now:
 
@@ -36,6 +41,17 @@ The product story is now:
 - free-form `step` models are still supported, but may remain explicit-only
 - `inspect` reports a capability matrix so you can see which path a model can use
 - `lint` / `readiness` now reports both capability blockers and maintainability guidance
+
+## What's Stable Today
+
+- `valid init` for project-first bootstrap
+- scenarios, predicates, covers, and transition properties
+- project policy via `critical_properties` and `property_suites`
+- language-agnostic test vectors with observation-first metadata
+- handoff summaries that point at recommended generated vectors
+- dynamic shell completion plus `completion install`
+- failure, deadlock, and SCC-oriented graph views
+- artifact indexing and run-history surfaces
 
 ## What It Can Do
 
@@ -217,6 +233,18 @@ cargo valid suite --critical
 cargo valid suite --suite=smoke
 cargo valid list --json
 ```
+
+For implementation-facing review, use `handoff` for the brief and `testgen`
+for the full artifacts:
+
+```sh
+cargo valid handoff counter --json
+cargo valid testgen counter --json
+```
+
+The current guidance for that workflow lives in
+[docs/testgen-and-handoff.md](./docs/testgen-and-handoff.md) and
+[docs/testgen-strategies.md](./docs/testgen-strategies.md).
 
 Try the legacy `.valid` path:
 
@@ -463,6 +491,10 @@ cargo valid completion install bash
 cargo valid completion install fish
 cargo valid completion install zsh --shell-config
 ```
+
+`cargo valid` completion now resolves model names from the current project and
+can also suggest property ids, action ids, and graph views in the relevant
+commands.
 
 If you want the raw scripts instead of writing into the default shell path:
 

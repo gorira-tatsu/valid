@@ -63,6 +63,10 @@ pub(crate) const DOCS: &[DocEntry] = &[
             "ai-curriculum",
             "ai-candidate-comparison-workflow",
             "ai-requirement-refinement-workflow",
+            "testgen-and-handoff-guide",
+            "testgen-strategies-guide",
+            "graph-and-review-guide",
+            "composition-guide",
             "dsl-guide",
             "install-guide",
             "architecture-note",
@@ -234,6 +238,7 @@ pub(crate) const DOCS: &[DocEntry] = &[
             "ai-review-workflow",
             "ai-modeling-checklist",
             "ai-examples-curriculum",
+            "testgen-and-handoff-guide",
         ],
         source_path: "docs/ai/conformance-workflow.md",
         body_markdown: include_str!("../../../../docs/ai/conformance-workflow.md"),
@@ -405,6 +410,32 @@ pub(crate) const DOCS: &[DocEntry] = &[
         body_markdown: include_str!("../../../../docs/ai/modeling-checklist.md"),
     },
     DocEntry {
+        id: "ai-model-authoring-best-practices",
+        title: "Model Authoring Best Practices",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["maintainability", "source-adjacent-docs", "review"],
+        canonical_entry: false,
+        summary: "User-facing guidance for documenting model intent, scope, assumptions, scenarios, and critical properties close to the source.",
+        key_points: &[
+            "Explains what each model file should say near the code",
+            "Keeps long-lived review context close to the model definition",
+        ],
+        canonical_rules: &[
+            "Each model should explain scope, out-of-scope behavior, and critical checks near the source",
+        ],
+        supported_features: &[
+            "Source-adjacent documentation guidance",
+            "Review-friendly model comment structure",
+        ],
+        unsupported_features: &[
+            "Normative DSL syntax reference",
+        ],
+        related_docs: &["ai-authoring-guide", "ai-modeling-checklist", "project-organization-guide"],
+        source_path: "docs/ai/model-authoring-best-practices.md",
+        body_markdown: include_str!("../../../../docs/ai/model-authoring-best-practices.md"),
+    },
+    DocEntry {
         id: "ai-review-workflow",
         title: "Review Workflow",
         kind: "workflow",
@@ -492,6 +523,58 @@ pub(crate) const DOCS: &[DocEntry] = &[
         body_markdown: include_str!("../../../../docs/artifacts.md"),
     },
     DocEntry {
+        id: "ci-workflow-templates-guide",
+        title: "CI Workflow Templates",
+        kind: "operations",
+        audience: "humans-and-agents",
+        recommended_for: &["ci", "automation", "templates"],
+        canonical_entry: false,
+        summary: "Reusable CI workflow templates and command equivalents for inspect, check, testgen, conformance, and doc drift checks.",
+        key_points: &[
+            "Explains the built-in GitHub Actions templates",
+            "Maps the templates back to ordinary valid and cargo valid commands",
+        ],
+        canonical_rules: &[
+            "Treat the templates as reusable starting points, not as the only supported CI shape",
+        ],
+        supported_features: &[
+            "CI template overview",
+            "Command-to-template mapping",
+        ],
+        unsupported_features: &[
+            "Repository-specific deployment policy",
+        ],
+        related_docs: &["artifact-inventory-guide", "install-guide", "docs-index"],
+        source_path: "docs/ci/README.md",
+        body_markdown: include_str!("../../../../docs/ci/README.md"),
+    },
+    DocEntry {
+        id: "composition-guide",
+        title: "Composition Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["composition", "integration-models", "shared-state-review"],
+        canonical_entry: false,
+        summary: "User-facing guide to the current supported composition helper story, integration-model pattern, and composition limits.",
+        key_points: &[
+            "Explains when to use standalone models, integration models, or helper-based composition",
+            "Clarifies that broader first-class compose syntax is still future work",
+        ],
+        canonical_rules: &[
+            "Treat the current composition story as helper-oriented and explicit",
+        ],
+        supported_features: &[
+            "Current compose helper guidance",
+            "Integration-model decision rules",
+        ],
+        unsupported_features: &[
+            "General first-class compose DSL",
+        ],
+        related_docs: &["project-organization-guide", "dsl-guide", "graph-and-review-guide"],
+        source_path: "docs/composition.md",
+        body_markdown: include_str!("../../../../docs/composition.md"),
+    },
+    DocEntry {
         id: "dsl-guide",
         title: "Rust DSL Guide",
         kind: "guide",
@@ -516,6 +599,32 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &["ai-authoring-guide", "language-spec"],
         source_path: "docs/dsl/README.md",
         body_markdown: include_str!("../../../../docs/dsl/README.md"),
+    },
+    DocEntry {
+        id: "graph-and-review-guide",
+        title: "Graph and Review Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["review", "graph", "deadlock", "field-diff"],
+        canonical_entry: false,
+        summary: "User-facing guide to choosing the right graph, trace, and explain surfaces for review-oriented debugging.",
+        key_points: &[
+            "Explains the purpose of overview, logic, failure, deadlock, and SCC graph views",
+            "Shows how field-diff-oriented explain output fits into review workflows",
+        ],
+        canonical_rules: &[
+            "Do not start from the largest graph when a smaller failure-oriented view answers the question",
+        ],
+        supported_features: &[
+            "Graph-view selection guidance",
+            "Failure and deadlock review flows",
+        ],
+        unsupported_features: &[
+            "Normative graph schema reference",
+        ],
+        related_docs: &["testgen-strategies-guide", "testgen-and-handoff-guide", "ai-review-workflow"],
+        source_path: "docs/graph-and-review.md",
+        body_markdown: include_str!("../../../../docs/graph-and-review.md"),
     },
     DocEntry {
         id: "fizzbuzz-validation-report",
@@ -568,6 +677,32 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &["language-spec", "frontend-adr", "dsl-guide"],
         source_path: "docs/dsl/language-evolution.md",
         body_markdown: include_str!("../../../../docs/dsl/language-evolution.md"),
+    },
+    DocEntry {
+        id: "parameterized-action-roadmap",
+        title: "Parameterized Action Roadmap",
+        kind: "roadmap",
+        audience: "humans-and-agents",
+        recommended_for: &["future-direction", "bounded-choices", "action-design"],
+        canonical_entry: false,
+        summary: "Incremental plan for moving from enum-only actions to bounded parameterized actions without encouraging action explosion.",
+        key_points: &[
+            "Explains why bounded choices come before a full parameterized-action system",
+            "Documents the current and planned action-surface boundary",
+        ],
+        canonical_rules: &[
+            "Treat this document as roadmap guidance, not implemented behavior beyond the current bounded choices",
+        ],
+        supported_features: &[
+            "Action-surface roadmap",
+            "Bounded-choice rationale",
+        ],
+        unsupported_features: &[
+            "Normative implemented syntax guarantees beyond the current bounded surface",
+        ],
+        related_docs: &["dsl-guide", "language-evolution", "language-spec"],
+        source_path: "docs/dsl/parameterized-action-roadmap.md",
+        body_markdown: include_str!("../../../../docs/dsl/parameterized-action-roadmap.md"),
     },
     DocEntry {
         id: "language-spec",
@@ -623,6 +758,86 @@ pub(crate) const DOCS: &[DocEntry] = &[
         related_docs: &["docs-index", "ai-authoring-guide", "dsl-guide"],
         source_path: "docs/install.md",
         body_markdown: include_str!("../../../../docs/install.md"),
+    },
+    DocEntry {
+        id: "project-organization-guide",
+        title: "Project Organization Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["project-layout", "integration-models", "bootstrap"],
+        canonical_entry: false,
+        summary: "Recommended layout for model files, registries, generated artifacts, and integration-model organization in valid projects.",
+        key_points: &[
+            "Explains the project-first layout created by valid init",
+            "Shows where registries, models, generated artifacts, and integration models belong",
+        ],
+        canonical_rules: &[
+            "Keep registry files thin and keep model logic in explicit model modules",
+        ],
+        supported_features: &[
+            "Project layout guidance",
+            "Integration-model organization",
+            "Generated artifact boundaries",
+        ],
+        unsupported_features: &[
+            "Normative DSL syntax definition",
+        ],
+        related_docs: &["composition-guide", "dsl-guide", "testgen-and-handoff-guide"],
+        source_path: "docs/project-organization.md",
+        body_markdown: include_str!("../../../../docs/project-organization.md"),
+    },
+    DocEntry {
+        id: "testgen-and-handoff-guide",
+        title: "Testgen and Handoff Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["testgen", "handoff", "conformance"],
+        canonical_entry: false,
+        summary: "User-facing guide to language-agnostic test specs, handoff summaries, and implementation-facing conformance workflows.",
+        key_points: &[
+            "Explains the contract between testgen, handoff, and conformance",
+            "Clarifies observation-first vectors and recommended vector summaries",
+        ],
+        canonical_rules: &[
+            "Treat generated vectors as language-agnostic test specs rather than framework-specific code",
+        ],
+        supported_features: &[
+            "Observation-first vector guidance",
+            "Handoff summary interpretation",
+            "Implementation-surface selection",
+        ],
+        unsupported_features: &[
+            "Framework-specific test generator output",
+        ],
+        related_docs: &["testgen-strategies-guide", "ai-conformance-workflow", "graph-and-review-guide"],
+        source_path: "docs/testgen-and-handoff.md",
+        body_markdown: include_str!("../../../../docs/testgen-and-handoff.md"),
+    },
+    DocEntry {
+        id: "testgen-strategies-guide",
+        title: "Testgen Strategies Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["testgen", "strategy-selection", "deadlock", "enablement"],
+        canonical_entry: false,
+        summary: "User-facing guide to choosing between replay, witness, deadlock, enablement, and grouped test generation strategies.",
+        key_points: &[
+            "Separates replay-oriented, exploration-oriented, and unblock-oriented strategies",
+            "Explains grouping metadata and focus-action use",
+        ],
+        canonical_rules: &[
+            "Pick the strategy that matches the review question instead of defaulting to the biggest trace",
+        ],
+        supported_features: &[
+            "Strategy-by-strategy selection guidance",
+            "Grouped vector explanation",
+        ],
+        unsupported_features: &[
+            "Complete implementation details of each generator",
+        ],
+        related_docs: &["testgen-and-handoff-guide", "graph-and-review-guide", "artifact-inventory-guide"],
+        source_path: "docs/testgen-strategies.md",
+        body_markdown: include_str!("../../../../docs/testgen-strategies.md"),
     },
 ];
 

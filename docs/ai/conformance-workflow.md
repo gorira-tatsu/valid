@@ -50,6 +50,19 @@ recommended generated vectors for the current model/property scope. Treat that
 summary as the shortlist for implementation-facing tests, and use
 `valid_testgen` when you need the full vector bodies or generated artifacts.
 
+Recommended order for implementation handoff:
+
+1. `valid_handoff`
+   Read the model summary, mismatch surface, and recommended vectors.
+2. `valid_testgen`
+   Pull the full vector bodies for the shortlisted items.
+3. `valid_conformance`
+   Run the real SUT against those vectors.
+
+The handoff summary is deliberately smaller than the full generated vector set.
+It is the brief. `valid_testgen` remains the source of truth for the complete
+language-agnostic test spec.
+
 ## Rust-native harnesses
 
 If your SUT already lives in Rust, you do not need to shell out to an external
@@ -125,6 +138,7 @@ Use the external `--runner` flow when:
 
 ## Next read
 
+- [Testgen and Handoff Guide](../testgen-and-handoff.md)
 - [Review Workflow](./review-workflow.md)
 - [Modeling Checklist](./modeling-checklist.md)
 - [Examples Curriculum](./examples-curriculum.md)

@@ -15,6 +15,10 @@ Related documents:
 - [Current Language Spec](./language-spec.md)
 - [Language Evolution Notes](./language-evolution.md)
 - [Parameterized Action Roadmap](./parameterized-action-roadmap.md)
+- [Testgen and Handoff Guide](../testgen-and-handoff.md)
+- [Testgen Strategies Guide](../testgen-strategies.md)
+- [Graph and Review Guide](../graph-and-review.md)
+- [Composition Guide](../composition.md)
 - [ADR-0001: `valid_model!` Frontend Decision](../adr/0001-valid-model-frontend.md)
 
 ## What the DSL is
@@ -80,6 +84,23 @@ The current surface DSL consists of these pieces:
 - `valid_actions!`
 - `valid_model!`
 - `valid_models!`
+
+## When to use the newer DSL surfaces
+
+- `predicates:`
+  Use when the same domain condition appears in more than one guard, scenario,
+  or property.
+- `scenarios:`
+  Use when you need a focused initial-state restriction instead of another
+  setup-style transition.
+- `cover`
+  Use when "this should be reachable" is itself the review question.
+- transition properties
+  Use when the requirement is naturally about a specific action's `prev`/`next`
+  postcondition rather than a pure state invariant.
+
+Use [Graph and Review Guide](../graph-and-review.md) when the question becomes
+"how do I inspect the failure?" rather than "how do I write the syntax?"
 
 You can either define types through macros like `valid_state!`, or define plain
 Rust types and attach semantics through derives.
@@ -226,6 +247,11 @@ action Add:
 
 This lowers to one concrete action per choice combination for exploration and
 evidence while keeping the authoring surface bounded and explicit.
+
+Use bounded choices when the real concept is one action with a small finite
+input space. Do not use them as a substitute for large arbitrary payloads or a
+full parameterized-action system. The current implementation is intentionally
+bounded and explicit.
 
 ## IDE Notes
 

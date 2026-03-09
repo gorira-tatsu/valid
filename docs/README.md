@@ -1,5 +1,7 @@
 # Documentation
 
+- [Task Guide](#task-guide)
+  Recommended starting points by workflow.
 - [Install Guide](./install.md)
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
 - [CI Workflow Templates](./ci/README.md)
@@ -19,6 +21,18 @@
 - [Project Organization Guide](./project-organization.md)
   Recommended layout for model files, registries, shared types, integration
   models, generated artifacts, and the pre-compose integration-model pattern.
+- [Testgen and Handoff Guide](./testgen-and-handoff.md)
+  Language-agnostic test specs, handoff summaries, and conformance-oriented
+  workflows.
+- [Testgen Strategies Guide](./testgen-strategies.md)
+  Strategy-by-strategy guidance for replay, witness, deadlock, enablement, and
+  grouped vectors.
+- [Graph and Review Guide](./graph-and-review.md)
+  Review-oriented use of `graph --view`, `trace`, `explain`, and field-diff
+  evidence.
+- [Composition Guide](./composition.md)
+  Current supported composition helpers, integration-model guidance, and
+  composition limits.
 - [Architecture](./architecture.md)
   Clean-architecture view of the repository, package roles, DTO boundary, and
   solver-neutral layering.
@@ -54,3 +68,15 @@ That guide also links to the built-in MCP prompt workflows.
 If you want to model and verify a system, start with the Rust DSL guide.
 If you want to understand the repository's design and scope, read the
 architecture note and the RDD.
+
+## Task Guide
+
+| Task | Start Here | Then Read |
+| --- | --- | --- |
+| Bootstrap a new project | [Install Guide](./install.md) | [Project Organization Guide](./project-organization.md) |
+| Learn the current public surface | [Rust DSL Guide](./dsl/README.md) | [DSL Language Spec](./dsl/language-spec.md) |
+| Author or review with AI | [AI Authoring Guide](./ai/authoring-guide.md) | [AI Docs Curriculum](./ai/curriculum.md) |
+| Refine an ambiguous requirement | [Requirement Refinement Workflow](./ai/requirement-refinement-workflow.md) | [Candidate Comparison Workflow](./ai/candidate-comparison-workflow.md) |
+| Generate implementation-facing tests | [Testgen and Handoff Guide](./testgen-and-handoff.md) | [Testgen Strategies Guide](./testgen-strategies.md) |
+| Review failures and deadlocks | [Graph and Review Guide](./graph-and-review.md) | [Artifact Inventory and Run History](./artifacts.md) |
+| Organize a larger multi-model project | [Project Organization Guide](./project-organization.md) | [Composition Guide](./composition.md) |
