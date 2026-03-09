@@ -58,6 +58,8 @@
   itself.
 
 If you want the shortest first-run walkthrough, start with the quickstart guide.
+If onboarding fails, move to the install guide for `valid doctor` and
+`valid init --repair`.
 If you want to install or distribute the tool in more detail, move to the
 install guide next.
 If you want to wire an LLM or MCP client into `valid`, start with the AI

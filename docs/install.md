@@ -120,6 +120,9 @@ If that first run fails, use:
 valid doctor
 ```
 
+Use `valid doctor` for shell/PATH/Cargo/project diagnostics first. If it reports
+safe scaffold drift, continue with `valid init --repair`.
+
 ## Project Setup
 
 Create a project skeleton:
@@ -137,8 +140,8 @@ cargo valid handoff approval-model
 valid init --check
 ```
 
-If the scaffold exists but some standard files disappeared, restore the safe
-layout without overwriting existing files:
+If `valid doctor` reports missing scaffold files, restore the safe layout
+without overwriting existing files:
 
 ```sh
 valid init --repair

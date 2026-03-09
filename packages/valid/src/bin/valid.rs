@@ -179,6 +179,13 @@ struct OnboardingReport {
     valid_project_detected: bool,
     stages: Vec<OnboardingStageReport>,
     next_paths: Vec<String>,
+    next_path_summaries: Vec<OnboardingNextPathSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct OnboardingNextPathSummary {
+    path_id: String,
+    summary: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -708,41 +715,160 @@ fn current_exe_dir_on_path() -> bool {
         .unwrap_or(false)
 }
 
+fn current_exe_dir() -> Option<PathBuf> {
+    env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+}
+
+fn active_shell_name() -> Option<String> {
+    env::var("SHELL").ok().and_then(|shell| {
+        PathBuf::from(shell)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+    })
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME").map(PathBuf::from)
+}
+
+fn shell_path_repair_hint(shell: Option<&str>, bin_dir: Option<&PathBuf>) -> Option<String> {
+    let dir = bin_dir?.display().to_string();
+    Some(match shell {
+        Some("fish") => format!(
+            "Run `fish_add_path {dir}` now and add the same path in `~/.config/fish/config.fish` for future sessions."
+        ),
+        Some("zsh") => format!(
+            "Run `export PATH=\"{dir}:$PATH\"` now and add the same export to `~/.zshrc`."
+        ),
+        Some("bash") => format!(
+            "Run `export PATH=\"{dir}:$PATH\"` now and add the same export to `~/.bashrc` or `~/.bash_profile`."
+        ),
+        _ => format!(
+            "Add `{dir}` to PATH in your current shell session and your shell startup config."
+        ),
+    })
+}
+
+fn completion_path_for_shell(shell: Option<&str>) -> Option<PathBuf> {
+    let home = home_dir()?;
+    match shell {
+        Some("fish") => Some(home.join(".config/fish/completions/valid.fish")),
+        Some("zsh") => Some(home.join(".zsh/completions/_valid")),
+        Some("bash") => Some(home.join(".local/share/bash-completion/completions/valid")),
+        _ => None,
+    }
+}
+
+fn shell_completion_repair_hint(shell: Option<&str>) -> Option<String> {
+    Some(match shell {
+        Some("fish") => "Run `valid completion install fish` to install Fish completions.".to_string(),
+        Some("zsh") => {
+            "Run `valid completion install zsh --shell-config` to install completions and update `~/.zshrc`."
+                .to_string()
+        }
+        Some("bash") => {
+            "Run `valid completion install bash` to install Bash completions into the standard completion directory."
+                .to_string()
+        }
+        _ => "Run `valid completion install <bash|fish|zsh>` for your shell to install completions."
+            .to_string(),
+    })
+}
+
 fn build_doctor_report(root: &PathBuf) -> DoctorReport {
     let mut checks = Vec::new();
+    let active_shell = active_shell_name();
+    let exe_dir = current_exe_dir();
     let exe_on_path = current_exe_dir_on_path();
     checks.push(DoctorCheckReport {
-        check_id: "valid_path".to_string(),
+        check_id: "shell_path".to_string(),
         status: if exe_on_path { "ok" } else { "warn" }.to_string(),
         summary: if exe_on_path {
             "`valid` appears to be discoverable on PATH.".to_string()
         } else {
             "`valid` is running, but the current executable directory is not on PATH.".to_string()
         },
-        details: env::current_exe()
-            .ok()
-            .map(|path| format!("current_executable={}", path.display())),
+        details: env::current_exe().ok().map(|path| {
+            format!(
+                "current_executable={}, active_shell={}",
+                path.display(),
+                active_shell.as_deref().unwrap_or("unknown")
+            )
+        }),
         repair_hint: if exe_on_path {
             None
         } else {
-            Some("Add the directory that contains `valid` to PATH for your shell session and shell config.".to_string())
+            shell_path_repair_hint(active_shell.as_deref(), exe_dir.as_ref())
+        },
+    });
+
+    let completion_path = completion_path_for_shell(active_shell.as_deref());
+    let completion_installed = completion_path.as_ref().is_some_and(|path| path.exists());
+    checks.push(DoctorCheckReport {
+        check_id: "shell_completion".to_string(),
+        status: if completion_installed {
+            "ok"
+        } else if completion_path.is_some() {
+            "warn"
+        } else {
+            "warn"
+        }
+        .to_string(),
+        summary: if completion_installed {
+            "Shell completions for `valid` appear to be installed.".to_string()
+        } else if completion_path.is_some() {
+            "Shell completions for `valid` are not installed.".to_string()
+        } else {
+            "The active shell could not be detected for completion installation hints.".to_string()
+        },
+        details: completion_path
+            .as_ref()
+            .map(|path| {
+                format!(
+                    "active_shell={}, expected_completion_path={}",
+                    active_shell.as_deref().unwrap_or("unknown"),
+                    path.display()
+                )
+            })
+            .or_else(|| {
+                active_shell
+                    .as_ref()
+                    .map(|shell| format!("active_shell={shell}"))
+            }),
+        repair_hint: if completion_installed {
+            None
+        } else {
+            shell_completion_repair_hint(active_shell.as_deref())
         },
     });
 
     let cargo_available = command_is_available("cargo", "--version");
+    let project_requires_cargo =
+        root.join("Cargo.toml").exists() || root.join("valid.toml").exists();
     checks.push(DoctorCheckReport {
         check_id: "cargo_available".to_string(),
-        status: if cargo_available { "ok" } else { "error" }.to_string(),
+        status: if cargo_available {
+            "ok"
+        } else if project_requires_cargo {
+            "error"
+        } else {
+            "warn"
+        }
+        .to_string(),
         summary: if cargo_available {
             "`cargo` is available.".to_string()
+        } else if project_requires_cargo {
+            "`cargo` is not available on PATH, and this project flow requires Cargo.".to_string()
         } else {
-            "`cargo` is not available on PATH.".to_string()
+            "`cargo` is not available on PATH, but you can still use binary-first review and onboarding help.".to_string()
         },
         details: None,
         repair_hint: if cargo_available {
             None
         } else {
-            Some("Install Rust/Cargo and make sure `cargo` is available on PATH before using project-first workflows.".to_string())
+            Some("Install Rust/Cargo and make sure `cargo` is available on PATH before using project-first model loading workflows.".to_string())
         },
     });
 
@@ -800,6 +926,38 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
             None
         } else {
             Some("Run `valid init --repair` to restore the `.mcp/` snippet files.".to_string())
+        },
+    });
+
+    let registry_ready = init_report
+        .registry
+        .as_ref()
+        .is_some_and(|registry| root.join(registry).exists());
+    let mcp_ready_status = if init_report.status == "error" || !registry_ready {
+        "error"
+    } else if !mcp_dir.exists() {
+        "warn"
+    } else {
+        "ok"
+    };
+    checks.push(DoctorCheckReport {
+        check_id: "mcp_project_readiness".to_string(),
+        status: mcp_ready_status.to_string(),
+        summary: match mcp_ready_status {
+            "ok" => "The current project has the minimum files needed for `valid mcp --project .`.".to_string(),
+            "warn" => "The project is mostly ready for `valid mcp --project .`, but local MCP snippets are missing.".to_string(),
+            _ => "The current project is not ready for `valid mcp --project .`.".to_string(),
+        },
+        details: Some(format!(
+            "registry_path={}, registry_exists={}, mcp_dir_exists={}",
+            init_report.registry.as_deref().unwrap_or("<missing>"),
+            registry_ready,
+            mcp_dir.exists()
+        )),
+        repair_hint: match mcp_ready_status {
+            "warn" => Some("Run `valid init --repair` to restore the `.mcp/` snippet files before wiring MCP clients.".to_string()),
+            "error" => Some("Run `valid init --check` first and fix the reported scaffold or registry-path issues before using `valid mcp --project .`.".to_string()),
+            _ => None,
         },
     });
 
@@ -1084,31 +1242,31 @@ fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
             "check_scaffold",
             vec!["init", "--check", "--json"],
             "Validate that the scaffold still matches the supported layout.",
-            Some("Run `valid init --check` and restore the missing scaffold paths.".to_string()),
+            Some("Run `valid doctor` to inspect the scaffold state, then use `valid init --repair` for any safe missing files.".to_string()),
         ),
         (
             "list_models",
             vec!["valid", "models"],
             "Confirm that the starter registry loads and exposes the scaffolded model.",
-            Some("Install Cargo and make sure the scaffolded project can run `cargo valid models`.".to_string()),
+            Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo valid models` once project-first loading is healthy.".to_string()),
         ),
         (
             "inspect_starter_model",
             vec!["valid", "inspect", "approval-model"],
             "Inspect the starter model to see its states, actions, and properties.",
-            Some("Run `cargo valid inspect approval-model` after fixing the registry or Cargo setup.".to_string()),
+            Some("Run `valid doctor` first, then `cargo valid inspect approval-model` after the registry and Cargo setup are healthy.".to_string()),
         ),
         (
             "graph_starter_model",
             vec!["valid", "graph", "approval-model", "--view=overview"],
             "Render the first graph view for the starter model.",
-            Some("Run `cargo valid graph approval-model --view=overview` after the starter model loads cleanly.".to_string()),
+            Some("Run `valid doctor` and, if needed, `valid init --repair` before retrying `cargo valid graph approval-model --view=overview`.".to_string()),
         ),
         (
             "handoff_starter_model",
             vec!["valid", "handoff", "approval-model"],
             "Generate the implementation-facing handoff summary for the starter model.",
-            Some("Run `cargo valid handoff approval-model` after inspect and graph are healthy.".to_string()),
+            Some("Run `valid doctor` first, then retry `cargo valid handoff approval-model` after inspect and graph are healthy.".to_string()),
         ),
     ] {
         let (program, argv): (String, Vec<String>) = if command[0] == "init" {
@@ -1269,6 +1427,24 @@ fn finish_onboarding(
             "connect_mcp".to_string(),
             "start_authoring".to_string(),
         ],
+        next_path_summaries: vec![
+            OnboardingNextPathSummary {
+                path_id: "review_models".to_string(),
+                summary: "Inspect additional models, read their properties, and use graph or explain output for review.".to_string(),
+            },
+            OnboardingNextPathSummary {
+                path_id: "generate_test_specs".to_string(),
+                summary: "Use `cargo valid testgen <model>` to produce language-agnostic test specs for implementation handoff.".to_string(),
+            },
+            OnboardingNextPathSummary {
+                path_id: "connect_mcp".to_string(),
+                summary: "Use the local `.mcp/` snippets or `valid mcp --project .` to connect docs, handoff, and verification workflows to AI tools.".to_string(),
+            },
+            OnboardingNextPathSummary {
+                path_id: "start_authoring".to_string(),
+                summary: "Edit `valid/models/` and `valid/registry.rs` when you are ready to move from review to authoring.".to_string(),
+            },
+        ],
     };
     if json {
         println!(
@@ -1280,6 +1456,9 @@ fn finish_onboarding(
         println!("root: {}", report.root);
         println!("interactive: {}", report.interactive);
         println!("next_paths: {}", report.next_paths.join(", "));
+        for next_path in &report.next_path_summaries {
+            println!("  {}: {}", next_path.path_id, next_path.summary);
+        }
     }
     let exit = if report.status == "error" {
         ExitCode::Error

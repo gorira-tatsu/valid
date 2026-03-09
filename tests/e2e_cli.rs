@@ -1357,6 +1357,15 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
         .expect("valid doctor should run");
     assert!(output.status.success());
     let report: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    let check_ids = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|check| check["check_id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(check_ids.contains(&"shell_path"));
+    assert!(check_ids.contains(&"shell_completion"));
+    assert!(check_ids.contains(&"mcp_project_readiness"));
     let scaffold = report["checks"]
         .as_array()
         .unwrap()
@@ -1405,6 +1414,13 @@ fn cli_doctor_reports_repair_hint_for_missing_scaffold_files() {
         .as_str()
         .unwrap()
         .contains("valid init --repair"));
+    let mcp = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "mcp_project_readiness")
+        .expect("mcp project readiness check");
+    assert_eq!(mcp["status"], "ok");
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1495,6 +1511,11 @@ fn cli_onboarding_bootstraps_empty_project_non_interactively() {
     assert_eq!(report["stages"][1]["status"], "success");
     assert_eq!(report["stages"][6]["stage_id"], "handoff_starter_model");
     assert_eq!(report["stages"][6]["status"], "success");
+    assert!(report["next_path_summaries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["path_id"] == "connect_mcp"));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1572,7 +1593,11 @@ fn cli_onboarding_reports_partial_failure_for_broken_scaffold() {
     assert!(report["stages"][2]["repair_hint"]
         .as_str()
         .expect("repair hint")
-        .contains("valid init --check"));
+        .contains("valid doctor"));
+    assert!(report["stages"][2]["repair_hint"]
+        .as_str()
+        .expect("repair hint")
+        .contains("valid init --repair"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

@@ -1640,8 +1640,17 @@ fn cargo_valid_suite_uses_default_suite_from_project_policy() {
 #[test]
 fn cargo_valid_benchmark_uses_project_config_targets() {
     let _guard = cargo_guard();
+    let baseline_dir = std::env::temp_dir().join(format!(
+        "valid-bench-targets-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&baseline_dir).expect("baseline dir");
     let output = Command::new(cargo_valid_path())
         .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .env("VALID_BENCHMARK_BASELINES_DIR", &baseline_dir)
         .arg("benchmark")
         .arg("--json")
         .output()
@@ -1656,6 +1665,8 @@ fn cargo_valid_benchmark_uses_project_config_targets() {
     assert!(stdout.contains("\"runs\":["));
     assert!(stdout.contains("counter"));
     assert!(stdout.contains("\"average_elapsed_ms\""));
+
+    let _ = fs::remove_dir_all(baseline_dir);
 }
 
 #[test]

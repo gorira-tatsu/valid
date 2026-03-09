@@ -17,8 +17,8 @@ This gives you a working scaffold, confirms that the scaffold is healthy, shows
 the starter model, renders the first overview graph, and produces an
 implementation-facing handoff summary.
 
-If this flow fails, run `valid doctor` first. If the scaffold exists but
-standard files are missing, use `valid init --repair`.
+If this flow fails, run `valid doctor` first. If `doctor` reports missing
+scaffold files, use `valid init --repair` and rerun onboarding.
 
 ## Manual Equivalent
 
@@ -39,6 +39,10 @@ For recovery:
 valid doctor
 valid init --repair
 ```
+
+Use `valid doctor` for environment and PATH issues. Use `valid init --repair`
+for safe scaffold recovery only after `doctor` points at missing bootstrap
+files.
 
 ## What You Get
 

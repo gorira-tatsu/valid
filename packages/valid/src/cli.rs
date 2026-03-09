@@ -3251,6 +3251,17 @@ fn onboarding_response_schema() -> Value {
             "next_paths": {
                 "type": "array",
                 "items": { "type": "string" }
+            },
+            "next_path_summaries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["path_id", "summary"],
+                    "properties": {
+                        "path_id": { "type": "string" },
+                        "summary": { "type": "string" }
+                    }
+                }
             }
         }
     })

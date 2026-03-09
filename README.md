@@ -97,6 +97,9 @@ If the walkthrough or local shell setup fails, run:
 valid doctor
 ```
 
+Use `valid doctor` first for shell/PATH/Cargo/project diagnostics. If it
+reports missing safe scaffold files, continue with `valid init --repair`.
+
 If you want the longer walkthrough, read [docs/quickstart.md](./docs/quickstart.md).
 If you want installation details, read [docs/install.md](./docs/install.md).
 
@@ -134,9 +137,10 @@ valid onboarding
 `benchmarks/baselines/`, and writes project-local AI/MCP bootstrap snippets
 under `.mcp/` plus `docs/ai/bootstrap.md`. Run `valid init --check` later if
 you want to confirm the scaffold still matches the supported layout, or
-`valid init --repair` if safe scaffold files are missing and you want to
-restore them without overwriting existing work. Use `valid doctor` first when
-you need environment or PATH diagnostics. `cargo valid init` remains the
+`valid init --repair` if `valid doctor` reports safe scaffold drift and you
+want to restore the missing files without overwriting existing work. Use
+`valid doctor` first when you need environment, PATH, completion, or
+project-readiness diagnostics. `cargo valid init` remains the
 compatibility path for an already-existing Cargo project:
 
 ```toml
