@@ -1755,7 +1755,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.property_id,
@@ -1772,6 +1772,12 @@ fn cmd_testgen(parsed: ParsedArgs) {
                             vector.state_visibility,
                             vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
                             vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                            vector.priority,
+                            vector.selection_reason,
+                            vector.novelty_key,
+                            vector.conceptual_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                            vector.concrete_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
+                            vector.parameter_bindings.iter().map(|binding| format!("{{\"name\":\"{}\",\"value\":\"{}\"}}", binding.name, binding.value)).collect::<Vec<_>>().join(","),
                             vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                         ))
                         .collect::<Vec<_>>()

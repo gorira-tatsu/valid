@@ -843,7 +843,7 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                 .vectors
                 .iter()
                 .map(|vector| format!(
-                    "{{\"vector_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
+                    "{{\"vector_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
                     vector.vector_id,
                     vector.property_id,
                     vector.strictness,
@@ -859,6 +859,12 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                     vector.state_visibility,
                     vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
                     vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
+                    vector.priority,
+                    vector.selection_reason,
+                    vector.novelty_key,
+                    vector.conceptual_action_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(","),
+                    vector.concrete_action_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(","),
+                    vector.parameter_bindings.iter().map(|binding| format!("{{\"name\":\"{}\",\"value\":\"{}\"}}", binding.name, binding.value)).collect::<Vec<_>>().join(","),
                     vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                 ))
                 .collect::<Vec<_>>()
@@ -1020,48 +1026,64 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         .collect::<Vec<_>>();
     let action_details = M::Action::action_descriptors()
         .into_iter()
-        .map(|action| InspectAction {
-            action_id: action.action_id.to_string(),
-            role: "business".to_string(),
-            reads: action.reads.iter().map(|item| item.to_string()).collect(),
-            writes: action.writes.iter().map(|item| item.to_string()).collect(),
+        .map(|action| {
+            let identity = crate::ir::parse_action_identity(action.action_id);
+            InspectAction {
+                action_id: action.action_id.to_string(),
+                conceptual_action_id: identity.conceptual_action_id.clone(),
+                concrete_action_id: (identity.concrete_action_id != identity.conceptual_action_id)
+                    .then_some(identity.concrete_action_id),
+                parameter_bindings: identity.parameter_bindings,
+                parameter_domains: Vec::new(),
+                expanded_choice_count: 1,
+                role: "business".to_string(),
+                reads: action.reads.iter().map(|item| item.to_string()).collect(),
+                writes: action.writes.iter().map(|item| item.to_string()).collect(),
+            }
         })
         .collect::<Vec<_>>();
     let transition_details = crate::modeling::machine_transition_ir::<M>()
         .into_iter()
-        .map(|transition| InspectTransition {
-            action_id: transition.action_id.to_string(),
-            role: transition.role.as_str().to_string(),
-            guard: transition.guard.map(str::to_string),
-            effect: transition.effect.map(str::to_string),
-            reads: transition
-                .reads
-                .iter()
-                .map(|item| item.to_string())
-                .collect(),
-            writes: transition
-                .writes
-                .iter()
-                .map(|item| item.to_string())
-                .collect(),
-            path_tags: crate::modeling::decision_path_tags(
-                &transition.path_tags,
-                transition.action_id,
-                transition.reads.iter().copied(),
-                transition.writes.iter().copied(),
-                transition.guard,
-                transition.effect,
-            ),
-            updates: transition
-                .updates
-                .iter()
-                .filter_map(|update| {
-                    update.expr.map(|expr| InspectTransitionUpdate {
-                        field: update.field.to_string(),
-                        expr: expr.to_string(),
+        .map(|transition| {
+            let identity = crate::ir::parse_action_identity(transition.action_id);
+            InspectTransition {
+                action_id: transition.action_id.to_string(),
+                conceptual_action_id: identity.conceptual_action_id.clone(),
+                concrete_action_id: (identity.concrete_action_id != identity.conceptual_action_id)
+                    .then_some(identity.concrete_action_id),
+                parameter_bindings: identity.parameter_bindings,
+                role: transition.role.as_str().to_string(),
+                guard: transition.guard.map(str::to_string),
+                effect: transition.effect.map(str::to_string),
+                reads: transition
+                    .reads
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect(),
+                writes: transition
+                    .writes
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect(),
+                path_tags: crate::modeling::decision_path_tags(
+                    &transition.path_tags,
+                    transition.action_id,
+                    transition.reads.iter().copied(),
+                    transition.writes.iter().copied(),
+                    transition.guard,
+                    transition.effect,
+                ),
+                updates: transition
+                    .updates
+                    .iter()
+                    .filter_map(|update| {
+                        update.expr.map(|expr| InspectTransitionUpdate {
+                            field: update.field.to_string(),
+                            expr: expr.to_string(),
+                        })
                     })
-                })
-                .collect(),
+                    .collect(),
+            }
         })
         .collect::<Vec<_>>();
     let property_details = M::properties()
@@ -1227,6 +1249,7 @@ fn testgen_machine<M: VerifiedMachine>(
     let mut vectors =
         build_machine_test_vectors_for_strategy::<M>(property_id, request_id, focus_action_id);
     annotate_registry_replay_targets::<M>(property_id, &mut vectors);
+    let suppressed_vector_count = crate::api::prioritize_test_vectors(&mut vectors);
     let generated_files = write_generated_test_files(&vectors)
         .unwrap_or_else(|message| message_exit("testgen", json, &message, Some(TESTGEN_USAGE)));
     TestgenResponse {
@@ -1239,25 +1262,7 @@ fn testgen_machine<M: VerifiedMachine>(
             .collect(),
         vectors: vectors
             .iter()
-            .map(|vector| crate::api::TestgenVectorSummary {
-                vector_id: vector.vector_id.clone(),
-                run_id: vector.run_id.clone(),
-                property_id: vector.property_id.clone(),
-                strictness: vector.strictness.clone(),
-                derivation: vector.derivation.clone(),
-                source_kind: vector.source_kind.clone(),
-                strategy: vector.strategy.clone(),
-                requirement_clusters: vector.grouping.requirement_clusters.clone(),
-                risk_clusters: vector.grouping.risk_clusters.clone(),
-                observation_mode: vector.observation_contract.mode.clone(),
-                observation_layers: vector.observation_layers.clone(),
-                oracle_targets: vector.oracle_targets.clone(),
-                suggested_surface: vector.implementation_hints.suggested_surface.clone(),
-                state_visibility: vector.implementation_hints.state_visibility.clone(),
-                focus_action_id: vector.focus_action_id.clone(),
-                expected_guard_enabled: vector.expected_guard_enabled,
-                notes: vector.notes.clone(),
-            })
+            .map(|vector| crate::api::summarize_testgen_vector(vector, suppressed_vector_count))
             .collect(),
         vector_groups: crate::api::summarize_testgen_groups(&vectors),
         generated_files,

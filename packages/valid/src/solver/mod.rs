@@ -150,7 +150,7 @@ pub const fn sat_varisat_compiled_in() -> bool {
 pub fn mcp_backend_names() -> Vec<&'static str> {
     let mut backends = vec!["explicit", "mock-bmc", "smt-cvc5", "command"];
     if sat_varisat_compiled_in() {
-        backends.insert(2, "sat-varisat");
+        backends.insert(1, "sat-varisat");
     }
     backends
 }

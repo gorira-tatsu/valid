@@ -1643,7 +1643,7 @@ fn cargo_valid_list_exposes_verification_policy_from_valid_toml() {
     write_multi_property_fixture(&project_dir, "policy-model");
     fs::write(
         project_dir.join("valid.toml"),
-        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\nsuite_models = [\"policy-model\"]\npreferred_backends = [\"explicit\", \"smt-cvc5\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 85\nminimum_business_coverage_percent = 70\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 65\n\n[critical_properties]\npolicy-model = [\"P_READY_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = [{ model = \"policy-model\", properties = [\"P_RETRIES_BOUNDED\"] }]\n",
+        "registry = \"examples/valid_models.rs\"\ndefault_backend = \"explicit\"\nsuite_models = [\"policy-model\"]\npreferred_backends = [\"explicit\", \"sat-varisat\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 85\nminimum_business_coverage_percent = 70\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 65\n\n[critical_properties]\npolicy-model = [\"P_READY_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = [{ model = \"policy-model\", properties = [\"P_RETRIES_BOUNDED\"] }]\n",
     )
     .expect("valid.toml");
 
@@ -1662,7 +1662,7 @@ fn cargo_valid_list_exposes_verification_policy_from_valid_toml() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"verification_policy\""));
     assert!(stdout.contains("\"default_suite\":\"smoke\""));
-    assert!(stdout.contains("\"preferred_backends\":[\"explicit\",\"smt-cvc5\"]"));
+    assert!(stdout.contains("\"preferred_backends\":[\"explicit\",\"sat-varisat\"]"));
     assert!(stdout.contains("\"minimum_overall_coverage_percent\":85"));
 
     let _ = fs::remove_dir_all(project_dir);

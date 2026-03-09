@@ -871,7 +871,7 @@ fn valid_mcp_exposes_project_property_metadata_and_suite_runs() {
     let registry = make_mock_registry(&temp);
     fs::write(
         temp.path().join("valid.toml"),
-        "registry = \"examples/valid_models.rs\"\npreferred_backends = [\"explicit\", \"smt-cvc5\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 85\nminimum_business_coverage_percent = 70\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 65\n\n[critical_properties]\nmock-broken = [\"P_FAIL\"]\n\n[property_suites.smoke]\nentries = [{ model = \"mock-broken\", properties = [\"P_GUARD\"] }]\n",
+        "registry = \"examples/valid_models.rs\"\npreferred_backends = [\"explicit\", \"sat-varisat\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 85\nminimum_business_coverage_percent = 70\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 65\n\n[critical_properties]\nmock-broken = [\"P_FAIL\"]\n\n[property_suites.smoke]\nentries = [{ model = \"mock-broken\", properties = [\"P_GUARD\"] }]\n",
     )
     .expect("valid.toml");
     let registry_str = registry.to_string_lossy().to_string();
@@ -887,7 +887,7 @@ fn valid_mcp_exposes_project_property_metadata_and_suite_runs() {
     assert_eq!(listed["verification_policy"]["default_suite"], "smoke");
     assert_eq!(
         listed["verification_policy"]["preferred_backends"][1],
-        "smt-cvc5"
+        "sat-varisat"
     );
     assert_eq!(
         listed["verification_policy"]["coverage_gates"]["minimum_overall_coverage_percent"],

@@ -2397,11 +2397,17 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         })
         .collect::<Vec<_>>();
 
+    let covered_conceptual_actions = covered_actions.clone();
+    let total_conceptual_actions = total_actions.clone();
+    let conceptual_action_execution_counts = action_execution_counts.clone();
+
     CoverageReport {
         schema_version: "1.0.0".to_string(),
         model_id: M::model_id().to_string(),
         transition_coverage_percent,
+        conceptual_transition_coverage_percent: transition_coverage_percent,
         business_transition_coverage_percent,
+        business_conceptual_transition_coverage_percent: business_transition_coverage_percent,
         setup_transition_coverage_percent,
         requirement_tag_coverage_percent,
         decision_coverage_percent,
@@ -2409,11 +2415,14 @@ pub fn collect_machine_coverage<M: VerifiedMachine>() -> CoverageReport {
         business_guard_full_coverage_percent,
         setup_guard_full_coverage_percent,
         covered_actions,
+        covered_conceptual_actions,
         covered_decisions,
         total_actions,
+        total_conceptual_actions,
         total_decisions,
         action_roles,
         action_execution_counts,
+        conceptual_action_execution_counts,
         decision_counts,
         covered_requirement_tags,
         total_requirement_tags,
@@ -2654,6 +2663,7 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         },
     ];
 
+    let failing_identity = crate::ir::parse_action_identity(&action_id);
     Ok(ExplainResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
@@ -2673,6 +2683,11 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         breakpoint_note: failure_step.note.clone(),
         failure_step_index: failure_step.index,
         failing_action_id: Some(action_id.clone()),
+        failing_conceptual_action_id: Some(failing_identity.conceptual_action_id.clone()),
+        failing_concrete_action_id: (failing_identity.concrete_action_id
+            != failing_identity.conceptual_action_id)
+            .then_some(failing_identity.concrete_action_id),
+        failing_action_parameter_bindings: failing_identity.parameter_bindings,
         failing_action_role,
         decision_path,
         failing_action_reads: action_reads,

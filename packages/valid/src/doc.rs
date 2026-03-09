@@ -385,6 +385,11 @@ mod tests {
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
+                conceptual_action_id: "INC".to_string(),
+                concrete_action_id: None,
+                parameter_bindings: Vec::new(),
+                parameter_domains: Vec::new(),
+                expanded_choice_count: 1,
                 role: "business".to_string(),
                 reads: vec!["x".to_string()],
                 writes: vec!["x".to_string()],
@@ -393,6 +398,9 @@ mod tests {
             scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
+                conceptual_action_id: "INC".to_string(),
+                concrete_action_id: None,
+                parameter_bindings: Vec::new(),
                 role: "business".to_string(),
                 guard: Some("state.x < 3".to_string()),
                 effect: Some("x = state.x + 1".to_string()),

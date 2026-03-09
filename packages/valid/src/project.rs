@@ -1250,7 +1250,7 @@ default_property = "P_SAFE"
 default_solver_executable = "cvc5"
 default_solver_args = ["--lang", "smt2"]
 suite_models = ["counter", "failing-counter"]
-preferred_backends = ["explicit", "smt-cvc5"]
+preferred_backends = ["explicit", "sat-varisat"]
 default_suite = "smoke"
 minimum_overall_coverage_percent = 90
 minimum_business_coverage_percent = 80
@@ -1283,7 +1283,7 @@ default_graph_format = "mermaid"
                 default_solver_executable: Some("cvc5".to_string()),
                 default_solver_args: vec!["--lang".to_string(), "smt2".to_string()],
                 suite_models: vec!["counter".to_string(), "failing-counter".to_string()],
-                preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+                preferred_backends: vec!["explicit".to_string(), "sat-varisat".to_string()],
                 default_suite: Some("smoke".to_string()),
                 coverage_gates: CoverageGates {
                     minimum_overall_coverage_percent: Some(90),
@@ -1434,7 +1434,7 @@ default_graph_format = "mermaid"
                     properties: vec!["P_SAFE".to_string()],
                 }],
             )]),
-            preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+            preferred_backends: vec!["explicit".to_string(), "sat-varisat".to_string()],
             default_suite: Some("smoke".to_string()),
             coverage_gates: CoverageGates {
                 minimum_overall_coverage_percent: Some(80),
@@ -1459,7 +1459,7 @@ default_graph_format = "mermaid"
                         properties: vec!["P_SAFE".to_string()],
                     }],
                 )]),
-                preferred_backends: vec!["explicit".to_string(), "smt-cvc5".to_string()],
+                preferred_backends: vec!["explicit".to_string(), "sat-varisat".to_string()],
                 default_suite: Some("smoke".to_string()),
                 coverage_gates: CoverageGates {
                     minimum_overall_coverage_percent: Some(80),

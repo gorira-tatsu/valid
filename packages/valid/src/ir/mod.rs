@@ -8,7 +8,9 @@ pub mod path;
 pub mod property;
 pub mod value;
 
-pub use action::{ActionIr, ActionRole, UpdateIr};
+pub use action::{
+    parse_action_identity, ActionIdentity, ActionIr, ActionParameterBinding, ActionRole, UpdateIr,
+};
 pub use decision::{Decision, DecisionKind, DecisionOutcome, DecisionPoint};
 pub use expr::{BinaryOp, ExprIr, UnaryOp};
 pub use model::{

@@ -92,6 +92,225 @@ fn backfill_testgen_grouping(property_id: &str, vectors: &mut [crate::testgen::T
     }
 }
 
+fn parameter_domains_by_conceptual_action(model: &ModelIr) -> BTreeMap<String, Vec<String>> {
+    let mut domains = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
+    for action in &model.actions {
+        let identity = crate::ir::parse_action_identity(&action.action_id);
+        for binding in identity.parameter_bindings {
+            domains
+                .entry(identity.conceptual_action_id.clone())
+                .or_default()
+                .entry(binding.name)
+                .or_default()
+                .insert(binding.value);
+        }
+    }
+    domains
+        .into_iter()
+        .map(|(action_id, entries)| {
+            let rendered = entries
+                .into_iter()
+                .map(|(name, values)| {
+                    format!(
+                        "{}:{}",
+                        name,
+                        values.into_iter().collect::<Vec<_>>().join("|")
+                    )
+                })
+                .collect::<Vec<_>>();
+            (action_id, rendered)
+        })
+        .collect()
+}
+
+fn expanded_choice_counts(model: &ModelIr) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for action in &model.actions {
+        let identity = crate::ir::parse_action_identity(&action.action_id);
+        *counts.entry(identity.conceptual_action_id).or_insert(0) += 1;
+    }
+    counts
+}
+
+fn vector_identity_metadata(
+    vector: &crate::testgen::TestVector,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<crate::ir::ActionParameterBinding>,
+) {
+    let mut conceptual_action_ids = Vec::new();
+    let mut concrete_action_ids = Vec::new();
+    let mut parameter_bindings = Vec::new();
+    let mut seen_conceptual = BTreeSet::new();
+    let mut seen_concrete = BTreeSet::new();
+    let mut seen_bindings = BTreeSet::new();
+    for step in &vector.actions {
+        let identity = crate::ir::parse_action_identity(&step.action_id);
+        if seen_conceptual.insert(identity.conceptual_action_id.clone()) {
+            conceptual_action_ids.push(identity.conceptual_action_id);
+        }
+        if seen_concrete.insert(identity.concrete_action_id.clone()) {
+            concrete_action_ids.push(identity.concrete_action_id);
+        }
+        for binding in identity.parameter_bindings {
+            let key = format!("{}={}", binding.name, binding.value);
+            if seen_bindings.insert(key) {
+                parameter_bindings.push(binding);
+            }
+        }
+    }
+    (
+        conceptual_action_ids,
+        concrete_action_ids,
+        parameter_bindings,
+    )
+}
+
+pub fn summarize_testgen_vector(
+    vector: &crate::testgen::TestVector,
+    suppressed_vector_count: usize,
+) -> TestgenVectorSummary {
+    let (conceptual_action_ids, concrete_action_ids, parameter_bindings) =
+        vector_identity_metadata(vector);
+    let priority = vector
+        .notes
+        .iter()
+        .find_map(|note| note.strip_prefix("priority:"))
+        .unwrap_or("normal")
+        .to_string();
+    let selection_reason = vector
+        .notes
+        .iter()
+        .find_map(|note| note.strip_prefix("selection_reason:"))
+        .unwrap_or("stable reviewable vector")
+        .to_string();
+    let novelty_key = vector
+        .notes
+        .iter()
+        .find_map(|note| note.strip_prefix("novelty_key:"))
+        .unwrap_or("")
+        .to_string();
+    let mut notes = vector.notes.clone();
+    notes.push("selection_policy:stable_review_surface".to_string());
+    if suppressed_vector_count > 0 {
+        notes.push(format!("suppressed_vectors:{suppressed_vector_count}"));
+    }
+    TestgenVectorSummary {
+        vector_id: vector.vector_id.clone(),
+        run_id: vector.run_id.clone(),
+        property_id: vector.property_id.clone(),
+        strictness: vector.strictness.clone(),
+        derivation: vector.derivation.clone(),
+        source_kind: vector.source_kind.clone(),
+        strategy: vector.strategy.clone(),
+        requirement_clusters: vector.grouping.requirement_clusters.clone(),
+        risk_clusters: vector.grouping.risk_clusters.clone(),
+        observation_mode: vector.observation_contract.mode.clone(),
+        observation_layers: vector.observation_layers.clone(),
+        oracle_targets: vector.oracle_targets.clone(),
+        suggested_surface: vector.implementation_hints.suggested_surface.clone(),
+        state_visibility: vector.implementation_hints.state_visibility.clone(),
+        focus_action_id: vector.focus_action_id.clone(),
+        expected_guard_enabled: vector.expected_guard_enabled,
+        priority,
+        selection_reason,
+        novelty_key,
+        conceptual_action_ids,
+        concrete_action_ids,
+        parameter_bindings,
+        notes,
+    }
+}
+
+pub fn prioritize_test_vectors(vectors: &mut Vec<crate::testgen::TestVector>) -> usize {
+    let original_len = vectors.len();
+    let mut deduped = Vec::with_capacity(vectors.len());
+    let mut seen = BTreeSet::new();
+    for mut vector in vectors.drain(..) {
+        let (conceptual_action_ids, _, parameter_bindings) = vector_identity_metadata(&vector);
+        let novelty_key = format!(
+            "{}|{:?}|{:?}|{:?}|{:?}",
+            vector.property_id,
+            conceptual_action_ids,
+            parameter_bindings
+                .iter()
+                .map(|binding| format!("{}={}", binding.name, binding.value))
+                .collect::<Vec<_>>(),
+            vector.expected_guard_enabled,
+            vector.expected_path_tags
+        );
+        if !seen.insert(novelty_key.clone()) {
+            continue;
+        }
+        let has_risk = !vector.grouping.risk_clusters.is_empty()
+            || vector
+                .expected_path_tags
+                .iter()
+                .any(|tag| tag == "risk_path");
+        let has_parameter_choice = !parameter_bindings.is_empty();
+        let priority = if vector.source_kind == "counterexample" || has_risk {
+            "high"
+        } else if vector.strategy == "guard" || has_parameter_choice {
+            "medium"
+        } else {
+            "normal"
+        };
+        let selection_reason = if vector.source_kind == "counterexample" {
+            "shortest failing reproduction".to_string()
+        } else if has_risk {
+            "covers a risk-tagged path".to_string()
+        } else if vector.strategy == "guard" {
+            "improves guard polarity coverage".to_string()
+        } else if has_parameter_choice {
+            "covers a bounded parameter choice".to_string()
+        } else {
+            "kept as a stable reviewable witness".to_string()
+        };
+        vector
+            .notes
+            .retain(|note| !note.starts_with("selection_reason:"));
+        vector
+            .notes
+            .push(format!("selection_reason:{selection_reason}"));
+        vector.notes.retain(|note| !note.starts_with("priority:"));
+        vector.notes.push(format!("priority:{priority}"));
+        vector
+            .notes
+            .retain(|note| !note.starts_with("novelty_key:"));
+        vector.notes.push(format!("novelty_key:{novelty_key}"));
+        deduped.push(vector);
+    }
+    deduped.sort_by(|left, right| {
+        let left_rank = left
+            .notes
+            .iter()
+            .find_map(|note| note.strip_prefix("priority:"))
+            .map(priority_rank)
+            .unwrap_or(2);
+        let right_rank = right
+            .notes
+            .iter()
+            .find_map(|note| note.strip_prefix("priority:"))
+            .map(priority_rank)
+            .unwrap_or(2);
+        left_rank
+            .cmp(&right_rank)
+            .then_with(|| left.vector_id.cmp(&right.vector_id))
+    });
+    let suppressed = original_len.saturating_sub(deduped.len());
+    *vectors = deduped;
+    suppressed
+}
+
+fn priority_rank(priority: &str) -> u8 {
+    match priority {
+        "high" => 0,
+        "medium" => 1,
+        _ => 2,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectResponse {
     pub schema_version: String,
@@ -205,6 +424,11 @@ pub struct InspectStateField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectAction {
     pub action_id: String,
+    pub conceptual_action_id: String,
+    pub concrete_action_id: Option<String>,
+    pub parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
+    pub parameter_domains: Vec<String>,
+    pub expanded_choice_count: usize,
     pub role: String,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
@@ -213,6 +437,9 @@ pub struct InspectAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectTransition {
     pub action_id: String,
+    pub conceptual_action_id: String,
+    pub concrete_action_id: Option<String>,
+    pub parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
     pub role: String,
     pub guard: Option<String>,
     pub effect: Option<String>,
@@ -328,6 +555,9 @@ pub struct ExplainResponse {
     pub breakpoint_note: Option<String>,
     pub failure_step_index: usize,
     pub failing_action_id: Option<String>,
+    pub failing_conceptual_action_id: Option<String>,
+    pub failing_concrete_action_id: Option<String>,
+    pub failing_action_parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
     pub failing_action_role: Option<String>,
     pub decision_path: Path,
     pub failing_action_reads: Vec<String>,
@@ -551,6 +781,12 @@ pub struct TestgenVectorSummary {
     pub state_visibility: String,
     pub focus_action_id: Option<String>,
     pub expected_guard_enabled: Option<bool>,
+    pub priority: String,
+    pub selection_reason: String,
+    pub novelty_key: String,
+    pub conceptual_action_ids: Vec<String>,
+    pub concrete_action_ids: Vec<String>,
+    pub parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
     pub notes: Vec<String>,
 }
 
@@ -744,6 +980,8 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
                 .collect(),
         }
     };
+    let parameter_domains = parameter_domains_by_conceptual_action(model);
+    let expanded_counts = expanded_choice_counts(model);
     InspectResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
@@ -830,11 +1068,29 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
         action_details: model
             .actions
             .iter()
-            .map(|action| InspectAction {
-                action_id: action.action_id.clone(),
-                role: action.role.as_str().to_string(),
-                reads: action.reads.clone(),
-                writes: action.writes.clone(),
+            .map(|action| {
+                let identity = crate::ir::parse_action_identity(&action.action_id);
+                let conceptual_action_id = identity.conceptual_action_id.clone();
+                let concrete_action_id = (identity.concrete_action_id
+                    != identity.conceptual_action_id)
+                    .then_some(identity.concrete_action_id);
+                InspectAction {
+                    action_id: action.action_id.clone(),
+                    conceptual_action_id: conceptual_action_id.clone(),
+                    concrete_action_id,
+                    parameter_bindings: identity.parameter_bindings,
+                    parameter_domains: parameter_domains
+                        .get(&conceptual_action_id)
+                        .cloned()
+                        .unwrap_or_default(),
+                    expanded_choice_count: expanded_counts
+                        .get(&conceptual_action_id)
+                        .copied()
+                        .unwrap_or(1),
+                    role: action.role.as_str().to_string(),
+                    reads: action.reads.clone(),
+                    writes: action.writes.clone(),
+                }
             })
             .collect(),
         predicate_details: model
@@ -856,22 +1112,30 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
         transition_details: model
             .actions
             .iter()
-            .map(|action| InspectTransition {
-                action_id: action.action_id.clone(),
-                role: action.role.as_str().to_string(),
-                guard: Some(render_expr_ir(&action.guard)),
-                effect: Some(render_update_effect(&action.updates)),
-                reads: action.reads.clone(),
-                writes: action.writes.clone(),
-                path_tags: action.path_tags.clone(),
-                updates: action
-                    .updates
-                    .iter()
-                    .map(|update| InspectTransitionUpdate {
-                        field: update.field.clone(),
-                        expr: render_expr_ir(&update.value),
-                    })
-                    .collect(),
+            .map(|action| {
+                let identity = crate::ir::parse_action_identity(&action.action_id);
+                InspectTransition {
+                    action_id: action.action_id.clone(),
+                    conceptual_action_id: identity.conceptual_action_id.clone(),
+                    concrete_action_id: (identity.concrete_action_id
+                        != identity.conceptual_action_id)
+                        .then_some(identity.concrete_action_id),
+                    parameter_bindings: identity.parameter_bindings,
+                    role: action.role.as_str().to_string(),
+                    guard: Some(render_expr_ir(&action.guard)),
+                    effect: Some(render_update_effect(&action.updates)),
+                    reads: action.reads.clone(),
+                    writes: action.writes.clone(),
+                    path_tags: action.path_tags.clone(),
+                    updates: action
+                        .updates
+                        .iter()
+                        .map(|update| InspectTransitionUpdate {
+                            field: update.field.clone(),
+                            expr: render_expr_ir(&update.value),
+                        })
+                        .collect(),
+                }
             })
             .collect(),
         property_details: model
@@ -1606,6 +1870,10 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 confidence += 0.1;
             }
             confidence = confidence.min(0.95);
+            let failing_identity = failure_step
+                .action_id
+                .as_deref()
+                .map(crate::ir::parse_action_identity);
             Ok(ExplainResponse {
                 schema_version: "1.0.0".to_string(),
                 request_id: request.request_id.clone(),
@@ -1617,6 +1885,16 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 breakpoint_note: failure_step.note.clone(),
                 failure_step_index: failure_step.index,
                 failing_action_id: failure_step.action_id.clone(),
+                failing_conceptual_action_id: failing_identity
+                    .as_ref()
+                    .map(|identity| identity.conceptual_action_id.clone()),
+                failing_concrete_action_id: failing_identity.as_ref().and_then(|identity| {
+                    (identity.concrete_action_id != identity.conceptual_action_id)
+                        .then_some(identity.concrete_action_id.clone())
+                }),
+                failing_action_parameter_bindings: failing_identity
+                    .map(|identity| identity.parameter_bindings)
+                    .unwrap_or_default(),
                 failing_action_role: action_metadata
                     .as_ref()
                     .map(|(role, _, _, _, _)| role.clone()),
@@ -2364,6 +2642,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         vector.normalize_language_agnostic_contract();
     }
     annotate_model_replay_targets(&request.source_name, target_property_id, &mut vectors);
+    let suppressed_vector_count = prioritize_test_vectors(&mut vectors);
     let generated_files =
         write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
             manifest: result.manifest.clone(),
@@ -2385,25 +2664,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .collect(),
         vectors: vectors
             .iter()
-            .map(|vector| TestgenVectorSummary {
-                vector_id: vector.vector_id.clone(),
-                run_id: vector.run_id.clone(),
-                property_id: vector.property_id.clone(),
-                strictness: vector.strictness.clone(),
-                derivation: vector.derivation.clone(),
-                source_kind: vector.source_kind.clone(),
-                strategy: vector.strategy.clone(),
-                requirement_clusters: vector.grouping.requirement_clusters.clone(),
-                risk_clusters: vector.grouping.risk_clusters.clone(),
-                observation_mode: vector.observation_contract.mode.clone(),
-                observation_layers: vector.observation_layers.clone(),
-                oracle_targets: vector.oracle_targets.clone(),
-                suggested_surface: vector.implementation_hints.suggested_surface.clone(),
-                state_visibility: vector.implementation_hints.state_visibility.clone(),
-                focus_action_id: vector.focus_action_id.clone(),
-                expected_guard_enabled: vector.expected_guard_enabled,
-                notes: vector.notes.clone(),
-            })
+            .map(|vector| summarize_testgen_vector(vector, suppressed_vector_count))
             .collect(),
         vector_groups: summarize_testgen_groups(&vectors),
         generated_files,
@@ -2763,8 +3024,13 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"role\":\"{}\",\"reads\":{},\"writes\":{}}}",
+            "{{\"action_id\":\"{}\",\"conceptual_action_id\":\"{}\",\"concrete_action_id\":{},\"parameter_bindings\":{},\"parameter_domains\":{},\"expanded_choice_count\":{},\"role\":\"{}\",\"reads\":{},\"writes\":{}}}",
             escape_json(&action.action_id),
+            escape_json(&action.conceptual_action_id),
+            render_optional_string(action.concrete_action_id.as_deref()),
+            render_parameter_bindings_json(&action.parameter_bindings),
+            render_string_array(&action.parameter_domains),
+            action.expanded_choice_count,
             escape_json(&action.role),
             render_string_array(&action.reads),
             render_string_array(&action.writes)
@@ -2801,8 +3067,11 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"action_id\":\"{}\",\"role\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{},\"updates\":[{}]}}",
+            "{{\"action_id\":\"{}\",\"conceptual_action_id\":\"{}\",\"concrete_action_id\":{},\"parameter_bindings\":{},\"role\":\"{}\",\"guard\":{},\"effect\":{},\"reads\":{},\"writes\":{},\"path_tags\":{},\"updates\":[{}]}}",
             escape_json(&transition.action_id),
+            escape_json(&transition.conceptual_action_id),
+            render_optional_string(transition.concrete_action_id.as_deref()),
+            render_parameter_bindings_json(&transition.parameter_bindings),
             escape_json(&transition.role),
             transition
                 .guard
@@ -3062,7 +3331,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"property_layer\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"property_layer\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_conceptual_action_id\":{},\"failing_concrete_action_id\":{},\"failing_action_parameter_bindings\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
@@ -3077,6 +3346,9 @@ pub fn render_explain_json(response: &ExplainResponse) -> String {
             .as_ref()
             .map(|value| format!("\"{}\"", escape_json(value)))
             .unwrap_or_else(|| "null".to_string()),
+        render_optional_string(response.failing_conceptual_action_id.as_deref()),
+        render_optional_string(response.failing_concrete_action_id.as_deref()),
+        render_parameter_bindings_json(&response.failing_action_parameter_bindings),
         response
             .failing_action_role
             .as_ref()
@@ -4884,6 +5156,23 @@ fn render_string_array(values: &[String]) -> String {
     )
 }
 
+fn render_parameter_bindings_json(values: &[crate::ir::ActionParameterBinding]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|binding| {
+                format!(
+                    "{{\"name\":\"{}\",\"value\":\"{}\"}}",
+                    escape_json(&binding.name),
+                    escape_json(&binding.value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 fn render_optional_bool(value: Option<bool>) -> String {
     value
         .map(|value| value.to_string())
@@ -5847,6 +6136,9 @@ property P_RECOVERY_VISIBLE:
             scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "STEP".to_string(),
+                conceptual_action_id: "STEP".to_string(),
+                concrete_action_id: None,
+                parameter_bindings: Vec::new(),
                 role: "business".to_string(),
                 guard: Some("(i % 3 == 0)".to_string()),
                 effect: Some("[]".to_string()),
@@ -5892,6 +6184,11 @@ property P_RECOVERY_VISIBLE:
             action_details: (0..9)
                 .map(|index| InspectAction {
                     action_id: format!("ACTION_{index}"),
+                    conceptual_action_id: format!("ACTION_{index}"),
+                    concrete_action_id: None,
+                    parameter_bindings: Vec::new(),
+                    parameter_domains: Vec::new(),
+                    expanded_choice_count: 1,
                     role: if index < 4 {
                         "setup".to_string()
                     } else {
@@ -5906,6 +6203,9 @@ property P_RECOVERY_VISIBLE:
             transition_details: (0..10)
                 .map(|index| InspectTransition {
                     action_id: format!("ACTION_{index}"),
+                    conceptual_action_id: format!("ACTION_{index}"),
+                    concrete_action_id: None,
+                    parameter_bindings: Vec::new(),
                     role: if index < 4 {
                         "setup".to_string()
                     } else {
@@ -6072,6 +6372,11 @@ property P_RECOVERY_VISIBLE:
             ],
             action_details: vec![super::InspectAction {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
+                conceptual_action_id: "SET_STRONG_PASSWORD".to_string(),
+                concrete_action_id: None,
+                parameter_bindings: Vec::new(),
+                parameter_domains: Vec::new(),
+                expanded_choice_count: 1,
                 role: "business".to_string(),
                 reads: vec!["password_set".to_string()],
                 writes: vec![
@@ -6084,6 +6389,9 @@ property P_RECOVERY_VISIBLE:
             scenario_details: vec![],
             transition_details: vec![InspectTransition {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
+                conceptual_action_id: "SET_STRONG_PASSWORD".to_string(),
+                concrete_action_id: None,
+                parameter_bindings: Vec::new(),
                 role: "business".to_string(),
                 guard: Some("state.password_set == false".to_string()),
                 effect: Some(

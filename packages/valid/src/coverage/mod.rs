@@ -20,7 +20,9 @@ pub struct CoverageReport {
     pub schema_version: String,
     pub model_id: String,
     pub transition_coverage_percent: u32,
+    pub conceptual_transition_coverage_percent: u32,
     pub business_transition_coverage_percent: u32,
+    pub business_conceptual_transition_coverage_percent: u32,
     pub setup_transition_coverage_percent: u32,
     pub requirement_tag_coverage_percent: u32,
     pub decision_coverage_percent: u32,
@@ -28,11 +30,14 @@ pub struct CoverageReport {
     pub business_guard_full_coverage_percent: u32,
     pub setup_guard_full_coverage_percent: u32,
     pub covered_actions: BTreeSet<String>,
+    pub covered_conceptual_actions: BTreeSet<String>,
     pub covered_decisions: BTreeSet<String>,
     pub total_actions: BTreeSet<String>,
+    pub total_conceptual_actions: BTreeSet<String>,
     pub total_decisions: BTreeSet<String>,
     pub action_roles: BTreeMap<String, String>,
     pub action_execution_counts: BTreeMap<String, usize>,
+    pub conceptual_action_execution_counts: BTreeMap<String, usize>,
     pub decision_counts: BTreeMap<String, usize>,
     pub covered_requirement_tags: BTreeSet<String>,
     pub total_requirement_tags: BTreeSet<String>,
@@ -83,6 +88,11 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         .iter()
         .map(|a| a.action_id.clone())
         .collect::<BTreeSet<_>>();
+    let total_conceptual_actions = model
+        .actions
+        .iter()
+        .map(|action| crate::ir::parse_action_identity(&action.action_id).conceptual_action_id)
+        .collect::<BTreeSet<_>>();
     let action_roles = model
         .actions
         .iter()
@@ -99,6 +109,12 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         .iter()
         .filter(|action| action.role == ActionRole::Setup)
         .map(|action| action.action_id.clone())
+        .collect::<BTreeSet<_>>();
+    let business_conceptual_actions = model
+        .actions
+        .iter()
+        .filter(|action| action.role == ActionRole::Business)
+        .map(|action| crate::ir::parse_action_identity(&action.action_id).conceptual_action_id)
         .collect::<BTreeSet<_>>();
     let total_requirement_tags = model
         .actions
@@ -118,6 +134,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         })
         .collect::<BTreeSet<_>>();
     let mut covered_actions = BTreeSet::new();
+    let mut covered_conceptual_actions = BTreeSet::new();
     let mut covered_decisions = BTreeSet::new();
     let mut visited_states = BTreeSet::new();
     let mut all_seen_states = 0usize;
@@ -128,6 +145,7 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     let mut guard_false_counts = BTreeMap::new();
     let mut path_tag_counts = BTreeMap::new();
     let mut action_execution_counts = BTreeMap::new();
+    let mut conceptual_action_execution_counts = BTreeMap::new();
     let mut decision_counts = BTreeMap::new();
     let mut covered_requirement_tags = BTreeSet::new();
     let mut requirement_tag_counts = BTreeMap::new();
@@ -151,8 +169,14 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
                 .or_insert(step.depth);
             if let Some(action_id) = &step.action_id {
                 covered_actions.insert(action_id.clone());
+                let conceptual_action_id =
+                    crate::ir::parse_action_identity(action_id).conceptual_action_id;
+                covered_conceptual_actions.insert(conceptual_action_id.clone());
                 *action_execution_counts
                     .entry(action_id.clone())
+                    .or_insert(0) += 1;
+                *conceptual_action_execution_counts
+                    .entry(conceptual_action_id)
                     .or_insert(0) += 1;
                 let path = step.path.clone().or_else(|| {
                     let state = machine_state_from_snapshot(model, &step.state_before)?;
@@ -234,11 +258,26 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
     } else {
         ((covered_actions.len() * 100) / total_actions.len()) as u32
     };
+    let conceptual_transition_coverage_percent = if total_conceptual_actions.is_empty() {
+        100
+    } else {
+        ((covered_conceptual_actions.len() * 100) / total_conceptual_actions.len()) as u32
+    };
     let business_transition_coverage_percent = if business_actions.is_empty() {
         100
     } else {
         ((covered_actions.intersection(&business_actions).count() * 100) / business_actions.len())
             as u32
+    };
+    let business_conceptual_transition_coverage_percent = if business_conceptual_actions.is_empty()
+    {
+        100
+    } else {
+        ((covered_conceptual_actions
+            .intersection(&business_conceptual_actions)
+            .count()
+            * 100)
+            / business_conceptual_actions.len()) as u32
     };
     let setup_transition_coverage_percent = if setup_actions.is_empty() {
         100
@@ -306,7 +345,9 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         schema_version: "1.0.0".to_string(),
         model_id: model.model_id.clone(),
         transition_coverage_percent,
+        conceptual_transition_coverage_percent,
         business_transition_coverage_percent,
+        business_conceptual_transition_coverage_percent,
         setup_transition_coverage_percent,
         requirement_tag_coverage_percent,
         decision_coverage_percent,
@@ -314,11 +355,14 @@ pub fn collect_coverage(model: &ModelIr, traces: &[EvidenceTrace]) -> CoverageRe
         business_guard_full_coverage_percent,
         setup_guard_full_coverage_percent,
         covered_actions,
+        covered_conceptual_actions,
         covered_decisions,
         total_actions,
+        total_conceptual_actions,
         total_decisions,
         action_roles,
         action_execution_counts,
+        conceptual_action_execution_counts,
         decision_counts,
         covered_requirement_tags,
         total_requirement_tags,
@@ -376,9 +420,11 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
     out.push_str(&format!("\"schema_version\":\"{}\"", report.schema_version));
     out.push_str(&format!(",\"model_id\":\"{}\"", report.model_id));
     out.push_str(&format!(
-        ",\"summary\":{{\"transition_coverage_percent\":{},\"business_transition_coverage_percent\":{},\"setup_transition_coverage_percent\":{},\"requirement_tag_coverage_percent\":{},\"decision_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"business_guard_full_coverage_percent\":{},\"setup_guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
+        ",\"summary\":{{\"transition_coverage_percent\":{},\"conceptual_transition_coverage_percent\":{},\"business_transition_coverage_percent\":{},\"business_conceptual_transition_coverage_percent\":{},\"setup_transition_coverage_percent\":{},\"requirement_tag_coverage_percent\":{},\"decision_coverage_percent\":{},\"guard_full_coverage_percent\":{},\"business_guard_full_coverage_percent\":{},\"setup_guard_full_coverage_percent\":{},\"visited_state_count\":{},\"repeated_state_count\":{},\"step_count\":{},\"max_depth_observed\":{}}}",
         report.transition_coverage_percent,
+        report.conceptual_transition_coverage_percent,
         report.business_transition_coverage_percent,
+        report.business_conceptual_transition_coverage_percent,
         report.setup_transition_coverage_percent,
         report.requirement_tag_coverage_percent,
         report.decision_coverage_percent,
@@ -390,6 +436,23 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
         report.step_count,
         report.max_depth_observed
     ));
+    out.push_str(",\"conceptual_actions\":[");
+    for (index, action) in report.total_conceptual_actions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"action_id\":\"{}\",\"covered\":{},\"count\":{}}}",
+            action,
+            report.covered_conceptual_actions.contains(action),
+            report
+                .conceptual_action_execution_counts
+                .get(action)
+                .copied()
+                .unwrap_or(0)
+        ));
+    }
+    out.push(']');
     out.push_str(",\"actions\":[");
     for (index, action) in report.total_actions.iter().enumerate() {
         if index > 0 {
@@ -523,10 +586,12 @@ pub fn render_coverage_json(report: &CoverageReport) -> String {
 pub fn render_coverage_text(report: &CoverageReport) -> String {
     let gate = evaluate_coverage_gate(report, 80);
     format!(
-        "COVERAGE model={}\ntransition_coverage_percent={}\nbusiness_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\nrequirement_tag_coverage_percent={}\ndecision_coverage_percent={}\nguard_full_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
+        "COVERAGE model={}\ntransition_coverage_percent={}\nconceptual_transition_coverage_percent={}\nbusiness_transition_coverage_percent={}\nbusiness_conceptual_transition_coverage_percent={}\nsetup_transition_coverage_percent={}\nrequirement_tag_coverage_percent={}\ndecision_coverage_percent={}\nguard_full_coverage_percent={}\nbusiness_guard_full_coverage_percent={}\nsetup_guard_full_coverage_percent={}\nvisited_state_count={}\nrepeated_state_count={}\nstep_count={}\nmax_depth_observed={}\ngate_status={}\n{}",
         report.model_id,
         report.transition_coverage_percent,
+        report.conceptual_transition_coverage_percent,
         report.business_transition_coverage_percent,
+        report.business_conceptual_transition_coverage_percent,
         report.setup_transition_coverage_percent,
         report.requirement_tag_coverage_percent,
         report.decision_coverage_percent,
@@ -575,8 +640,16 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     if report.transition_coverage_percent > 100 {
         return Err("transition_coverage_percent must not exceed 100".to_string());
     }
+    if report.conceptual_transition_coverage_percent > 100 {
+        return Err("conceptual_transition_coverage_percent must not exceed 100".to_string());
+    }
     if report.business_transition_coverage_percent > 100 {
         return Err("business_transition_coverage_percent must not exceed 100".to_string());
+    }
+    if report.business_conceptual_transition_coverage_percent > 100 {
+        return Err(
+            "business_conceptual_transition_coverage_percent must not exceed 100".to_string(),
+        );
     }
     if report.setup_transition_coverage_percent > 100 {
         return Err("setup_transition_coverage_percent must not exceed 100".to_string());
@@ -598,6 +671,11 @@ pub fn validate_coverage_report(report: &CoverageReport) -> Result<(), String> {
     }
     if report.covered_actions.len() > report.total_actions.len() {
         return Err("covered_actions must be a subset of total_actions".to_string());
+    }
+    if report.covered_conceptual_actions.len() > report.total_conceptual_actions.len() {
+        return Err(
+            "covered_conceptual_actions must be a subset of total_conceptual_actions".to_string(),
+        );
     }
     for action in &report.covered_actions {
         if !report.total_actions.contains(action) {
@@ -656,7 +734,9 @@ pub fn validate_rendered_coverage_json(body: &str) -> Result<(), String> {
         "summary",
     )?;
     require_number_field(summary, "transition_coverage_percent")?;
+    require_number_field(summary, "conceptual_transition_coverage_percent")?;
     require_number_field(summary, "business_transition_coverage_percent")?;
+    require_number_field(summary, "business_conceptual_transition_coverage_percent")?;
     require_number_field(summary, "setup_transition_coverage_percent")?;
     require_number_field(summary, "requirement_tag_coverage_percent")?;
     require_number_field(summary, "decision_coverage_percent")?;

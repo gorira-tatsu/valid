@@ -541,7 +541,7 @@ Project-level verification targeting can also live in `valid.toml`:
 ```toml
 registry = "examples/valid_models.rs"
 suite_models = ["refund-control", "approval-model"]
-preferred_backends = ["explicit", "smt-cvc5"]
+preferred_backends = ["explicit", "sat-varisat"]
 default_suite = "smoke"
 minimum_overall_coverage_percent = 80
 minimum_business_coverage_percent = 75
