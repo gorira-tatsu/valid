@@ -1922,10 +1922,8 @@ macro_rules! valid_model_transition_descriptor {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! valid_model_guard_eval {
-    ([$state:expr] |$guard_state:ident| true => $body:block) => {{
-        $body
-    }};
     ([$state:expr] |$guard_state:ident| $guard_expr:expr => $body:block) => {{
+        #[allow(unused_variables)]
         let $guard_state = $state;
         if $guard_expr {
             $body
