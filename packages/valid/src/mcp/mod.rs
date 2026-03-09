@@ -1592,7 +1592,7 @@ fn parse_cursor(cursor: &str) -> Result<usize, String> {
 
 fn build_resources(config: &ServerConfig) -> Vec<Value> {
     let mut resources = Vec::new();
-    for doc in docs_catalog::DOCS {
+    for doc in docs_catalog::docs() {
         resources.push(json!({
             "uri": format!("valid://docs/{}", doc.id),
             "name": doc.title,
@@ -1600,7 +1600,7 @@ fn build_resources(config: &ServerConfig) -> Vec<Value> {
             "mimeType": "text/markdown"
         }));
     }
-    for example in docs_catalog::EXAMPLES {
+    for example in docs_catalog::examples() {
         resources.push(json!({
             "uri": format!("valid://examples/{}", example.id),
             "name": example.title,

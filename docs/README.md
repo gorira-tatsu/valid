@@ -1,5 +1,7 @@
 # Documentation
 
+## Public Guides
+
 - [Task Guide](#task-guide)
   Recommended starting points by workflow.
 - [Quickstart Guide](./quickstart.md)
@@ -50,30 +52,12 @@
 - [Parameterized Action Roadmap](./dsl/parameterized-action-roadmap.md)
   Incremental plan for moving from enum-only actions to bounded parameterized
   actions without encouraging action explosion in docs or examples.
-- [ADR-0001: `valid_model!` Frontend Decision](./adr/0001-valid-model-frontend.md)
-  Decision record for keeping `valid_model!` on the `macro_rules!` track unless
-  A1 fails to recover `rust-analyzer` compatibility.
-- [RDD](./rdd/README.md)
-  Requirements, architecture, planning, and delivery documents for the project
-  itself.
-
 If you want the shortest first-run walkthrough, start with the quickstart guide.
 If onboarding fails, move to the install guide for `valid doctor` and
 `valid init --repair`.
-If you want to install or distribute the tool in more detail, move to the
-install guide next.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
-authoring guide, then move through the AI docs curriculum. If the requirement
-is still moving, read the requirement refinement workflow before editing the
-model.
-If you want models to stay readable for review and long-term maintenance, read
-the model authoring best-practice guide alongside the AI guide.
-If you want to keep a `valid` project maintainable as it grows, read the
-project organization guide next.
-That guide also links to the built-in MCP prompt workflows.
+authoring guide, then move through the AI docs curriculum.
 If you want to model and verify a system, start with the Rust DSL guide.
-If you want to understand the repository's design and scope, read the
-architecture note and the RDD.
 
 ## Task Guide
 
@@ -86,3 +70,11 @@ architecture note and the RDD.
 | Generate implementation-facing tests | [Testgen and Handoff Guide](./testgen-and-handoff.md) | [Testgen Strategies Guide](./testgen-strategies.md) |
 | Review failures and deadlocks | [Graph and Review Guide](./graph-and-review.md) | [Artifact Inventory and Run History](./artifacts.md) |
 | Organize a larger multi-model project | [Project Organization Guide](./project-organization.md) | [Composition Guide](./composition.md) |
+
+## Maintainer and Internal References
+
+- [ADR-0001: `valid_model!` Frontend Decision](./adr/0001-valid-model-frontend.md)
+  Maintainer-facing decision record for the current frontend implementation.
+- [RDD](./rdd/README.md)
+  Requirements, planning, architecture, and delivery documents for the project
+  itself.

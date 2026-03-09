@@ -1,1028 +1,237 @@
+use std::sync::OnceLock;
+
+use serde::Deserialize;
 use serde_json::{json, Value};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub(crate) struct DocEntry {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub kind: &'static str,
-    pub audience: &'static str,
-    pub recommended_for: &'static [&'static str],
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub audience: String,
+    pub recommended_for: Vec<String>,
     pub canonical_entry: bool,
-    pub summary: &'static str,
-    pub key_points: &'static [&'static str],
-    pub canonical_rules: &'static [&'static str],
-    pub supported_features: &'static [&'static str],
-    pub unsupported_features: &'static [&'static str],
-    pub related_docs: &'static [&'static str],
-    pub source_path: &'static str,
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub canonical_rules: Vec<String>,
+    pub supported_features: Vec<String>,
+    pub unsupported_features: Vec<String>,
+    pub related_docs: Vec<String>,
+    pub source_path: String,
     pub body_markdown: &'static str,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub(crate) struct ExampleEntry {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub difficulty: &'static str,
-    pub concepts: &'static [&'static str],
-    pub mode: &'static str,
-    pub backend_expectation: &'static str,
-    pub source_path: &'static str,
+    pub id: String,
+    pub title: String,
+    pub difficulty: String,
+    pub concepts: Vec<String>,
+    pub mode: String,
+    pub backend_expectation: String,
+    pub source_path: String,
     pub recommended_order: u64,
-    pub recommended_docs: &'static [&'static str],
-    pub focus_models: &'static [&'static str],
-    pub summary: &'static str,
-    pub commands: &'static [&'static str],
+    pub recommended_docs: Vec<String>,
+    pub focus_models: Vec<String>,
+    pub summary: String,
+    pub commands: Vec<String>,
     pub source_text: &'static str,
 }
 
-pub(crate) const DOCS: &[DocEntry] = &[
-    DocEntry {
-        id: "docs-index",
-        title: "Documentation Index",
-        kind: "index",
-        audience: "humans-and-agents",
-        recommended_for: &["navigation", "docs-overview"],
-        canonical_entry: false,
-        summary: "Top-level documentation index for install, AI authoring, DSL, architecture, and RDD documents.",
-        key_points: &[
-            "Provides the top-level map of the non-RDD and RDD documentation tree",
-            "Points LLM and MCP users to the AI authoring guide first",
-        ],
-        canonical_rules: &[
-            "Use the AI authoring guide as the first AI-facing entrypoint",
-        ],
-        supported_features: &[
-            "Top-level docs navigation",
-            "Short descriptions for each major doc set",
-        ],
-        unsupported_features: &[
-            "Normative language reference",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-curriculum",
-            "ai-candidate-comparison-workflow",
-            "ai-requirement-refinement-workflow",
-            "testgen-and-handoff-guide",
-            "testgen-strategies-guide",
-            "graph-and-review-guide",
-            "composition-guide",
-            "dsl-guide",
-            "install-guide",
-            "architecture-note",
-        ],
-        source_path: "docs/README.md",
-        body_markdown: include_str!("../../../../docs/README.md"),
-    },
-    DocEntry {
-        id: "frontend-adr",
-        title: "ADR-0001: valid_model! Frontend Decision",
-        kind: "adr",
-        audience: "humans-and-agents",
-        recommended_for: &["frontend-design", "macro-strategy"],
-        canonical_entry: false,
-        summary: "Decision record for keeping valid_model! on the macro_rules track unless rust-analyzer compatibility work fails.",
-        key_points: &[
-            "Explains why the current frontend stays on macro_rules",
-            "Documents the fallback to a function-like proc-macro if acceptance fails",
-        ],
-        canonical_rules: &[
-            "Treat the ADR as design rationale, not end-user syntax documentation",
-        ],
-        supported_features: &[
-            "Frontend decision history",
-            "Design tradeoff context",
-        ],
-        unsupported_features: &[
-            "Current syntax reference",
-        ],
-        related_docs: &["dsl-guide", "language-evolution", "language-spec"],
-        source_path: "docs/adr/0001-valid-model-frontend.md",
-        body_markdown: include_str!("../../../../docs/adr/0001-valid-model-frontend.md"),
-    },
-    DocEntry {
-        id: "ai-authoring-guide",
-        title: "AI Authoring Guide",
-        kind: "guide",
-        audience: "llm-agents",
-        recommended_for: &["first-read", "mcp-clients", "ai-assisted-authoring"],
-        canonical_entry: true,
-        summary: "Shortest canonical entrypoint for LLM agents writing or reviewing valid models.",
-        key_points: &[
-            "Use registry mode and cargo valid for new Rust-first work",
-            "Prefer declarative transitions over step",
-            "Check readiness before claiming solver support",
-        ],
-        canonical_rules: &[
-            "Always write model Name<State, Action>;",
-            "Treat step as explicit-first or migration-oriented",
-            "Use valid_docs_index then valid_docs_get before model-specific tools",
-        ],
-        supported_features: &[
-            "Minimal registry skeleton",
-            "Finite state/action modeling rules",
-            "Command and MCP workflow guidance",
-        ],
-        unsupported_features: &[
-            "General containers like Vec and HashMap",
-            "Implicit frame-condition inference",
-            "Non-invariant property kinds",
-        ],
-        related_docs: &[
-            "ai-curriculum",
-            "ai-requirement-refinement-workflow",
-            "ai-modeling-checklist",
-            "ai-common-pitfalls",
-            "ai-examples-curriculum",
-            "ai-review-workflow",
-            "ai-migration-guide",
-            "ai-conformance-workflow",
-            "language-spec",
-        ],
-        source_path: "docs/ai/authoring-guide.md",
-        body_markdown: include_str!("../../../../docs/ai/authoring-guide.md"),
-    },
-    DocEntry {
-        id: "ai-requirement-refinement-workflow",
-        title: "Requirement Refinement Workflow",
-        kind: "workflow",
-        audience: "llm-agents",
-        recommended_for: &["clarification-first", "requirement-refinement", "evidence-driven-repair"],
-        canonical_entry: false,
-        summary: "Task-oriented guide for turning ambiguous product requirements into stable modeling briefs, then refining them from verification evidence.",
-        key_points: &[
-            "Explains the clarification-first loop before and after model authoring",
-            "Maps counterexamples, dead actions, vacuity, and mismatches to targeted follow-up questions",
-        ],
-        canonical_rules: &[
-            "Do not patch the model before deciding whether the requirement brief is incomplete",
-            "Ask the minimum product-facing follow-up questions needed to unlock the next model change",
-        ],
-        supported_features: &[
-            "Initial requirement clarification flow",
-            "Evidence-driven refinement flow",
-            "Example sessions and exit criteria",
-        ],
-        unsupported_features: &[
-            "Normative syntax details",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-curriculum",
-            "ai-modeling-checklist",
-            "ai-review-workflow",
-            "ai-conformance-workflow",
-        ],
-        source_path: "docs/ai/requirement-refinement-workflow.md",
-        body_markdown: include_str!("../../../../docs/ai/requirement-refinement-workflow.md"),
-    },
-    DocEntry {
-        id: "ai-candidate-comparison-workflow",
-        title: "Candidate Comparison Workflow",
-        kind: "workflow",
-        audience: "llm-agents",
-        recommended_for: &["candidate-comparison", "distinguish", "review"],
-        canonical_entry: false,
-        summary: "Task-oriented guide for comparing two plausible candidate models and turning the first divergence into a product-facing decision.",
-        key_points: &[
-            "Explains how to move from shared requirement brief to shortest distinguishing trace",
-            "Separates model-level divergence from product-level decision wording",
-        ],
-        canonical_rules: &[
-            "Name the shared requirement brief before comparing the candidates",
-            "Record the differing assumption in product language, not only model language",
-        ],
-        supported_features: &[
-            "Candidate-model comparison workflow",
-            "Distinguishing-trace review order",
-            "Exit criteria for requirement decisions",
-        ],
-        unsupported_features: &[
-            "Normative syntax definition",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-review-workflow",
-            "ai-requirement-refinement-workflow",
-            "ai-curriculum",
-        ],
-        source_path: "docs/ai/candidate-comparison-workflow.md",
-        body_markdown: include_str!("../../../../docs/ai/candidate-comparison-workflow.md"),
-    },
-    DocEntry {
-        id: "ai-conformance-workflow",
-        title: "Conformance Workflow",
-        kind: "workflow",
-        audience: "llm-agents",
-        recommended_for: &["conformance", "implementation-handoff", "review"],
-        canonical_entry: false,
-        summary: "Task-oriented guide for moving from reviewed models into conformance and implementation-facing checks.",
-        key_points: &[
-            "Explains the review-to-conformance handoff",
-            "Separates model review from implementation mismatch analysis",
-        ],
-        canonical_rules: &[
-            "Review the model before blaming the implementation",
-            "Record the mismatch class and the property or scenario it belongs to",
-        ],
-        supported_features: &[
-            "Conformance task order",
-            "Implementation-facing command guidance",
-        ],
-        unsupported_features: &[
-            "Trait-level implementation details",
-        ],
-        related_docs: &[
-            "ai-curriculum",
-            "ai-requirement-refinement-workflow",
-            "ai-review-workflow",
-            "ai-modeling-checklist",
-            "ai-examples-curriculum",
-            "testgen-and-handoff-guide",
-        ],
-        source_path: "docs/ai/conformance-workflow.md",
-        body_markdown: include_str!("../../../../docs/ai/conformance-workflow.md"),
-    },
-    DocEntry {
-        id: "ai-common-pitfalls",
-        title: "Common Pitfalls",
-        kind: "pitfalls",
-        audience: "llm-agents",
-        recommended_for: &["error-avoidance", "review"],
-        canonical_entry: false,
-        summary: "Common mistakes LLMs make when generating or reviewing valid models.",
-        key_points: &[
-            "Do not use shorthand model headers",
-            "Do not assume implicit field retention",
-            "Do not overclaim solver support for string-heavy models",
-        ],
-        canonical_rules: &[
-            "Registry mode is primary for new work",
-            "Use transitions for canonical long-lived models",
-        ],
-        supported_features: &[
-            "Examples of wrong and correct patterns",
-            "Mode-selection reminders",
-        ],
-        unsupported_features: &[
-            "Full supported-syntax inventory",
-        ],
-        related_docs: &["ai-authoring-guide", "ai-curriculum", "language-spec"],
-        source_path: "docs/ai/common-pitfalls.md",
-        body_markdown: include_str!("../../../../docs/ai/common-pitfalls.md"),
-    },
-    DocEntry {
-        id: "ai-curriculum",
-        title: "AI Docs Curriculum",
-        kind: "curriculum",
-        audience: "llm-agents",
-        recommended_for: &["learning-order", "task-order", "navigation"],
-        canonical_entry: false,
-        summary: "Learning-order and task-order map for authoring, review, migration, and conformance workflows.",
-        key_points: &[
-            "Separates first-read order from task-specific order",
-            "Links docs, examples, and prompt-oriented workflows into one map",
-        ],
-        canonical_rules: &[
-            "Start with the AI authoring guide, then switch by task rather than reading every page linearly",
-        ],
-        supported_features: &[
-            "Learning-order path",
-            "Task-order path",
-            "Prompt and example linkage",
-        ],
-        unsupported_features: &[
-            "Normative syntax definition",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-requirement-refinement-workflow",
-            "ai-review-workflow",
-            "ai-migration-guide",
-            "ai-conformance-workflow",
-            "ai-examples-curriculum",
-        ],
-        source_path: "docs/ai/curriculum.md",
-        body_markdown: include_str!("../../../../docs/ai/curriculum.md"),
-    },
-    DocEntry {
-        id: "ai-examples-curriculum",
-        title: "Examples Curriculum",
-        kind: "examples-curriculum",
-        audience: "llm-agents",
-        recommended_for: &["learning-order", "few-shot-selection"],
-        canonical_entry: false,
-        summary: "Learning order for examples that teach valid incrementally.",
-        key_points: &[
-            "Start with the counter registry example",
-            "Move to relations/maps and grouped transitions before string-heavy models",
-        ],
-        canonical_rules: &[
-            "Inspect first, then readiness, then verify",
-        ],
-        supported_features: &[
-            "Ordered curriculum",
-            "Example selection by concept",
-        ],
-        unsupported_features: &[
-            "Raw grammar reference",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-requirement-refinement-workflow",
-            "ai-curriculum",
-            "ai-review-workflow",
-            "ai-migration-guide",
-            "ai-conformance-workflow",
-            "dsl-guide",
-            "language-spec",
-        ],
-        source_path: "docs/ai/examples-curriculum.md",
-        body_markdown: include_str!("../../../../docs/ai/examples-curriculum.md"),
-    },
-    DocEntry {
-        id: "ai-migration-guide",
-        title: "Migration Guide",
-        kind: "workflow",
-        audience: "llm-agents",
-        recommended_for: &["migration", "step-to-transitions", "cleanup"],
-        canonical_entry: false,
-        summary: "Task-oriented guide for migrating models toward the current canonical valid path.",
-        key_points: &[
-            "Covers step-to-transitions, predicates, scenarios, and suite-oriented cleanup",
-            "Explains what to preserve while migrating a model",
-        ],
-        canonical_rules: &[
-            "Preserve action ids and property ids where feasible",
-            "Use inspect and lint before verify claims after a migration",
-        ],
-        supported_features: &[
-            "Migration task order",
-            "Migration-specific review questions",
-        ],
-        unsupported_features: &[
-            "Automated migration guarantees",
-        ],
-        related_docs: &[
-            "ai-curriculum",
-            "ai-authoring-guide",
-            "ai-requirement-refinement-workflow",
-            "ai-examples-curriculum",
-            "ai-review-workflow",
-        ],
-        source_path: "docs/ai/migration-guide.md",
-        body_markdown: include_str!("../../../../docs/ai/migration-guide.md"),
-    },
-    DocEntry {
-        id: "ai-modeling-checklist",
-        title: "Modeling Checklist",
-        kind: "checklist",
-        audience: "llm-agents",
-        recommended_for: &["generation-review", "preflight"],
-        canonical_entry: false,
-        summary: "Preflight checklist for generated or reviewed valid models.",
-        key_points: &[
-            "Validate state, action, init, transition, and property shape",
-            "Check capability expectations before verify claims",
-        ],
-        canonical_rules: &[
-            "Every bounded integer field needs a range",
-            "Every action variant should carry reads and writes metadata",
-        ],
-        supported_features: &[
-            "Generation review checklist",
-            "Capability review checklist",
-        ],
-        unsupported_features: &[
-            "Product strategy",
-            "Full grammar reference",
-        ],
-        related_docs: &[
-            "ai-authoring-guide",
-            "ai-curriculum",
-            "ai-requirement-refinement-workflow",
-            "ai-review-workflow",
-            "ai-migration-guide",
-            "ai-conformance-workflow",
-            "language-spec",
-        ],
-        source_path: "docs/ai/modeling-checklist.md",
-        body_markdown: include_str!("../../../../docs/ai/modeling-checklist.md"),
-    },
-    DocEntry {
-        id: "ai-model-authoring-best-practices",
-        title: "Model Authoring Best Practices",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["maintainability", "source-adjacent-docs", "review"],
-        canonical_entry: false,
-        summary: "User-facing guidance for documenting model intent, scope, assumptions, scenarios, and critical properties close to the source.",
-        key_points: &[
-            "Explains what each model file should say near the code",
-            "Keeps long-lived review context close to the model definition",
-        ],
-        canonical_rules: &[
-            "Each model should explain scope, out-of-scope behavior, and critical checks near the source",
-        ],
-        supported_features: &[
-            "Source-adjacent documentation guidance",
-            "Review-friendly model comment structure",
-        ],
-        unsupported_features: &[
-            "Normative DSL syntax reference",
-        ],
-        related_docs: &["ai-authoring-guide", "ai-modeling-checklist", "project-organization-guide"],
-        source_path: "docs/ai/model-authoring-best-practices.md",
-        body_markdown: include_str!("../../../../docs/ai/model-authoring-best-practices.md"),
-    },
-    DocEntry {
-        id: "ai-review-workflow",
-        title: "Review Workflow",
-        kind: "workflow",
-        audience: "llm-agents",
-        recommended_for: &["review", "explain", "triage"],
-        canonical_entry: false,
-        summary: "Task-oriented guide for reviewing an existing model and deciding the next repair surface.",
-        key_points: &[
-            "Separates model review from implementation and requirement follow-up",
-            "Focuses on inspect, lint, explain, and review classification",
-        ],
-        canonical_rules: &[
-            "Do not blame the implementation before understanding the model failure",
-            "Treat capability issues separately from semantic bugs",
-        ],
-        supported_features: &[
-            "Review task order",
-            "Review checklist and anti-patterns",
-        ],
-        unsupported_features: &[
-            "Graph-specific rendering details",
-        ],
-        related_docs: &[
-            "ai-curriculum",
-            "ai-authoring-guide",
-            "ai-requirement-refinement-workflow",
-            "ai-common-pitfalls",
-            "ai-modeling-checklist",
-            "ai-conformance-workflow",
-        ],
-        source_path: "docs/ai/review-workflow.md",
-        body_markdown: include_str!("../../../../docs/ai/review-workflow.md"),
-    },
-    DocEntry {
-        id: "architecture-note",
-        title: "Architecture",
-        kind: "architecture",
-        audience: "humans-and-agents",
-        recommended_for: &["system-design", "package-roles"],
-        canonical_entry: false,
-        summary: "Repository architecture note covering package roles, layering, DTO boundaries, and solver-neutral design.",
-        key_points: &[
-            "Describes the clean-architecture split across packages and boundaries",
-            "Explains solver-neutral layering and package responsibilities",
-        ],
-        canonical_rules: &[
-            "Use this doc for repository design questions, not DSL syntax questions",
-        ],
-        supported_features: &[
-            "Architecture overview",
-            "Layering and DTO boundary explanation",
-        ],
-        unsupported_features: &[
-            "End-user modeling syntax",
-        ],
-        related_docs: &["docs-index", "dsl-guide", "frontend-adr"],
-        source_path: "docs/architecture.md",
-        body_markdown: include_str!("../../../../docs/architecture.md"),
-    },
-    DocEntry {
-        id: "artifact-inventory-guide",
-        title: "Artifact Inventory and Run History",
-        kind: "operations",
-        audience: "humans-and-agents",
-        recommended_for: &["artifacts", "run-history", "automation"],
-        canonical_entry: false,
-        summary: "Guide to the artifact index, run-history files, and CLI listing surfaces used to correlate valid outputs across runs.",
-        key_points: &[
-            "Documents artifacts/index.json and artifacts/run-history.json",
-            "Explains how valid and cargo valid expose artifact inventory listings",
-        ],
-        canonical_rules: &[
-            "Treat artifact inventory as operational metadata, not normative model semantics",
-        ],
-        supported_features: &[
-            "Artifact index layout",
-            "Run-history conventions",
-            "CLI inventory commands",
-        ],
-        unsupported_features: &[
-            "Modeling syntax reference",
-        ],
-        related_docs: &["docs-index", "install-guide", "architecture-note"],
-        source_path: "docs/artifacts.md",
-        body_markdown: include_str!("../../../../docs/artifacts.md"),
-    },
-    DocEntry {
-        id: "ci-workflow-templates-guide",
-        title: "CI Workflow Templates",
-        kind: "operations",
-        audience: "humans-and-agents",
-        recommended_for: &["ci", "automation", "templates"],
-        canonical_entry: false,
-        summary: "Reusable CI workflow templates and command equivalents for inspect, check, testgen, conformance, and doc drift checks.",
-        key_points: &[
-            "Explains the built-in GitHub Actions templates",
-            "Maps the templates back to ordinary valid and cargo valid commands",
-        ],
-        canonical_rules: &[
-            "Treat the templates as reusable starting points, not as the only supported CI shape",
-        ],
-        supported_features: &[
-            "CI template overview",
-            "Command-to-template mapping",
-        ],
-        unsupported_features: &[
-            "Repository-specific deployment policy",
-        ],
-        related_docs: &["artifact-inventory-guide", "install-guide", "docs-index"],
-        source_path: "docs/ci/README.md",
-        body_markdown: include_str!("../../../../docs/ci/README.md"),
-    },
-    DocEntry {
-        id: "composition-guide",
-        title: "Composition Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["composition", "integration-models", "shared-state-review"],
-        canonical_entry: false,
-        summary: "User-facing guide to the current supported composition helper story, integration-model pattern, and composition limits.",
-        key_points: &[
-            "Explains when to use standalone models, integration models, or helper-based composition",
-            "Clarifies that broader first-class compose syntax is still future work",
-        ],
-        canonical_rules: &[
-            "Treat the current composition story as helper-oriented and explicit",
-        ],
-        supported_features: &[
-            "Current compose helper guidance",
-            "Integration-model decision rules",
-        ],
-        unsupported_features: &[
-            "General first-class compose DSL",
-        ],
-        related_docs: &["project-organization-guide", "dsl-guide", "graph-and-review-guide"],
-        source_path: "docs/composition.md",
-        body_markdown: include_str!("../../../../docs/composition.md"),
-    },
-    DocEntry {
-        id: "dsl-guide",
-        title: "Rust DSL Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["user-guide", "authoring"],
-        canonical_entry: false,
-        summary: "User-facing guide for writing, operating, and choosing between transitions and step.",
-        key_points: &[
-            "Explains the user-facing modeling language",
-            "Covers canonical modeling path and current surface pieces",
-        ],
-        canonical_rules: &[
-            "Prefer transitions for long-lived models",
-            "Use readiness when diagnostics are ambiguous",
-        ],
-        supported_features: &[
-            "Conceptual explanation of state, actions, model definition, and readiness",
-        ],
-        unsupported_features: &[
-            "Normative grammar-level completeness",
-        ],
-        related_docs: &["ai-authoring-guide", "language-spec"],
-        source_path: "docs/dsl/README.md",
-        body_markdown: include_str!("../../../../docs/dsl/README.md"),
-    },
-    DocEntry {
-        id: "graph-and-review-guide",
-        title: "Graph and Review Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["review", "graph", "deadlock", "field-diff"],
-        canonical_entry: false,
-        summary: "User-facing guide to choosing the right graph, trace, and explain surfaces for review-oriented debugging.",
-        key_points: &[
-            "Explains the purpose of overview, logic, failure, deadlock, and SCC graph views",
-            "Shows how field-diff-oriented explain output fits into review workflows",
-        ],
-        canonical_rules: &[
-            "Do not start from the largest graph when a smaller failure-oriented view answers the question",
-        ],
-        supported_features: &[
-            "Graph-view selection guidance",
-            "Failure and deadlock review flows",
-        ],
-        unsupported_features: &[
-            "Normative graph schema reference",
-        ],
-        related_docs: &["testgen-strategies-guide", "testgen-and-handoff-guide", "ai-review-workflow"],
-        source_path: "docs/graph-and-review.md",
-        body_markdown: include_str!("../../../../docs/graph-and-review.md"),
-    },
-    DocEntry {
-        id: "fizzbuzz-validation-report",
-        title: "FizzBuzz Model Validation Report",
-        kind: "report",
-        audience: "humans-and-agents",
-        recommended_for: &["worked-example", "validation-review"],
-        canonical_entry: false,
-        summary: "Worked validation report for the FizzBuzz model, including strengths and known limitations in exploration depth.",
-        key_points: &[
-            "Shows how a concrete model behaves across inspect, verify, readiness, graph, coverage, and testgen",
-            "Highlights a real limitation around shallow exploration depth",
-        ],
-        canonical_rules: &[
-            "Treat this report as an example assessment, not as a normative spec",
-        ],
-        supported_features: &[
-            "Worked example of command-by-command validation",
-            "Concrete notes about strengths and current weaknesses",
-        ],
-        unsupported_features: &[
-            "General language definition",
-        ],
-        related_docs: &["dsl-guide", "language-spec"],
-        source_path: "docs/dsl/fizzbuzz-validation-report.md",
-        body_markdown: include_str!("../../../../docs/dsl/fizzbuzz-validation-report.md"),
-    },
-    DocEntry {
-        id: "language-evolution",
-        title: "DSL Language Evolution",
-        kind: "evolution",
-        audience: "humans-and-agents",
-        recommended_for: &["future-direction", "design-notes"],
-        canonical_entry: false,
-        summary: "Non-normative design notes about candidate directions for the valid DSL.",
-        key_points: &[
-            "Separates implemented behavior from future candidate features",
-            "Covers relational actions, richer properties, text abstractions, and packaging",
-        ],
-        canonical_rules: &[
-            "Do not treat this document as implemented behavior",
-        ],
-        supported_features: &[
-            "Future design notes",
-            "Candidate feature rationale",
-        ],
-        unsupported_features: &[
-            "Normative current syntax guarantees",
-        ],
-        related_docs: &["language-spec", "frontend-adr", "dsl-guide"],
-        source_path: "docs/dsl/language-evolution.md",
-        body_markdown: include_str!("../../../../docs/dsl/language-evolution.md"),
-    },
-    DocEntry {
-        id: "parameterized-action-roadmap",
-        title: "Parameterized Action Roadmap",
-        kind: "roadmap",
-        audience: "humans-and-agents",
-        recommended_for: &["future-direction", "bounded-choices", "action-design"],
-        canonical_entry: false,
-        summary: "Incremental plan for moving from enum-only actions to bounded parameterized actions without encouraging action explosion.",
-        key_points: &[
-            "Explains why bounded choices come before a full parameterized-action system",
-            "Documents the current and planned action-surface boundary",
-        ],
-        canonical_rules: &[
-            "Treat this document as roadmap guidance, not implemented behavior beyond the current bounded choices",
-        ],
-        supported_features: &[
-            "Action-surface roadmap",
-            "Bounded-choice rationale",
-        ],
-        unsupported_features: &[
-            "Normative implemented syntax guarantees beyond the current bounded surface",
-        ],
-        related_docs: &["dsl-guide", "language-evolution", "language-spec"],
-        source_path: "docs/dsl/parameterized-action-roadmap.md",
-        body_markdown: include_str!("../../../../docs/dsl/parameterized-action-roadmap.md"),
-    },
-    DocEntry {
-        id: "language-spec",
-        title: "DSL Language Spec",
-        kind: "spec",
-        audience: "humans-and-agents",
-        recommended_for: &["normative-reference", "supported-surface"],
-        canonical_entry: false,
-        summary: "Normative description of the currently implemented valid DSL surface and capability boundaries.",
-        key_points: &[
-            "Separates supported syntax, capability constraints, and non-goals",
-            "Defines the implemented surface rather than future ideas",
-        ],
-        canonical_rules: &[
-            "Shorthand model headers are unsupported",
-            "Property kind surface is invariant-only",
-        ],
-        supported_features: &[
-            "Supported types, metadata, expressions, and capability fields",
-        ],
-        unsupported_features: &[
-            "General-purpose containers",
-            "Infinite string theory",
-            "Higher-order logic",
-        ],
-        related_docs: &["ai-authoring-guide", "dsl-guide"],
-        source_path: "docs/dsl/language-spec.md",
-        body_markdown: include_str!("../../../../docs/dsl/language-spec.md"),
-    },
-    DocEntry {
-        id: "install-guide",
-        title: "Install Guide",
-        kind: "install",
-        audience: "humans-and-agents",
-        recommended_for: &["setup", "distribution"],
-        canonical_entry: false,
-        summary: "Installation and packaging guidance for binary users, Rust model authors, and Docker-based execution.",
-        key_points: &[
-            "Explains the practical install modes and feature flags",
-            "Clarifies the Rust toolchain requirement for cargo valid workflows",
-        ],
-        canonical_rules: &[
-            "Use cargo install for Rust model authoring and prebuilt binaries for binary-only usage",
-        ],
-        supported_features: &[
-            "Install modes",
-            "Backend selection notes",
-            "Project setup commands",
-        ],
-        unsupported_features: &[
-            "DSL syntax reference",
-        ],
-        related_docs: &["docs-index", "ai-authoring-guide", "dsl-guide"],
-        source_path: "docs/install.md",
-        body_markdown: include_str!("../../../../docs/install.md"),
-    },
-    DocEntry {
-        id: "quickstart-guide",
-        title: "Quickstart Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["first-run", "bootstrap", "non-rust-onboarding"],
-        canonical_entry: false,
-        summary: "Shortest path from binary install to valid init, scaffold verification, inspect, and handoff.",
-        key_points: &[
-            "Optimized for non-Rust users evaluating valid for the first time",
-            "Centers the first successful run around valid init, inspect, and handoff",
-        ],
-        canonical_rules: &[
-            "Treat valid init plus valid init --check as the first onboarding checkpoint",
-        ],
-        supported_features: &[
-            "Shortest first-run sequence",
-            "Review-first onboarding path",
-            "Cross-links to install, project organization, and handoff guidance",
-        ],
-        unsupported_features: &[
-            "Deep DSL syntax reference",
-        ],
-        related_docs: &[
-            "install-guide",
-            "project-organization-guide",
-            "testgen-and-handoff-guide",
-            "ai-authoring-guide",
-        ],
-        source_path: "docs/quickstart.md",
-        body_markdown: include_str!("../../../../docs/quickstart.md"),
-    },
-    DocEntry {
-        id: "project-organization-guide",
-        title: "Project Organization Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["project-layout", "integration-models", "bootstrap"],
-        canonical_entry: false,
-        summary: "Recommended layout for model files, registries, generated artifacts, and integration-model organization in valid projects.",
-        key_points: &[
-            "Explains the project-first layout created by valid init",
-            "Shows where registries, models, generated artifacts, and integration models belong",
-        ],
-        canonical_rules: &[
-            "Keep registry files thin and keep model logic in explicit model modules",
-        ],
-        supported_features: &[
-            "Project layout guidance",
-            "Integration-model organization",
-            "Generated artifact boundaries",
-        ],
-        unsupported_features: &[
-            "Normative DSL syntax definition",
-        ],
-        related_docs: &["composition-guide", "dsl-guide", "testgen-and-handoff-guide"],
-        source_path: "docs/project-organization.md",
-        body_markdown: include_str!("../../../../docs/project-organization.md"),
-    },
-    DocEntry {
-        id: "testgen-and-handoff-guide",
-        title: "Testgen and Handoff Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["testgen", "handoff", "conformance"],
-        canonical_entry: false,
-        summary: "User-facing guide to language-agnostic test specs, handoff summaries, and implementation-facing conformance workflows.",
-        key_points: &[
-            "Explains the contract between testgen, handoff, and conformance",
-            "Clarifies observation-first vectors and recommended vector summaries",
-        ],
-        canonical_rules: &[
-            "Treat generated vectors as language-agnostic test specs rather than framework-specific code",
-        ],
-        supported_features: &[
-            "Observation-first vector guidance",
-            "Handoff summary interpretation",
-            "Implementation-surface selection",
-        ],
-        unsupported_features: &[
-            "Framework-specific test generator output",
-        ],
-        related_docs: &["testgen-strategies-guide", "ai-conformance-workflow", "graph-and-review-guide"],
-        source_path: "docs/testgen-and-handoff.md",
-        body_markdown: include_str!("../../../../docs/testgen-and-handoff.md"),
-    },
-    DocEntry {
-        id: "testgen-strategies-guide",
-        title: "Testgen Strategies Guide",
-        kind: "guide",
-        audience: "humans-and-agents",
-        recommended_for: &["testgen", "strategy-selection", "deadlock", "enablement"],
-        canonical_entry: false,
-        summary: "User-facing guide to choosing between replay, witness, deadlock, enablement, and grouped test generation strategies.",
-        key_points: &[
-            "Separates replay-oriented, exploration-oriented, and unblock-oriented strategies",
-            "Explains grouping metadata and focus-action use",
-        ],
-        canonical_rules: &[
-            "Pick the strategy that matches the review question instead of defaulting to the biggest trace",
-        ],
-        supported_features: &[
-            "Strategy-by-strategy selection guidance",
-            "Grouped vector explanation",
-        ],
-        unsupported_features: &[
-            "Complete implementation details of each generator",
-        ],
-        related_docs: &["testgen-and-handoff-guide", "graph-and-review-guide", "artifact-inventory-guide"],
-        source_path: "docs/testgen-strategies.md",
-        body_markdown: include_str!("../../../../docs/testgen-strategies.md"),
-    },
-];
+#[derive(Debug, Deserialize)]
+struct DocManifestEntry {
+    id: String,
+    title: String,
+    kind: String,
+    audience: String,
+    recommended_for: Vec<String>,
+    canonical_entry: bool,
+    summary: String,
+    key_points: Vec<String>,
+    canonical_rules: Vec<String>,
+    supported_features: Vec<String>,
+    unsupported_features: Vec<String>,
+    related_docs: Vec<String>,
+    source_path: String,
+}
 
-pub(crate) const EXAMPLES: &[ExampleEntry] = &[
-    ExampleEntry {
-        id: "registry-counter-basics",
-        title: "Counter basics",
-        difficulty: "intro",
-        concepts: &["registry-shape", "bounded-int", "action-metadata", "step"],
-        mode: "registry",
-        backend_expectation: "explicit-ready",
-        source_path: "examples/valid_models.rs",
-        recommended_order: 1,
-        recommended_docs: &["ai-authoring-guide", "ai-examples-curriculum", "dsl-guide"],
-        focus_models: &["counter", "failing-counter"],
-        summary: "Smallest registry-style example and the easiest place to learn inspect, verify, and counterexamples.",
-        commands: &[
-            "cargo valid --registry examples/valid_models.rs inspect counter",
-            "cargo valid --registry examples/valid_models.rs verify failing-counter",
-        ],
-        source_text: include_str!("../../../../examples/valid_models.rs"),
-    },
-    ExampleEntry {
-        id: "tenant-relations-map",
-        title: "Tenant relations and map",
-        difficulty: "intermediate",
-        concepts: &["FiniteRelation", "FiniteMap", "tenant-isolation", "transitions"],
-        mode: "registry",
-        backend_expectation: "solver-ready",
-        source_path: "examples/tenant_relation_registry.rs",
-        recommended_order: 2,
-        recommended_docs: &["ai-authoring-guide", "language-spec", "ai-examples-curriculum"],
-        focus_models: &["tenant-relation-safe", "tenant-relation-regression"],
-        summary: "Shows relation and map modeling in a small declarative cross-tenant policy example.",
-        commands: &[
-            "cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe",
-            "cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS",
-        ],
-        source_text: include_str!("../../../../examples/tenant_relation_registry.rs"),
-    },
-    ExampleEntry {
-        id: "saas-grouped-transitions",
-        title: "SaaS grouped transitions",
-        difficulty: "intermediate",
-        concepts: &["grouped-transitions", "entitlements", "path-tags", "tenant-isolation"],
-        mode: "registry",
-        backend_expectation: "solver-ready",
-        source_path: "examples/saas_multi_tenant_registry.rs",
-        recommended_order: 3,
-        recommended_docs: &["ai-authoring-guide", "dsl-guide", "ai-examples-curriculum"],
-        focus_models: &["tenant-isolation-safe", "tenant-isolation-regression"],
-        summary: "Demonstrates grouped declarative transitions for SaaS isolation and entitlement flows.",
-        commands: &[
-            "cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe",
-            "cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS",
-        ],
-        source_text: include_str!("../../../../examples/saas_multi_tenant_registry.rs"),
-    },
-    ExampleEntry {
-        id: "password-explicit-ready",
-        title: "Password explicit-ready model",
-        difficulty: "advanced",
-        concepts: &["String", "regex_match", "explicit-ready", "readiness"],
-        mode: "registry",
-        backend_expectation: "explicit-ready",
-        source_path: "examples/password_policy.rs",
-        recommended_order: 4,
-        recommended_docs: &["ai-authoring-guide", "language-spec", "ai-common-pitfalls"],
-        focus_models: &["password-policy-safe", "password-policy-regression"],
-        summary: "String and regex-heavy policy example that teaches capability boundaries and explicit-first expectations.",
-        commands: &[
-            "cargo valid --registry examples/password_policy.rs readiness password-policy-safe",
-            "cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG",
-        ],
-        source_text: include_str!("../../../../examples/password_policy.rs"),
-    },
-    ExampleEntry {
-        id: "compose-helper-minimal",
-        title: "Compose helper minimal",
-        difficulty: "intermediate",
-        concepts: &["compose_models", "shared-state-sync", "helper-based-composition"],
-        mode: "helper",
-        backend_expectation: "explicit-ready",
-        source_path: "examples/compose_helper_registry.rs",
-        recommended_order: 5,
-        recommended_docs: &["composition-guide", "project-organization-guide", "graph-and-review-guide"],
-        focus_models: &["Approval+Fulfillment"],
-        summary: "Smallest helper-based composition example that stays honest about the current supported compose story.",
-        commands: &["cargo run --example compose_helper_registry"],
-        source_text: include_str!("../../../../examples/compose_helper_registry.rs"),
-    },
-    ExampleEntry {
-        id: "deadlock-enablement-registry",
-        title: "Deadlock and enablement registry",
-        difficulty: "intermediate",
-        concepts: &["deadlock", "enablement", "focus-action", "risk_path"],
-        mode: "registry",
-        backend_expectation: "explicit-ready",
-        source_path: "examples/deadlock_enablement_registry.rs",
-        recommended_order: 6,
-        recommended_docs: &["testgen-strategies-guide", "graph-and-review-guide", "testgen-and-handoff-guide"],
-        focus_models: &["deadlock-terminal", "blocked-recovery"],
-        summary: "Small registry for shortest deadlock traces and action-enablement traces.",
-        commands: &[
-            "cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock",
-            "cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER",
-        ],
-        source_text: include_str!("../../../../examples/deadlock_enablement_registry.rs"),
-    },
-    ExampleEntry {
-        id: "handoff-testgen-alignment",
-        title: "Handoff and testgen alignment",
-        difficulty: "intermediate",
-        concepts: &["handoff", "counterexample", "risk-grouping", "observation-first"],
-        mode: "registry",
-        backend_expectation: "explicit-ready",
-        source_path: "examples/handoff_testgen_registry.rs",
-        recommended_order: 7,
-        recommended_docs: &["testgen-and-handoff-guide", "ai-conformance-workflow", "testgen-strategies-guide"],
-        focus_models: &["review-gate-safe", "review-gate-regression"],
-        summary: "Small review-gate example that makes handoff summaries and generated vectors line up.",
-        commands: &[
-            "cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json",
-            "cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json",
-        ],
-        source_text: include_str!("../../../../examples/handoff_testgen_registry.rs"),
-    },
-];
+#[derive(Debug, Deserialize)]
+struct ExampleManifestEntry {
+    id: String,
+    title: String,
+    difficulty: String,
+    concepts: Vec<String>,
+    mode: String,
+    backend_expectation: String,
+    source_path: String,
+    recommended_order: u64,
+    recommended_docs: Vec<String>,
+    focus_models: Vec<String>,
+    summary: String,
+    commands: Vec<String>,
+}
+
+const DOC_MANIFEST_JSON: &str = include_str!("../../../../docs/mcp/catalog.docs.json");
+const EXAMPLE_MANIFEST_JSON: &str = include_str!("../../../../docs/mcp/catalog.examples.json");
+
+static DOCS: OnceLock<Vec<DocEntry>> = OnceLock::new();
+static EXAMPLES: OnceLock<Vec<ExampleEntry>> = OnceLock::new();
+
+pub(crate) fn docs() -> &'static [DocEntry] {
+    DOCS.get_or_init(load_docs).as_slice()
+}
+
+pub(crate) fn examples() -> &'static [ExampleEntry] {
+    EXAMPLES.get_or_init(load_examples).as_slice()
+}
 
 pub(crate) fn docs_index() -> Vec<Value> {
-    DOCS.iter().copied().map(doc_summary).collect()
+    docs().iter().map(doc_summary).collect()
 }
 
 pub(crate) fn docs_canonical_entry() -> &'static str {
-    DOCS.iter()
+    docs()
+        .iter()
         .find(|doc| doc.canonical_entry)
-        .map(|doc| doc.id)
+        .map(|doc| doc.id.as_str())
         .unwrap_or("ai-authoring-guide")
 }
 
-pub(crate) fn doc_entry(id: &str) -> Option<DocEntry> {
-    DOCS.iter().copied().find(|doc| doc.id == id)
+pub(crate) fn doc_entry(id: &str) -> Option<&'static DocEntry> {
+    docs().iter().find(|doc| doc.id == id)
 }
 
 pub(crate) fn examples_index() -> Vec<Value> {
-    EXAMPLES.iter().copied().map(example_summary).collect()
+    examples().iter().map(example_summary).collect()
 }
 
-pub(crate) fn example_entry(id: &str) -> Option<ExampleEntry> {
-    EXAMPLES.iter().copied().find(|example| example.id == id)
+pub(crate) fn example_entry(id: &str) -> Option<&'static ExampleEntry> {
+    examples().iter().find(|example| example.id == id)
 }
 
-fn doc_summary(doc: DocEntry) -> Value {
+fn load_docs() -> Vec<DocEntry> {
+    let manifest: Vec<DocManifestEntry> =
+        serde_json::from_str(DOC_MANIFEST_JSON).expect("docs manifest should parse");
+    manifest
+        .into_iter()
+        .map(|entry| DocEntry {
+            body_markdown: doc_body_markdown(&entry.source_path),
+            id: entry.id,
+            title: entry.title,
+            kind: entry.kind,
+            audience: entry.audience,
+            recommended_for: entry.recommended_for,
+            canonical_entry: entry.canonical_entry,
+            summary: entry.summary,
+            key_points: entry.key_points,
+            canonical_rules: entry.canonical_rules,
+            supported_features: entry.supported_features,
+            unsupported_features: entry.unsupported_features,
+            related_docs: entry.related_docs,
+            source_path: entry.source_path,
+        })
+        .collect()
+}
+
+fn load_examples() -> Vec<ExampleEntry> {
+    let manifest: Vec<ExampleManifestEntry> =
+        serde_json::from_str(EXAMPLE_MANIFEST_JSON).expect("examples manifest should parse");
+    manifest
+        .into_iter()
+        .map(|entry| ExampleEntry {
+            source_text: example_source_text(&entry.source_path),
+            id: entry.id,
+            title: entry.title,
+            difficulty: entry.difficulty,
+            concepts: entry.concepts,
+            mode: entry.mode,
+            backend_expectation: entry.backend_expectation,
+            source_path: entry.source_path,
+            recommended_order: entry.recommended_order,
+            recommended_docs: entry.recommended_docs,
+            focus_models: entry.focus_models,
+            summary: entry.summary,
+            commands: entry.commands,
+        })
+        .collect()
+}
+
+fn doc_body_markdown(source_path: &str) -> &'static str {
+    match source_path {
+        "docs/README.md" => include_str!("../../../../docs/README.md"),
+        "docs/ai/authoring-guide.md" => include_str!("../../../../docs/ai/authoring-guide.md"),
+        "docs/ai/requirement-refinement-workflow.md" => {
+            include_str!("../../../../docs/ai/requirement-refinement-workflow.md")
+        }
+        "docs/ai/candidate-comparison-workflow.md" => {
+            include_str!("../../../../docs/ai/candidate-comparison-workflow.md")
+        }
+        "docs/ai/conformance-workflow.md" => {
+            include_str!("../../../../docs/ai/conformance-workflow.md")
+        }
+        "docs/ai/common-pitfalls.md" => include_str!("../../../../docs/ai/common-pitfalls.md"),
+        "docs/ai/curriculum.md" => include_str!("../../../../docs/ai/curriculum.md"),
+        "docs/ai/examples-curriculum.md" => {
+            include_str!("../../../../docs/ai/examples-curriculum.md")
+        }
+        "docs/ai/migration-guide.md" => include_str!("../../../../docs/ai/migration-guide.md"),
+        "docs/ai/modeling-checklist.md" => {
+            include_str!("../../../../docs/ai/modeling-checklist.md")
+        }
+        "docs/ai/model-authoring-best-practices.md" => {
+            include_str!("../../../../docs/ai/model-authoring-best-practices.md")
+        }
+        "docs/ai/review-workflow.md" => include_str!("../../../../docs/ai/review-workflow.md"),
+        "docs/architecture.md" => include_str!("../../../../docs/architecture.md"),
+        "docs/artifacts.md" => include_str!("../../../../docs/artifacts.md"),
+        "docs/ci/README.md" => include_str!("../../../../docs/ci/README.md"),
+        "docs/composition.md" => include_str!("../../../../docs/composition.md"),
+        "docs/dsl/README.md" => include_str!("../../../../docs/dsl/README.md"),
+        "docs/graph-and-review.md" => include_str!("../../../../docs/graph-and-review.md"),
+        "docs/dsl/language-evolution.md" => {
+            include_str!("../../../../docs/dsl/language-evolution.md")
+        }
+        "docs/dsl/parameterized-action-roadmap.md" => {
+            include_str!("../../../../docs/dsl/parameterized-action-roadmap.md")
+        }
+        "docs/dsl/language-spec.md" => include_str!("../../../../docs/dsl/language-spec.md"),
+        "docs/install.md" => include_str!("../../../../docs/install.md"),
+        "docs/quickstart.md" => include_str!("../../../../docs/quickstart.md"),
+        "docs/project-organization.md" => {
+            include_str!("../../../../docs/project-organization.md")
+        }
+        "docs/testgen-and-handoff.md" => {
+            include_str!("../../../../docs/testgen-and-handoff.md")
+        }
+        "docs/testgen-strategies.md" => include_str!("../../../../docs/testgen-strategies.md"),
+        other => panic!("unmapped docs catalog source_path `{other}`"),
+    }
+}
+
+fn example_source_text(source_path: &str) -> &'static str {
+    match source_path {
+        "examples/valid_models.rs" => include_str!("../../../../examples/valid_models.rs"),
+        "examples/tenant_relation_registry.rs" => {
+            include_str!("../../../../examples/tenant_relation_registry.rs")
+        }
+        "examples/saas_multi_tenant_registry.rs" => {
+            include_str!("../../../../examples/saas_multi_tenant_registry.rs")
+        }
+        "examples/password_policy.rs" => include_str!("../../../../examples/password_policy.rs"),
+        "examples/compose_helper_registry.rs" => {
+            include_str!("../../../../examples/compose_helper_registry.rs")
+        }
+        "examples/deadlock_enablement_registry.rs" => {
+            include_str!("../../../../examples/deadlock_enablement_registry.rs")
+        }
+        "examples/handoff_testgen_registry.rs" => {
+            include_str!("../../../../examples/handoff_testgen_registry.rs")
+        }
+        other => panic!("unmapped examples catalog source_path `{other}`"),
+    }
+}
+
+fn doc_summary(doc: &DocEntry) -> Value {
     json!({
         "doc_id": doc.id,
         "title": doc.title,
@@ -1036,7 +245,7 @@ fn doc_summary(doc: DocEntry) -> Value {
     })
 }
 
-fn example_summary(example: ExampleEntry) -> Value {
+fn example_summary(example: &ExampleEntry) -> Value {
     json!({
         "example_id": example.id,
         "title": example.title,
@@ -1055,7 +264,7 @@ fn example_summary(example: ExampleEntry) -> Value {
 mod tests {
     use std::{collections::BTreeSet, fs, path::PathBuf};
 
-    use super::{doc_entry, docs_canonical_entry, example_entry, DOCS, EXAMPLES};
+    use super::{doc_entry, docs, docs_canonical_entry, example_entry, examples};
 
     fn manifest_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1063,24 +272,27 @@ mod tests {
 
     #[test]
     fn doc_ids_are_unique_and_have_one_canonical_entry() {
-        let ids = DOCS.iter().map(|doc| doc.id).collect::<BTreeSet<_>>();
-        assert_eq!(ids.len(), DOCS.len(), "duplicate doc ids");
+        let ids = docs()
+            .iter()
+            .map(|doc| doc.id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), docs().len(), "duplicate doc ids");
 
-        let canonical = DOCS.iter().filter(|doc| doc.canonical_entry).count();
+        let canonical = docs().iter().filter(|doc| doc.canonical_entry).count();
         assert_eq!(canonical, 1, "expected exactly one canonical entry");
         assert!(doc_entry(docs_canonical_entry()).is_some());
     }
 
     #[test]
     fn example_ids_are_unique() {
-        let ids = EXAMPLES
+        let ids = examples()
             .iter()
-            .map(|example| example.id)
+            .map(|example| example.id.as_str())
             .collect::<BTreeSet<_>>();
-        assert_eq!(ids.len(), EXAMPLES.len(), "duplicate example ids");
-        for example in EXAMPLES {
+        assert_eq!(ids.len(), examples().len(), "duplicate example ids");
+        for example in examples() {
             assert!(
-                example_entry(example.id).is_some(),
+                example_entry(&example.id).is_some(),
                 "missing example entry {}",
                 example.id
             );
@@ -1088,46 +300,72 @@ mod tests {
     }
 
     #[test]
-    fn catalog_covers_all_non_rdd_markdown_docs() {
-        let docs_root = manifest_dir().join("docs");
-        let actual = walk_markdown_files(&docs_root)
-            .into_iter()
-            .filter(|path| !path.starts_with("docs/rdd/"))
-            .collect::<BTreeSet<_>>();
-        let catalog = DOCS
-            .iter()
-            .map(|doc| doc.source_path.to_string())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            catalog, actual,
-            "docs catalog is missing or over-reporting markdown docs"
-        );
+    fn catalog_covers_all_manifest_listed_public_docs() {
+        for doc in docs() {
+            let path = manifest_dir().join(&doc.source_path);
+            assert!(
+                path.is_file(),
+                "missing public doc source {}",
+                doc.source_path
+            );
+        }
     }
 
-    fn walk_markdown_files(root: &PathBuf) -> Vec<String> {
-        let mut files = Vec::new();
-        let mut stack = vec![root.clone()];
-        while let Some(dir) = stack.pop() {
-            let entries = fs::read_dir(&dir).expect("docs directory should be readable");
-            for entry in entries {
-                let entry = entry.expect("docs entry should be readable");
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
-                    continue;
-                }
-                let relative = path
-                    .strip_prefix(manifest_dir())
-                    .expect("path should be inside manifest dir")
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                files.push(relative);
+    #[test]
+    fn related_doc_references_resolve() {
+        let ids = docs()
+            .iter()
+            .map(|doc| doc.id.as_str())
+            .collect::<BTreeSet<_>>();
+        for doc in docs() {
+            for related in &doc.related_docs {
+                assert!(
+                    ids.contains(related.as_str()),
+                    "unknown related doc `{related}` in {}",
+                    doc.id
+                );
             }
         }
-        files.sort();
-        files
+    }
+
+    #[test]
+    fn internal_docs_are_not_exposed() {
+        let catalog = docs()
+            .iter()
+            .map(|doc| doc.source_path.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(!catalog.contains("docs/adr/0001-valid-model-frontend.md"));
+        assert!(
+            catalog.iter().all(|path| !path.starts_with("docs/rdd/")),
+            "RDD docs must stay out of the MCP docs catalog"
+        );
+        assert!(!catalog.contains("docs/dsl/fizzbuzz-validation-report.md"));
+        assert!(doc_entry("frontend-adr").is_none());
+        assert!(doc_entry("fizzbuzz-validation-report").is_none());
+    }
+
+    #[test]
+    fn example_manifest_source_paths_exist() {
+        for example in examples() {
+            let path = manifest_dir().join(&example.source_path);
+            assert!(
+                path.is_file(),
+                "missing example source {}",
+                example.source_path
+            );
+        }
+    }
+
+    #[test]
+    fn manifests_are_valid_json_files() {
+        let docs_manifest = manifest_dir().join("docs/mcp/catalog.docs.json");
+        let examples_manifest = manifest_dir().join("docs/mcp/catalog.examples.json");
+        let docs_text =
+            fs::read_to_string(docs_manifest).expect("docs manifest should be readable");
+        let examples_text =
+            fs::read_to_string(examples_manifest).expect("examples manifest should be readable");
+        serde_json::from_str::<serde_json::Value>(&docs_text).expect("docs manifest should parse");
+        serde_json::from_str::<serde_json::Value>(&examples_text)
+            .expect("examples manifest should parse");
     }
 }

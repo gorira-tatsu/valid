@@ -1,15 +1,15 @@
 # Quickstart
 
-Use this guide if you want to try `valid` quickly, especially if you are not
-planning to author Rust models on day one.
+Use this guide if you want to try the Rust DSL path quickly.
 
 ## 3-Minute Path
 
-1. Install a prebuilt `valid` binary for your platform.
+1. Install `valid` with Cargo.
 2. Create or enter an empty project directory.
 3. Run:
 
 ```sh
+cargo install --git https://github.com/gorira-tatsu/valid --branch main valid --features varisat-backend
 valid onboarding
 ```
 
@@ -78,19 +78,6 @@ Look at the generated graph:
 ```sh
 cargo valid graph approval-model --view=overview
 ```
-
-## If You Only Want Review and Handoff
-
-You can still get value from `valid` without becoming a Rust model author on
-day one.
-
-Start with:
-
-- `valid onboarding`
-- or the manual sequence above if you prefer copy-paste commands
-
-That path lets you review a model, inspect its properties, and hand a concrete
-brief to an implementation team or AI workflow.
 
 ## When to Read More
 

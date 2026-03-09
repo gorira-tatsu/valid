@@ -1,15 +1,16 @@
 # valid
 
-Finite-state verification for business-rule models, with a Rust-first core and
-an onboarding path that does not require you to start as a Rust model author.
+Finite-state verification for business-rule models, with a Rust DSL and
+`cargo valid` as the main product path.
 
 `valid` is aimed at models such as authorization, pricing, entitlements, and
 stateful workflow rules. The main path is:
 
-1. Write a model in Rust
-2. Export it through a small registry file
-3. Run `valid init` once for a new project
-4. Use `cargo valid` from the project root
+1. Install `valid` with Cargo
+2. Run `valid init` once for a new project
+3. Write a model in Rust
+4. Export it through a small registry file
+5. Use `cargo valid` from the project root
 
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
@@ -79,11 +80,12 @@ The product story is now:
 
 If you are evaluating `valid`, start here.
 
-1. Install a prebuilt `valid` binary for your platform.
+1. Install `valid` with Cargo.
 2. Create or enter a project directory.
 3. Run:
 
 ```sh
+cargo install --git https://github.com/gorira-tatsu/valid --branch main valid --features varisat-backend
 valid onboarding
 ```
 
@@ -105,13 +107,11 @@ If you want installation details, read [docs/install.md](./docs/install.md).
 
 ## Quick Start
 
-There are two user stories:
+Install `valid` with Cargo:
 
-- `binary user`
-  install a prebuilt binary, use `valid onboarding`, and review models through
-  inspect/graph/handoff flows
-- `Rust model author`
-  install with Cargo and use `cargo valid` against Rust registries
+```sh
+cargo install --git https://github.com/gorira-tatsu/valid --branch main valid --features varisat-backend
+```
 
 Run the full test suite:
 
@@ -602,12 +602,12 @@ cargo valid --registry benchmarks/registries/enterprise_scale_registry.rs verify
 
 ## Packaging Notes
 
-If you are distributing `valid` to non-Rust users:
+If you are distributing `valid` inside a Rust-oriented team:
 
-- ship prebuilt `valid` and `cargo-valid` binaries
-- document that `.valid` compatibility mode works without Rust DSL authoring
-- document that Rust registry projects still require `cargo` because their
-  models are compiled on demand
+- prefer a Cargo-based install path
+- document that Rust registry projects require `cargo` because models are
+  compiled on demand
+- treat `.valid` mode as a compatibility path, not the main authoring path
 
 This is why the repository keeps solver integrations behind adapters and keeps
 the install guide separate from the DSL guide.

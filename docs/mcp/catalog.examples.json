@@ -1,0 +1,118 @@
+[
+  {
+    "id": "registry-counter-basics",
+    "title": "Counter basics",
+    "difficulty": "intro",
+    "concepts": ["registry-shape", "bounded-int", "action-metadata", "step"],
+    "mode": "registry",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/valid_models.rs",
+    "recommended_order": 1,
+    "recommended_docs": ["ai-authoring-guide", "ai-examples-curriculum", "dsl-guide"],
+    "focus_models": ["counter", "failing-counter"],
+    "summary": "Smallest registry-style example and the easiest place to learn inspect, verify, and counterexamples.",
+    "commands": [
+      "cargo valid --registry examples/valid_models.rs inspect counter",
+      "cargo valid --registry examples/valid_models.rs verify failing-counter"
+    ]
+  },
+  {
+    "id": "tenant-relations-map",
+    "title": "Tenant relations and map",
+    "difficulty": "intermediate",
+    "concepts": ["FiniteRelation", "FiniteMap", "tenant-isolation", "transitions"],
+    "mode": "registry",
+    "backend_expectation": "solver-ready",
+    "source_path": "examples/tenant_relation_registry.rs",
+    "recommended_order": 2,
+    "recommended_docs": ["ai-authoring-guide", "language-spec", "ai-examples-curriculum"],
+    "focus_models": ["tenant-relation-safe", "tenant-relation-regression"],
+    "summary": "Shows relation and map modeling in a small declarative cross-tenant policy example.",
+    "commands": [
+      "cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe",
+      "cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS"
+    ]
+  },
+  {
+    "id": "saas-grouped-transitions",
+    "title": "SaaS grouped transitions",
+    "difficulty": "intermediate",
+    "concepts": ["grouped-transitions", "entitlements", "path-tags", "tenant-isolation"],
+    "mode": "registry",
+    "backend_expectation": "solver-ready",
+    "source_path": "examples/saas_multi_tenant_registry.rs",
+    "recommended_order": 3,
+    "recommended_docs": ["ai-authoring-guide", "dsl-guide", "ai-examples-curriculum"],
+    "focus_models": ["tenant-isolation-safe", "tenant-isolation-regression"],
+    "summary": "Demonstrates grouped declarative transitions for SaaS isolation and entitlement flows.",
+    "commands": [
+      "cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe",
+      "cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS"
+    ]
+  },
+  {
+    "id": "password-explicit-ready",
+    "title": "Password explicit-ready model",
+    "difficulty": "advanced",
+    "concepts": ["String", "regex_match", "explicit-ready", "readiness"],
+    "mode": "registry",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/password_policy.rs",
+    "recommended_order": 4,
+    "recommended_docs": ["ai-authoring-guide", "language-spec", "ai-common-pitfalls"],
+    "focus_models": ["password-policy-safe", "password-policy-regression"],
+    "summary": "String and regex-heavy policy example that teaches capability boundaries and explicit-first expectations.",
+    "commands": [
+      "cargo valid --registry examples/password_policy.rs readiness password-policy-safe",
+      "cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG"
+    ]
+  },
+  {
+    "id": "compose-helper-minimal",
+    "title": "Compose helper minimal",
+    "difficulty": "intermediate",
+    "concepts": ["compose_models", "shared-state-sync", "helper-based-composition"],
+    "mode": "helper",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/compose_helper_registry.rs",
+    "recommended_order": 5,
+    "recommended_docs": ["composition-guide", "project-organization-guide", "graph-and-review-guide"],
+    "focus_models": ["Approval+Fulfillment"],
+    "summary": "Smallest helper-based composition example that stays honest about the current supported compose story.",
+    "commands": ["cargo run --example compose_helper_registry"]
+  },
+  {
+    "id": "deadlock-enablement-registry",
+    "title": "Deadlock and enablement registry",
+    "difficulty": "intermediate",
+    "concepts": ["deadlock", "enablement", "focus-action", "risk_path"],
+    "mode": "registry",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/deadlock_enablement_registry.rs",
+    "recommended_order": 6,
+    "recommended_docs": ["testgen-strategies-guide", "graph-and-review-guide", "testgen-and-handoff-guide"],
+    "focus_models": ["deadlock-terminal", "blocked-recovery"],
+    "summary": "Small registry for shortest deadlock traces and action-enablement traces.",
+    "commands": [
+      "cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock",
+      "cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER"
+    ]
+  },
+  {
+    "id": "handoff-testgen-alignment",
+    "title": "Handoff and testgen alignment",
+    "difficulty": "intermediate",
+    "concepts": ["handoff", "counterexample", "risk-grouping", "observation-first"],
+    "mode": "registry",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/handoff_testgen_registry.rs",
+    "recommended_order": 7,
+    "recommended_docs": ["testgen-and-handoff-guide", "ai-conformance-workflow", "testgen-strategies-guide"],
+    "focus_models": ["review-gate-safe", "review-gate-regression"],
+    "summary": "Small review-gate example that makes handoff summaries and generated vectors line up.",
+    "commands": [
+      "cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json",
+      "cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json"
+    ]
+  }
+]

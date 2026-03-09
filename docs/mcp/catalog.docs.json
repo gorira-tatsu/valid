@@ -1,0 +1,632 @@
+[
+  {
+    "id": "docs-index",
+    "title": "Documentation Index",
+    "kind": "index",
+    "audience": "humans-and-agents",
+    "recommended_for": ["navigation", "docs-overview"],
+    "canonical_entry": false,
+    "summary": "Top-level documentation index for install, AI authoring, DSL, architecture, and workflow guides.",
+    "key_points": [
+      "Provides the top-level map of curated public docs",
+      "Points agents and humans to the AI authoring guide first"
+    ],
+    "canonical_rules": [
+      "Use the AI authoring guide as the first AI-facing entrypoint"
+    ],
+    "supported_features": [
+      "Top-level docs navigation",
+      "Short descriptions for each major public doc set"
+    ],
+    "unsupported_features": [
+      "Normative language reference"
+    ],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-curriculum",
+      "dsl-guide",
+      "install-guide",
+      "quickstart-guide"
+    ],
+    "source_path": "docs/README.md"
+  },
+  {
+    "id": "ai-authoring-guide",
+    "title": "AI Authoring Guide",
+    "kind": "guide",
+    "audience": "llm-agents",
+    "recommended_for": ["first-read", "mcp-clients", "ai-assisted-authoring"],
+    "canonical_entry": true,
+    "summary": "Shortest canonical entrypoint for LLM agents writing or reviewing valid models.",
+    "key_points": [
+      "Use registry mode and cargo valid for new Rust-first work",
+      "Prefer declarative transitions over step",
+      "Check readiness before claiming solver support"
+    ],
+    "canonical_rules": [
+      "Always write model Name<State, Action>;",
+      "Treat step as explicit-first or migration-oriented",
+      "Use valid_docs_index then valid_docs_get before model-specific tools"
+    ],
+    "supported_features": [
+      "Minimal registry skeleton",
+      "Finite state/action modeling rules",
+      "Command and MCP workflow guidance"
+    ],
+    "unsupported_features": [
+      "General containers like Vec and HashMap",
+      "Implicit frame-condition inference",
+      "Non-invariant property kinds"
+    ],
+    "related_docs": [
+      "ai-curriculum",
+      "ai-requirement-refinement-workflow",
+      "ai-modeling-checklist",
+      "ai-common-pitfalls",
+      "ai-examples-curriculum",
+      "ai-review-workflow",
+      "ai-migration-guide",
+      "ai-conformance-workflow",
+      "language-spec"
+    ],
+    "source_path": "docs/ai/authoring-guide.md"
+  },
+  {
+    "id": "ai-requirement-refinement-workflow",
+    "title": "Requirement Refinement Workflow",
+    "kind": "workflow",
+    "audience": "llm-agents",
+    "recommended_for": ["clarification-first", "requirement-refinement", "evidence-driven-repair"],
+    "canonical_entry": false,
+    "summary": "Task-oriented guide for turning ambiguous product requirements into stable modeling briefs, then refining them from verification evidence.",
+    "key_points": [
+      "Explains the clarification-first loop before and after model authoring",
+      "Maps counterexamples, dead actions, vacuity, and mismatches to targeted follow-up questions"
+    ],
+    "canonical_rules": [
+      "Do not patch the model before deciding whether the requirement brief is incomplete",
+      "Ask the minimum product-facing follow-up questions needed to unlock the next model change"
+    ],
+    "supported_features": [
+      "Initial requirement clarification flow",
+      "Evidence-driven refinement flow",
+      "Example sessions and exit criteria"
+    ],
+    "unsupported_features": ["Normative syntax details"],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-curriculum",
+      "ai-modeling-checklist",
+      "ai-review-workflow",
+      "ai-conformance-workflow"
+    ],
+    "source_path": "docs/ai/requirement-refinement-workflow.md"
+  },
+  {
+    "id": "ai-candidate-comparison-workflow",
+    "title": "Candidate Comparison Workflow",
+    "kind": "workflow",
+    "audience": "llm-agents",
+    "recommended_for": ["candidate-comparison", "distinguish", "review"],
+    "canonical_entry": false,
+    "summary": "Task-oriented guide for comparing two plausible candidate models and turning the first divergence into a product-facing decision.",
+    "key_points": [
+      "Explains how to move from shared requirement brief to shortest distinguishing trace",
+      "Separates model-level divergence from product-level decision wording"
+    ],
+    "canonical_rules": [
+      "Name the shared requirement brief before comparing the candidates",
+      "Record the differing assumption in product language, not only model language"
+    ],
+    "supported_features": [
+      "Candidate-model comparison workflow",
+      "Distinguishing-trace review order",
+      "Exit criteria for requirement decisions"
+    ],
+    "unsupported_features": ["Normative syntax definition"],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-review-workflow",
+      "ai-requirement-refinement-workflow",
+      "ai-curriculum"
+    ],
+    "source_path": "docs/ai/candidate-comparison-workflow.md"
+  },
+  {
+    "id": "ai-conformance-workflow",
+    "title": "Conformance Workflow",
+    "kind": "workflow",
+    "audience": "llm-agents",
+    "recommended_for": ["conformance", "implementation-handoff", "review"],
+    "canonical_entry": false,
+    "summary": "Task-oriented guide for moving from reviewed models into conformance and implementation-facing checks.",
+    "key_points": [
+      "Explains the review-to-conformance handoff",
+      "Separates model review from implementation mismatch analysis"
+    ],
+    "canonical_rules": [
+      "Review the model before blaming the implementation",
+      "Record the mismatch class and the property or scenario it belongs to"
+    ],
+    "supported_features": [
+      "Conformance task order",
+      "Implementation-facing command guidance"
+    ],
+    "unsupported_features": ["Trait-level implementation details"],
+    "related_docs": [
+      "ai-curriculum",
+      "ai-requirement-refinement-workflow",
+      "ai-review-workflow",
+      "ai-modeling-checklist",
+      "ai-examples-curriculum",
+      "testgen-and-handoff-guide"
+    ],
+    "source_path": "docs/ai/conformance-workflow.md"
+  },
+  {
+    "id": "ai-common-pitfalls",
+    "title": "Common Pitfalls",
+    "kind": "pitfalls",
+    "audience": "llm-agents",
+    "recommended_for": ["error-avoidance", "review"],
+    "canonical_entry": false,
+    "summary": "Common mistakes LLMs make when generating or reviewing valid models.",
+    "key_points": [
+      "Do not use shorthand model headers",
+      "Do not assume implicit field retention",
+      "Do not overclaim solver support for string-heavy models"
+    ],
+    "canonical_rules": [
+      "Registry mode is primary for new work",
+      "Use transitions for canonical long-lived models"
+    ],
+    "supported_features": [
+      "Examples of wrong and correct patterns",
+      "Mode-selection reminders"
+    ],
+    "unsupported_features": ["Full supported-syntax inventory"],
+    "related_docs": ["ai-authoring-guide", "ai-curriculum", "language-spec"],
+    "source_path": "docs/ai/common-pitfalls.md"
+  },
+  {
+    "id": "ai-curriculum",
+    "title": "AI Docs Curriculum",
+    "kind": "curriculum",
+    "audience": "llm-agents",
+    "recommended_for": ["learning-order", "task-order", "navigation"],
+    "canonical_entry": false,
+    "summary": "Learning-order and task-order map for authoring, review, migration, and conformance workflows.",
+    "key_points": [
+      "Separates first-read order from task-specific order",
+      "Links docs, examples, and prompt-oriented workflows into one map"
+    ],
+    "canonical_rules": [
+      "Start with the AI authoring guide, then switch by task rather than reading every page linearly"
+    ],
+    "supported_features": ["Learning-order path", "Task-order path", "Prompt and example linkage"],
+    "unsupported_features": ["Normative syntax definition"],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-requirement-refinement-workflow",
+      "ai-review-workflow",
+      "ai-migration-guide",
+      "ai-conformance-workflow",
+      "ai-examples-curriculum"
+    ],
+    "source_path": "docs/ai/curriculum.md"
+  },
+  {
+    "id": "ai-examples-curriculum",
+    "title": "Examples Curriculum",
+    "kind": "examples-curriculum",
+    "audience": "llm-agents",
+    "recommended_for": ["learning-order", "few-shot-selection"],
+    "canonical_entry": false,
+    "summary": "Learning order for examples that teach valid incrementally.",
+    "key_points": [
+      "Start with the counter registry example",
+      "Move to relations/maps and grouped transitions before string-heavy models"
+    ],
+    "canonical_rules": ["Inspect first, then readiness, then verify"],
+    "supported_features": ["Ordered curriculum", "Example selection by concept"],
+    "unsupported_features": ["Raw grammar reference"],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-requirement-refinement-workflow",
+      "ai-curriculum",
+      "ai-review-workflow",
+      "ai-migration-guide",
+      "ai-conformance-workflow",
+      "dsl-guide",
+      "language-spec"
+    ],
+    "source_path": "docs/ai/examples-curriculum.md"
+  },
+  {
+    "id": "ai-migration-guide",
+    "title": "Migration Guide",
+    "kind": "workflow",
+    "audience": "llm-agents",
+    "recommended_for": ["migration", "step-to-transitions", "cleanup"],
+    "canonical_entry": false,
+    "summary": "Task-oriented guide for migrating models toward the current canonical valid path.",
+    "key_points": [
+      "Covers step-to-transitions, predicates, scenarios, and suite-oriented cleanup",
+      "Explains what to preserve while migrating a model"
+    ],
+    "canonical_rules": [
+      "Preserve action ids and property ids where feasible",
+      "Use inspect and lint before verify claims after a migration"
+    ],
+    "supported_features": ["Migration task order", "Migration-specific review questions"],
+    "unsupported_features": ["Automated migration guarantees"],
+    "related_docs": [
+      "ai-curriculum",
+      "ai-authoring-guide",
+      "ai-requirement-refinement-workflow",
+      "ai-examples-curriculum",
+      "ai-review-workflow"
+    ],
+    "source_path": "docs/ai/migration-guide.md"
+  },
+  {
+    "id": "ai-modeling-checklist",
+    "title": "Modeling Checklist",
+    "kind": "checklist",
+    "audience": "llm-agents",
+    "recommended_for": ["generation-review", "preflight"],
+    "canonical_entry": false,
+    "summary": "Preflight checklist for generated or reviewed valid models.",
+    "key_points": [
+      "Validate state, action, init, transition, and property shape",
+      "Check capability expectations before verify claims"
+    ],
+    "canonical_rules": [
+      "Every bounded integer field needs a range",
+      "Every action variant should carry reads and writes metadata"
+    ],
+    "supported_features": ["Generation review checklist", "Capability review checklist"],
+    "unsupported_features": ["Product strategy", "Full grammar reference"],
+    "related_docs": [
+      "ai-authoring-guide",
+      "ai-curriculum",
+      "ai-requirement-refinement-workflow",
+      "ai-review-workflow",
+      "ai-migration-guide",
+      "ai-conformance-workflow",
+      "language-spec"
+    ],
+    "source_path": "docs/ai/modeling-checklist.md"
+  },
+  {
+    "id": "ai-model-authoring-best-practices",
+    "title": "Model Authoring Best Practices",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["maintainability", "source-adjacent-docs", "review"],
+    "canonical_entry": false,
+    "summary": "User-facing guidance for documenting model intent, scope, assumptions, scenarios, and critical properties close to the source.",
+    "key_points": [
+      "Explains what each model file should say near the code",
+      "Keeps long-lived review context close to the model definition"
+    ],
+    "canonical_rules": [
+      "Each model should explain scope, out-of-scope behavior, and critical checks near the source"
+    ],
+    "supported_features": [
+      "Source-adjacent documentation guidance",
+      "Review-friendly model comment structure"
+    ],
+    "unsupported_features": ["Normative DSL syntax reference"],
+    "related_docs": ["ai-authoring-guide", "ai-modeling-checklist", "project-organization-guide"],
+    "source_path": "docs/ai/model-authoring-best-practices.md"
+  },
+  {
+    "id": "ai-review-workflow",
+    "title": "Review Workflow",
+    "kind": "workflow",
+    "audience": "llm-agents",
+    "recommended_for": ["review", "explain", "triage"],
+    "canonical_entry": false,
+    "summary": "Task-oriented guide for reviewing an existing model and deciding the next repair surface.",
+    "key_points": [
+      "Separates model review from implementation and requirement follow-up",
+      "Focuses on inspect, lint, explain, and review classification"
+    ],
+    "canonical_rules": [
+      "Do not blame the implementation before understanding the model failure",
+      "Treat capability issues separately from semantic bugs"
+    ],
+    "supported_features": ["Review task order", "Review checklist and anti-patterns"],
+    "unsupported_features": ["Graph-specific rendering details"],
+    "related_docs": [
+      "ai-curriculum",
+      "ai-authoring-guide",
+      "ai-requirement-refinement-workflow",
+      "ai-common-pitfalls",
+      "ai-modeling-checklist",
+      "ai-conformance-workflow"
+    ],
+    "source_path": "docs/ai/review-workflow.md"
+  },
+  {
+    "id": "architecture-note",
+    "title": "Architecture",
+    "kind": "architecture",
+    "audience": "humans-and-agents",
+    "recommended_for": ["system-design", "package-roles"],
+    "canonical_entry": false,
+    "summary": "Repository architecture note covering package roles, layering, DTO boundaries, and solver-neutral design.",
+    "key_points": [
+      "Describes the clean-architecture split across packages and boundaries",
+      "Explains solver-neutral layering and package responsibilities"
+    ],
+    "canonical_rules": [
+      "Use this doc for repository design questions, not DSL syntax questions"
+    ],
+    "supported_features": ["Architecture overview", "Layering and DTO boundary explanation"],
+    "unsupported_features": ["End-user modeling syntax"],
+    "related_docs": ["docs-index", "dsl-guide"],
+    "source_path": "docs/architecture.md"
+  },
+  {
+    "id": "artifact-inventory-guide",
+    "title": "Artifact Inventory and Run History",
+    "kind": "operations",
+    "audience": "humans-and-agents",
+    "recommended_for": ["artifacts", "run-history", "automation"],
+    "canonical_entry": false,
+    "summary": "Guide to the artifact index, run-history files, and CLI listing surfaces used to correlate valid outputs across runs.",
+    "key_points": [
+      "Documents artifacts/index.json and artifacts/run-history.json",
+      "Explains how valid and cargo valid expose artifact inventory listings"
+    ],
+    "canonical_rules": [
+      "Treat artifact inventory as operational metadata, not normative model semantics"
+    ],
+    "supported_features": ["Artifact index layout", "Run-history conventions", "CLI inventory commands"],
+    "unsupported_features": ["Modeling syntax reference"],
+    "related_docs": ["docs-index", "install-guide", "architecture-note"],
+    "source_path": "docs/artifacts.md"
+  },
+  {
+    "id": "ci-workflow-templates-guide",
+    "title": "CI Workflow Templates",
+    "kind": "operations",
+    "audience": "humans-and-agents",
+    "recommended_for": ["ci", "automation", "templates"],
+    "canonical_entry": false,
+    "summary": "Reusable CI workflow templates and command equivalents for inspect, check, testgen, conformance, and doc drift checks.",
+    "key_points": [
+      "Explains the built-in GitHub Actions templates",
+      "Maps the templates back to ordinary valid and cargo valid commands"
+    ],
+    "canonical_rules": [
+      "Treat the templates as reusable starting points, not as the only supported CI shape"
+    ],
+    "supported_features": ["CI template overview", "Command-to-template mapping"],
+    "unsupported_features": ["Repository-specific deployment policy"],
+    "related_docs": ["artifact-inventory-guide", "install-guide", "docs-index"],
+    "source_path": "docs/ci/README.md"
+  },
+  {
+    "id": "composition-guide",
+    "title": "Composition Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["composition", "integration-models", "shared-state-review"],
+    "canonical_entry": false,
+    "summary": "User-facing guide to the current supported composition helper story, integration-model pattern, and composition limits.",
+    "key_points": [
+      "Explains when to use standalone models, integration models, or helper-based composition",
+      "Clarifies that broader first-class compose syntax is still future work"
+    ],
+    "canonical_rules": [
+      "Treat the current composition story as helper-oriented and explicit"
+    ],
+    "supported_features": ["Current compose helper guidance", "Integration-model decision rules"],
+    "unsupported_features": ["General first-class compose DSL"],
+    "related_docs": ["project-organization-guide", "dsl-guide", "graph-and-review-guide"],
+    "source_path": "docs/composition.md"
+  },
+  {
+    "id": "dsl-guide",
+    "title": "Rust DSL Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["user-guide", "authoring"],
+    "canonical_entry": false,
+    "summary": "User-facing guide for writing, operating, and choosing between transitions and step.",
+    "key_points": [
+      "Explains the user-facing modeling language",
+      "Covers canonical modeling path and current surface pieces"
+    ],
+    "canonical_rules": [
+      "Prefer transitions for long-lived models",
+      "Use readiness when diagnostics are ambiguous"
+    ],
+    "supported_features": ["Conceptual explanation of state, actions, model definition, and readiness"],
+    "unsupported_features": ["Normative grammar-level completeness"],
+    "related_docs": ["ai-authoring-guide", "language-spec"],
+    "source_path": "docs/dsl/README.md"
+  },
+  {
+    "id": "graph-and-review-guide",
+    "title": "Graph and Review Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["review", "graph", "deadlock", "field-diff"],
+    "canonical_entry": false,
+    "summary": "User-facing guide to choosing the right graph, trace, and explain surfaces for review-oriented debugging.",
+    "key_points": [
+      "Explains the purpose of overview, logic, failure, deadlock, and SCC graph views",
+      "Shows how field-diff-oriented explain output fits into review workflows"
+    ],
+    "canonical_rules": [
+      "Do not start from the largest graph when a smaller failure-oriented view answers the question"
+    ],
+    "supported_features": ["Graph-view selection guidance", "Failure and deadlock review flows"],
+    "unsupported_features": ["Normative graph schema reference"],
+    "related_docs": ["testgen-strategies-guide", "testgen-and-handoff-guide", "ai-review-workflow"],
+    "source_path": "docs/graph-and-review.md"
+  },
+  {
+    "id": "language-evolution",
+    "title": "DSL Language Evolution",
+    "kind": "evolution",
+    "audience": "humans-and-agents",
+    "recommended_for": ["future-direction", "design-notes"],
+    "canonical_entry": false,
+    "summary": "Non-normative design notes about candidate directions for the valid DSL.",
+    "key_points": [
+      "Separates implemented behavior from future candidate features",
+      "Covers relational actions, richer properties, text abstractions, and packaging"
+    ],
+    "canonical_rules": ["Do not treat this document as implemented behavior"],
+    "supported_features": ["Future design notes", "Candidate feature rationale"],
+    "unsupported_features": ["Normative current syntax guarantees"],
+    "related_docs": ["language-spec", "dsl-guide"],
+    "source_path": "docs/dsl/language-evolution.md"
+  },
+  {
+    "id": "parameterized-action-roadmap",
+    "title": "Parameterized Action Roadmap",
+    "kind": "roadmap",
+    "audience": "humans-and-agents",
+    "recommended_for": ["future-direction", "bounded-choices", "action-design"],
+    "canonical_entry": false,
+    "summary": "Incremental plan for moving from enum-only actions to bounded parameterized actions without encouraging action explosion.",
+    "key_points": [
+      "Explains why bounded choices come before a full parameterized-action system",
+      "Documents the current and planned action-surface boundary"
+    ],
+    "canonical_rules": [
+      "Treat this document as roadmap guidance, not implemented behavior beyond the current bounded choices"
+    ],
+    "supported_features": ["Action-surface roadmap", "Bounded-choice rationale"],
+    "unsupported_features": ["Normative implemented syntax guarantees beyond the current bounded surface"],
+    "related_docs": ["dsl-guide", "language-evolution", "language-spec"],
+    "source_path": "docs/dsl/parameterized-action-roadmap.md"
+  },
+  {
+    "id": "language-spec",
+    "title": "DSL Language Spec",
+    "kind": "spec",
+    "audience": "humans-and-agents",
+    "recommended_for": ["normative-reference", "supported-surface"],
+    "canonical_entry": false,
+    "summary": "Normative description of the currently implemented valid DSL surface and capability boundaries.",
+    "key_points": [
+      "Separates supported syntax, capability constraints, and non-goals",
+      "Defines the implemented surface rather than future ideas"
+    ],
+    "canonical_rules": [
+      "Shorthand model headers are unsupported",
+      "Property kind surface is invariant-only"
+    ],
+    "supported_features": ["Supported types, metadata, expressions, and capability fields"],
+    "unsupported_features": ["General-purpose containers", "Infinite string theory", "Higher-order logic"],
+    "related_docs": ["ai-authoring-guide", "dsl-guide"],
+    "source_path": "docs/dsl/language-spec.md"
+  },
+  {
+    "id": "install-guide",
+    "title": "Install Guide",
+    "kind": "install",
+    "audience": "humans-and-agents",
+    "recommended_for": ["setup", "distribution"],
+    "canonical_entry": false,
+    "summary": "Cargo-first installation and packaging guidance for Rust DSL authors and project-first workflows.",
+    "key_points": [
+      "Explains the supported Cargo install modes and feature flags",
+      "Clarifies the Rust toolchain requirement for cargo valid workflows"
+    ],
+    "canonical_rules": [
+      "Use Cargo-based installation for the canonical Rust DSL path"
+    ],
+    "supported_features": ["Install modes", "Backend selection notes", "Project setup commands"],
+    "unsupported_features": ["DSL syntax reference"],
+    "related_docs": ["docs-index", "ai-authoring-guide", "dsl-guide"],
+    "source_path": "docs/install.md"
+  },
+  {
+    "id": "quickstart-guide",
+    "title": "Quickstart Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["first-run", "bootstrap", "rust-dsl-onboarding"],
+    "canonical_entry": false,
+    "summary": "Shortest path from Cargo installation to valid init, scaffold verification, inspect, and handoff.",
+    "key_points": [
+      "Optimized for Rust DSL users evaluating valid for the first time",
+      "Centers the first successful run around valid init, inspect, and handoff"
+    ],
+    "canonical_rules": [
+      "Treat valid init plus valid init --check as the first onboarding checkpoint"
+    ],
+    "supported_features": ["Shortest first-run sequence", "Review-first onboarding path", "Cross-links to install, project organization, and handoff guidance"],
+    "unsupported_features": ["Deep DSL syntax reference"],
+    "related_docs": ["install-guide", "project-organization-guide", "testgen-and-handoff-guide", "ai-authoring-guide"],
+    "source_path": "docs/quickstart.md"
+  },
+  {
+    "id": "project-organization-guide",
+    "title": "Project Organization Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["project-layout", "integration-models", "bootstrap"],
+    "canonical_entry": false,
+    "summary": "Recommended layout for model files, registries, generated artifacts, and integration-model organization in valid projects.",
+    "key_points": [
+      "Explains the project-first layout created by valid init",
+      "Shows where registries, models, generated artifacts, and integration models belong"
+    ],
+    "canonical_rules": [
+      "Keep registry files thin and keep model logic in explicit model modules"
+    ],
+    "supported_features": ["Project layout guidance", "Integration-model organization", "Generated artifact boundaries"],
+    "unsupported_features": ["Normative DSL syntax definition"],
+    "related_docs": ["composition-guide", "dsl-guide", "testgen-and-handoff-guide"],
+    "source_path": "docs/project-organization.md"
+  },
+  {
+    "id": "testgen-and-handoff-guide",
+    "title": "Testgen and Handoff Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["testgen", "handoff", "conformance"],
+    "canonical_entry": false,
+    "summary": "User-facing guide to language-agnostic test specs, handoff summaries, and implementation-facing conformance workflows.",
+    "key_points": [
+      "Explains the contract between testgen, handoff, and conformance",
+      "Clarifies observation-first vectors and recommended vector summaries"
+    ],
+    "canonical_rules": [
+      "Treat generated vectors as language-agnostic test specs rather than framework-specific code"
+    ],
+    "supported_features": ["Observation-first vector guidance", "Handoff summary interpretation", "Implementation-surface selection"],
+    "unsupported_features": ["Framework-specific test generator output"],
+    "related_docs": ["testgen-strategies-guide", "ai-conformance-workflow", "graph-and-review-guide"],
+    "source_path": "docs/testgen-and-handoff.md"
+  },
+  {
+    "id": "testgen-strategies-guide",
+    "title": "Testgen Strategies Guide",
+    "kind": "guide",
+    "audience": "humans-and-agents",
+    "recommended_for": ["testgen", "strategy-selection", "deadlock", "enablement"],
+    "canonical_entry": false,
+    "summary": "User-facing guide to choosing between replay, witness, deadlock, enablement, and grouped test generation strategies.",
+    "key_points": [
+      "Separates replay-oriented, exploration-oriented, and unblock-oriented strategies",
+      "Explains grouping metadata and focus-action use"
+    ],
+    "canonical_rules": [
+      "Pick the strategy that matches the review question instead of defaulting to the biggest trace"
+    ],
+    "supported_features": ["Strategy-by-strategy selection guidance", "Grouped vector explanation"],
+    "unsupported_features": ["Complete implementation details of each generator"],
+    "related_docs": ["testgen-and-handoff-guide", "graph-and-review-guide", "artifact-inventory-guide"],
+    "source_path": "docs/testgen-strategies.md"
+  }
+]
