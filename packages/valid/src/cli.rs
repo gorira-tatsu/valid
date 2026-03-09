@@ -2683,7 +2683,7 @@ fn build_arg_spec(spec: &ArgSpec, index: Option<usize>) -> Arg {
         if spec.multiple {
             arg = arg.num_args(1..);
         }
-    } else if spec.value_type == "bool" {
+    } else if spec.value_type == "bool" || spec.value_type == "boolean" {
         arg = arg.action(ArgAction::SetTrue);
     } else if spec.syntax.contains("[=<") {
         arg = arg.num_args(0..=1);
@@ -2706,6 +2706,27 @@ fn long_name_from_syntax(syntax: &str) -> Option<&str> {
         .find(|ch: char| ch == '[' || ch == '<' || ch == ' ' || ch == '=')
         .unwrap_or(stripped.len());
     Some(&stripped[..end])
+}
+
+fn surface_help_about(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Valid => "Project-first verification CLI for valid models, docs, handoff, MCP, and artifact workflows.",
+        Surface::CargoValid => "Cargo-integrated verification CLI for project and bundled valid models.",
+        Surface::Registry => "Registry-backed verification CLI for one compiled valid model registry.",
+    }
+}
+
+fn surface_help_usage(surface: Surface, program: &'static str) -> String {
+    match surface {
+        Surface::Valid | Surface::CargoValid => format!("{program} [--plain] <command> [args]"),
+        Surface::Registry => format!("{program} <command> [args]"),
+    }
+}
+
+fn surface_help_footer(program: &'static str) -> String {
+    format!(
+        "Use `{program} <command> --help` for detailed command help, `{program} commands --json` for machine-readable metadata, and `{program} schema <command>` for parameter/response schemas."
+    )
 }
 
 pub fn render_commands_json(surface: Surface) -> String {
@@ -2750,6 +2771,48 @@ pub fn render_commands_text(surface: Surface) -> String {
         lines.push(format!("{}{} - {}", spec.name, alias, spec.description));
     }
     lines.join("\n")
+}
+
+pub fn render_surface_help(surface: Surface, program: &'static str) -> String {
+    let mut command = Command::new(program)
+        .about(surface_help_about(surface))
+        .override_usage(surface_help_usage(surface, program))
+        .subcommand_help_heading("Commands")
+        .after_help(surface_help_footer(program));
+    command = command.arg(
+        Arg::new("plain")
+            .long("plain")
+            .global(true)
+            .action(ArgAction::SetTrue)
+            .help("Disable ANSI styling in text output."),
+    );
+    for spec in command_specs(surface) {
+        let mut subcommand = build_command_spec(spec).override_usage(spec.usage);
+        if !spec.aliases.is_empty() {
+            subcommand = subcommand.after_help(format!("Aliases: {}", spec.aliases.join(", ")));
+        }
+        command = command.subcommand(subcommand);
+    }
+    let mut buffer = Vec::new();
+    command
+        .write_long_help(&mut buffer)
+        .expect("surface help should render");
+    String::from_utf8(buffer).expect("surface help should be utf-8")
+}
+
+pub fn render_command_help(surface: Surface, command: &str) -> Result<String, String> {
+    let Some(spec) = find_command_spec(surface, command) else {
+        return Err(format!("unknown command `{command}`"));
+    };
+    let mut clap_command = build_command_spec(spec).override_usage(spec.usage);
+    if !spec.aliases.is_empty() {
+        clap_command = clap_command.after_help(format!("Aliases: {}", spec.aliases.join(", ")));
+    }
+    let mut buffer = Vec::new();
+    clap_command
+        .write_long_help(&mut buffer)
+        .expect("command help should render");
+    Ok(String::from_utf8(buffer).expect("command help should be utf-8"))
 }
 
 pub fn render_schema_json(surface: Surface, command: &str) -> Result<String, String> {

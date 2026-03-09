@@ -1047,6 +1047,54 @@ fn cli_commands_and_schema_are_machine_readable() {
 }
 
 #[test]
+fn cli_root_help_and_version_are_human_readable() {
+    let help = Command::new(binary_path())
+        .output()
+        .expect("root help should run");
+    assert!(help.status.success());
+    let help_stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(help_stdout.contains("Project-first verification CLI"));
+    assert!(help_stdout.contains("Commands"));
+    assert!(help_stdout.contains("mcp"));
+    assert!(help_stdout.contains("Start the MCP server with project-first target discovery."));
+
+    let short_help = Command::new(binary_path())
+        .arg("-h")
+        .output()
+        .expect("-h should run");
+    assert!(short_help.status.success());
+    let short_help_stdout = String::from_utf8_lossy(&short_help.stdout);
+    assert!(short_help_stdout.contains("Use `valid <command> --help`"));
+
+    let version = Command::new(binary_path())
+        .arg("-v")
+        .output()
+        .expect("-v should run");
+    assert!(version.status.success());
+    let version_stdout = String::from_utf8_lossy(&version.stdout);
+    assert_eq!(
+        version_stdout.trim(),
+        format!("valid {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn cli_command_help_explains_mcp() {
+    let output = Command::new(binary_path())
+        .arg("mcp")
+        .arg("-h")
+        .output()
+        .expect("mcp help should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Start the MCP server with project-first target discovery."));
+    assert!(stdout.contains("valid mcp"));
+    assert!(stdout.contains("--project"));
+    assert!(stdout.contains("--model-file"));
+    assert!(stdout.contains("--print-config"));
+}
+
+#[test]
 fn cli_can_generate_shell_completions() {
     for (shell, marker) in [
         ("fish", "complete -c valid"),

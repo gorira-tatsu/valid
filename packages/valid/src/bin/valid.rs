@@ -25,10 +25,10 @@ use valid::{
     cli::{
         child_stream_to_json, detect_json_flag, detect_progress_json_flag, install_completion,
         message_diagnostic, parse_batch_request, render_batch_response, render_cli_error_json,
-        render_commands_json, render_commands_text, render_completion, render_schema_json,
-        set_plain_text_output, text_bullet, text_command, text_header, text_hint, text_kv,
-        text_section, text_status_badge, usage_diagnostic, BatchResult, ExitCode, ProgressReporter,
-        Surface,
+        render_command_help, render_commands_json, render_commands_text, render_completion,
+        render_schema_json, render_surface_help, set_plain_text_output, text_bullet, text_command,
+        text_header, text_hint, text_kv, text_section, text_status_badge, usage_diagnostic,
+        BatchResult, ExitCode, ProgressReporter, Surface,
     },
     conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
@@ -606,6 +606,9 @@ struct McpArgs {
 
 fn main() {
     let raw_args = env::args().collect::<Vec<_>>();
+    if handle_builtin_help_or_version(&raw_args) {
+        return;
+    }
     let json = detect_json_flag(&raw_args);
     let cli = match ValidCli::try_parse() {
         Ok(cli) => cli,
@@ -650,12 +653,53 @@ fn main() {
         Some(ValidCommand::Schema(args)) => cmd_schema_from_parsed(args),
         Some(ValidCommand::Batch(args)) => cmd_batch_from_parsed(args),
         None => {
-            usage_exit(
-                "valid",
-                json,
-                "usage: valid <init|onboarding|doctor|inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
-            );
+            print!("{}", render_surface_help(Surface::Valid, "valid"));
+            process::exit(0);
         }
+    }
+}
+
+fn handle_builtin_help_or_version(raw_args: &[String]) -> bool {
+    let args = raw_args
+        .iter()
+        .skip(1)
+        .filter(|arg| arg.as_str() != "--plain")
+        .cloned()
+        .collect::<Vec<_>>();
+    match args.as_slice() {
+        [] => {
+            print!("{}", render_surface_help(Surface::Valid, "valid"));
+            process::exit(0);
+        }
+        [arg] if matches!(arg.as_str(), "-h" | "--help" | "help") => {
+            print!("{}", render_surface_help(Surface::Valid, "valid"));
+            process::exit(0);
+        }
+        [arg] if matches!(arg.as_str(), "-v" | "--version" | "version") => {
+            println!("valid {}", env!("CARGO_PKG_VERSION"));
+            process::exit(0);
+        }
+        [command, flag] if matches!(flag.as_str(), "-h" | "--help") => {
+            let command = normalize_command(command);
+            print!(
+                "{}",
+                render_command_help(Surface::Valid, &command).unwrap_or_else(|message| {
+                    message_exit("valid", false, &message, None);
+                })
+            );
+            process::exit(0);
+        }
+        [help, command] if help == "help" => {
+            let command = normalize_command(command);
+            print!(
+                "{}",
+                render_command_help(Surface::Valid, &command).unwrap_or_else(|message| {
+                    message_exit("valid", false, &message, None);
+                })
+            );
+            process::exit(0);
+        }
+        _ => false,
     }
 }
 
