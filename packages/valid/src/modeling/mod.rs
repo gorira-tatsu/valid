@@ -1972,6 +1972,7 @@ macro_rules! valid_model_push_properties {
 #[macro_export]
 macro_rules! valid_model {
     (
+        $(#[$meta:meta])*
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         transitions {
@@ -1981,6 +1982,7 @@ macro_rules! valid_model {
             $($property_tokens:tt)+
         }
     ) => {
+        $(#[$meta])*
         struct $model;
 
         impl $crate::modeling::ModelSpec for $model {
@@ -2030,6 +2032,7 @@ macro_rules! valid_model {
         }
     };
     (
+        $(#[$meta:meta])*
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         step |$state:ident, $action:ident| $step_body:block
@@ -2052,6 +2055,7 @@ macro_rules! valid_model {
 #[macro_export]
 macro_rules! valid_step_model {
     (
+        $(#[$meta:meta])*
         model $model:ident<$state_ty:ty, $action_ty:ty>;
         init [$($init_state:expr),* $(,)?];
         step |$state:ident, $action:ident| $step_body:block
@@ -2059,6 +2063,7 @@ macro_rules! valid_step_model {
             $($property_tokens:tt)+
         }
     ) => {
+        $(#[$meta])*
         struct $model;
 
         impl $crate::modeling::ModelSpec for $model {
