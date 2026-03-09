@@ -2,6 +2,14 @@
 name = "valid_derive"
 version = "0.1.0"
 edition = "2021"
+description = "Derive macros for valid state and action definitions."
+license = "MIT OR Apache-2.0"
+readme = "../../README.md"
+repository = "https://github.com/gorira-tatsu/valid"
+homepage = "https://github.com/gorira-tatsu/valid"
+documentation = "https://docs.rs/valid_derive"
+keywords = ["verification", "dsl", "derive", "state-machines"]
+categories = ["development-tools", "rust-patterns"]
 
 [lib]
 proc-macro = true

@@ -3,6 +3,9 @@
 `valid` is a Rust DSL and `cargo valid`-first tool. The canonical install path
 is Cargo-based.
 
+The package is maintained so `cargo publish --dry-run` stays green. Until the
+crates.io release is live, use the Git install commands below.
+
 ## Recommended Modes
 
 ### 1. Cargo install

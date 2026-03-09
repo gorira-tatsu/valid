@@ -7,6 +7,9 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/gorira-tatsu/valid"
 homepage = "https://github.com/gorira-tatsu/valid"
+documentation = "https://docs.rs/valid"
+keywords = ["verification", "model-checking", "state-machines", "workflow", "dsl"]
+categories = ["development-tools", "command-line-utilities", "simulation"]
 
 [features]
 default = ["verification-runtime"]
@@ -106,7 +109,7 @@ path = "tests/e2e_real_solver.rs"
 required-features = ["verification-runtime"]
 
 [dependencies]
-valid_derive = { path = "packages/valid_derive" }
+valid_derive = { version = "0.1.0", path = "packages/valid_derive" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 regex = "1"

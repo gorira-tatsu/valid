@@ -1366,6 +1366,7 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
     assert!(check_ids.contains(&"shell_path"));
     assert!(check_ids.contains(&"shell_completion"));
     assert!(check_ids.contains(&"mcp_project_readiness"));
+    assert!(check_ids.contains(&"publish_readiness"));
     let scaffold = report["checks"]
         .as_array()
         .unwrap()
@@ -1373,6 +1374,13 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
         .find(|check| check["check_id"] == "project_scaffold")
         .expect("project scaffold check");
     assert_eq!(scaffold["status"], "ok");
+    let publish = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "publish_readiness")
+        .expect("publish readiness check");
+    assert_eq!(publish["status"], "ok");
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1516,6 +1524,35 @@ fn cli_onboarding_bootstraps_empty_project_non_interactively() {
         .unwrap()
         .iter()
         .any(|item| item["path_id"] == "connect_mcp"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_onboarding_text_output_recaps_first_value() {
+    let project_dir = unique_temp_dir("valid-cli-onboarding-text");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("onboarding")
+        .arg("--non-interactive")
+        .output()
+        .expect("valid onboarding should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("what_you_now_have:"));
+    assert!(stdout.contains("approval-model"));
+    assert!(stdout.contains("recap_commands:"));
+    assert!(stdout.contains("cargo valid models"));
+    assert!(stdout.contains("cargo valid inspect approval-model"));
+    assert!(stdout.contains("cargo valid handoff approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

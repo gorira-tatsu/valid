@@ -13,6 +13,9 @@ cargo install --git https://github.com/gorira-tatsu/valid --branch main valid --
 valid onboarding
 ```
 
+This is the current Cargo-first install path while the crates.io release is
+being finalized.
+
 This gives you a working scaffold, confirms that the scaffold is healthy, shows
 the starter model, renders the first overview graph, and produces an
 implementation-facing handoff summary.

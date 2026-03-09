@@ -777,6 +777,33 @@ fn shell_completion_repair_hint(shell: Option<&str>) -> Option<String> {
     })
 }
 
+fn cargo_toml_has_nonempty_field(manifest: &str, field: &str) -> bool {
+    let pattern = format!(
+        r#"(?m)^\s*{}\s*=\s*"(?:[^"\n]|\\")+"\s*$"#,
+        regex::escape(field)
+    );
+    regex::Regex::new(&pattern)
+        .expect("manifest field regex should compile")
+        .is_match(manifest)
+}
+
+fn cargo_toml_has_path_and_version_dependency(manifest: &str, dep: &str) -> bool {
+    let pattern = format!(
+        r#"(?m)^\s*{}\s*=\s*\{{[^}}]*\bpath\s*=\s*"[^"]+"[^}}]*\bversion\s*=\s*"[^"]+"[^}}]*\}}\s*$"#,
+        regex::escape(dep)
+    );
+    regex::Regex::new(&pattern)
+        .expect("dependency regex should compile")
+        .is_match(manifest)
+}
+
+fn cargo_package_name(manifest: &str) -> Option<String> {
+    let capture = regex::Regex::new(r#"(?m)^\s*name\s*=\s*"([^"\n]+)"\s*$"#)
+        .expect("package name regex should compile")
+        .captures(manifest)?;
+    Some(capture.get(1)?.as_str().to_string())
+}
+
 fn build_doctor_report(root: &PathBuf) -> DoctorReport {
     let mut checks = Vec::new();
     let active_shell = active_shell_name();
@@ -862,7 +889,7 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
         } else if project_requires_cargo {
             "`cargo` is not available on PATH, and this project flow requires Cargo.".to_string()
         } else {
-            "`cargo` is not available on PATH, but you can still use binary-first review and onboarding help.".to_string()
+            "`cargo` is not available on PATH, so Cargo-first model loading and authoring are currently unavailable.".to_string()
         },
         details: None,
         repair_hint: if cargo_available {
@@ -960,6 +987,102 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
             _ => None,
         },
     });
+
+    let manifest_path = root.join("Cargo.toml");
+    let publish_check = if !manifest_path.exists() {
+        DoctorCheckReport {
+            check_id: "publish_readiness".to_string(),
+            status: "ok".to_string(),
+            summary: "Publish-readiness checks apply only when the current directory is a Cargo package root.".to_string(),
+            details: Some(manifest_path.display().to_string()),
+            repair_hint: None,
+        }
+    } else {
+        let manifest = fs::read_to_string(&manifest_path).unwrap_or_default();
+        let package_name = cargo_package_name(&manifest);
+        if package_name.as_deref() != Some("valid") {
+            DoctorCheckReport {
+                check_id: "publish_readiness".to_string(),
+                status: "ok".to_string(),
+                summary: "Publish-readiness checks are maintainer-focused and are skipped for application projects.".to_string(),
+                details: Some(format!(
+                    "manifest={}, package_name={}",
+                    manifest_path.display(),
+                    package_name.as_deref().unwrap_or("<unknown>")
+                )),
+                repair_hint: None,
+            }
+        } else {
+            let mut missing_fields = Vec::new();
+            for field in [
+                "description",
+                "license",
+                "readme",
+                "repository",
+                "homepage",
+                "documentation",
+            ] {
+                if !cargo_toml_has_nonempty_field(&manifest, field) {
+                    missing_fields.push(field.to_string());
+                }
+            }
+            let has_keywords = manifest.contains("keywords = [");
+            let has_categories = manifest.contains("categories = [");
+            if !has_keywords {
+                missing_fields.push("keywords".to_string());
+            }
+            if !has_categories {
+                missing_fields.push("categories".to_string());
+            }
+            let derive_dependency_ready =
+                cargo_toml_has_path_and_version_dependency(&manifest, "valid_derive");
+            let publish_ready = missing_fields.is_empty() && derive_dependency_ready;
+            let publish_order_blocker = derive_dependency_ready;
+            DoctorCheckReport {
+                check_id: "publish_readiness".to_string(),
+                status: if publish_ready && !publish_order_blocker {
+                    "ok"
+                } else {
+                    "warn"
+                }
+                .to_string(),
+                summary: if publish_ready && !publish_order_blocker {
+                    format!(
+                        "The package metadata for `{}` looks ready for `cargo publish --dry-run`.",
+                        package_name.as_deref().unwrap_or("valid")
+                    )
+                } else if publish_ready {
+                    "The root package metadata looks ready, but the `valid_derive` dependency must be published first.".to_string()
+                } else {
+                    "The current Cargo package still has publish-readiness gaps.".to_string()
+                },
+                details: Some(format!(
+                    "manifest={}, package_name={}, missing_fields={}, valid_derive_versioned_path_dependency={}, publish_order={}",
+                    manifest_path.display(),
+                    package_name.as_deref().unwrap_or("<unknown>"),
+                    if missing_fields.is_empty() {
+                        "<none>".to_string()
+                    } else {
+                        missing_fields.join(", ")
+                    },
+                    derive_dependency_ready,
+                    if publish_order_blocker {
+                        "publish valid_derive before valid"
+                    } else {
+                        "<none>"
+                    }
+                )),
+                repair_hint: if publish_ready && !publish_order_blocker {
+                    Some("Run `cargo publish --dry-run` from this directory to verify packaging before a real release.".to_string())
+                } else if publish_ready {
+                    Some("Publish `valid_derive` first, then rerun `cargo publish --dry-run` for the root `valid` package.".to_string())
+                } else {
+                    Some("Fill in the missing Cargo package metadata, keep local path dependencies versioned, then rerun `cargo publish --dry-run`.".to_string())
+                },
+            }
+        }
+    };
+    checks.push(publish_check);
 
     let status = if checks.iter().any(|check| check.status == "error") {
         "error"
@@ -1455,6 +1578,15 @@ fn finish_onboarding(
         println!("\nstatus: {}", report.status);
         println!("root: {}", report.root);
         println!("interactive: {}", report.interactive);
+        println!("what_you_now_have:");
+        println!("  - a scaffolded Cargo-first valid project");
+        println!("  - an inspectable starter model named approval-model");
+        println!("  - a first overview graph you can review");
+        println!("  - an implementation-facing handoff summary");
+        println!("recap_commands:");
+        println!("  cargo valid models");
+        println!("  cargo valid inspect approval-model");
+        println!("  cargo valid handoff approval-model");
         println!("next_paths: {}", report.next_paths.join(", "));
         for next_path in &report.next_path_summaries {
             println!("  {}: {}", next_path.path_id, next_path.summary);

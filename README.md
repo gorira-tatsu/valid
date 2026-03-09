@@ -89,6 +89,10 @@ cargo install --git https://github.com/gorira-tatsu/valid --branch main valid --
 valid onboarding
 ```
 
+The package is kept crates.io-ready with `cargo publish --dry-run`. Until the
+published `cargo install valid` path is live, use the Git install command
+above.
+
 That is enough to bootstrap a project, confirm the scaffold is healthy, inspect
 the starter model, render the first overview graph, and produce an
 implementation-facing handoff summary.
