@@ -1293,7 +1293,7 @@ fn cli_init_text_output_recommends_next_commands() {
         .expect("valid init should run");
     assert!(init.status.success());
     let stdout = String::from_utf8_lossy(&init.stdout);
-    assert!(stdout.contains("next_steps:"));
+    assert!(stdout.contains("Next Steps"));
     assert!(stdout.contains("valid init --check"));
     assert!(stdout.contains("cargo valid models"));
     assert!(stdout.contains("cargo valid inspect approval-model"));
@@ -1547,9 +1547,9 @@ fn cli_onboarding_text_output_recaps_first_value() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("what_you_now_have:"));
+    assert!(stdout.contains("You Now Have"));
     assert!(stdout.contains("approval-model"));
-    assert!(stdout.contains("recap_commands:"));
+    assert!(stdout.contains("Recap Commands"));
     assert!(stdout.contains("cargo valid models"));
     assert!(stdout.contains("cargo valid inspect approval-model"));
     assert!(stdout.contains("cargo valid handoff approval-model"));
@@ -1637,6 +1637,62 @@ fn cli_onboarding_reports_partial_failure_for_broken_scaffold() {
         .contains("valid init --repair"));
 
     let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_plain_flag_keeps_doctor_output_copy_pasteable() {
+    let project_dir = unique_temp_dir("valid-cli-doctor-plain");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("--plain")
+        .arg("doctor")
+        .output()
+        .expect("valid doctor --plain should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[OK]"));
+    assert!(stdout.contains("root:"));
+    assert!(!stdout.contains("\u{1b}["));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_scenario_and_cover_examples_are_reviewable() {
+    let scenario_output = Command::new(binary_path())
+        .arg("check")
+        .arg(repo_path("examples/scenario_focus.valid"))
+        .arg("--scenario=DeletedPost")
+        .arg("--json")
+        .output()
+        .expect("scenario example should run");
+    assert!(scenario_output.status.success());
+    let scenario_stdout = String::from_utf8_lossy(&scenario_output.stdout);
+    assert!(scenario_stdout.contains("\"scenario_id\":\"DeletedPost\""));
+    assert!(scenario_stdout.contains("\"property_id\":\"P_NOT_FOUND_WHEN_DELETED\""));
+
+    let cover_output = Command::new(binary_path())
+        .arg("check")
+        .arg(repo_path("examples/cover_review.valid"))
+        .arg("--property=C_RECOVERED_PATH")
+        .arg("--json")
+        .output()
+        .expect("cover example should run");
+    assert!(cover_output.status.success());
+    let cover_stdout = String::from_utf8_lossy(&cover_output.stdout);
+    assert!(cover_stdout.contains("\"property_id\":\"C_RECOVERED_PATH\""));
 }
 
 #[test]

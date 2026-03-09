@@ -66,6 +66,13 @@ fn handoff_testgen_registry_file() -> PathBuf {
         .join("handoff_testgen_registry.rs")
 }
 
+fn property_suites_project_manifest() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("property_suites_project")
+        .join("Cargo.toml")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
@@ -929,6 +936,10 @@ fn cargo_valid_handoff_check_reports_drift() {
     assert!(first_stdout.contains("\"testgen_summary\""));
     assert!(first_stdout.contains("\"recommended_next_step\""));
     assert!(first_stdout.contains("\"recommended_conformance_surface\""));
+    assert!(first_stdout.contains("\"recommended_docs\""));
+    assert!(first_stdout.contains("\"recommended_mcp_tool\""));
+    assert!(first_stdout.contains("\"recommended_testgen_strategy\""));
+    assert!(first_stdout.contains("\"recommended_conformance_command\""));
     assert!(first_stdout.contains("Recommended Test Vectors"));
     assert!(first_stdout.contains("\"markdown\""));
 
@@ -1052,6 +1063,58 @@ fn compose_helper_example_runs() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"model_id\":\"Approval+Fulfillment\""));
     assert!(stdout.contains("Completed"));
+}
+
+#[test]
+fn cargo_valid_property_suites_example_supports_critical_and_named_suite() {
+    let _guard = cargo_guard();
+    let critical = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(property_suites_project_manifest())
+        .arg("suite")
+        .arg("--critical")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid suite --critical should run");
+    assert!(critical.status.success());
+    let critical_stdout = String::from_utf8_lossy(&critical.stdout);
+    assert!(critical_stdout.contains("\"selection_mode\":\"critical\""));
+    assert!(critical_stdout.contains("\"property_id\":\"P_READY_BOOLEAN\""));
+
+    let named = Command::new(cargo_valid_path())
+        .arg("--manifest-path")
+        .arg(property_suites_project_manifest())
+        .arg("suite")
+        .arg("--suite=smoke")
+        .arg("--json")
+        .output()
+        .expect("cargo-valid suite --suite should run");
+    assert!(named.status.success());
+    let named_stdout = String::from_utf8_lossy(&named.stdout);
+    assert!(named_stdout.contains("\"selection_mode\":\"named_suite\""));
+    assert!(named_stdout.contains("\"suite_name\":\"smoke\""));
+    assert!(named_stdout.contains("\"property_id\":\"P_RETRIES_BOUNDED\""));
+}
+
+#[test]
+fn conformance_harness_example_runs() {
+    let _guard = cargo_guard();
+    let output = Command::new("cargo")
+        .arg("run")
+        .arg("--example")
+        .arg("conformance_harness")
+        .arg("--quiet")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("conformance harness example should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\": \"PASS\"") || stdout.contains("\"status\":\"PASS\""));
+    assert!(stdout.contains("conformance_harness::CounterHarness"));
 }
 
 #[test]

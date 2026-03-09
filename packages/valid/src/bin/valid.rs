@@ -26,7 +26,9 @@ use valid::{
         child_stream_to_json, detect_json_flag, detect_progress_json_flag, install_completion,
         message_diagnostic, parse_batch_request, render_batch_response, render_cli_error_json,
         render_commands_json, render_commands_text, render_completion, render_schema_json,
-        usage_diagnostic, BatchResult, ExitCode, ProgressReporter, Surface,
+        set_plain_text_output, text_bullet, text_command, text_header, text_hint, text_kv,
+        text_section, text_status_badge, usage_diagnostic, BatchResult, ExitCode, ProgressReporter,
+        Surface,
     },
     conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
@@ -72,6 +74,8 @@ use valid::{
 #[derive(Parser, Debug)]
 #[command(name = "valid", disable_help_flag = true, disable_version_flag = true)]
 struct ValidCli {
+    #[arg(long, global = true, action = ArgAction::SetTrue)]
+    plain: bool,
     #[command(subcommand)]
     command: Option<ValidCommand>,
 }
@@ -426,6 +430,7 @@ fn main() {
             message_exit("valid", json, &error.to_string(), None);
         }
     };
+    set_plain_text_output(cli.plain);
     match cli.command {
         Some(ValidCommand::Init(args)) => cmd_init_from_parsed(args),
         Some(ValidCommand::Onboarding(args)) => cmd_onboarding_from_parsed(args),
@@ -1116,19 +1121,51 @@ fn cmd_doctor_from_parsed(args: JsonProgressArgs) {
             serde_json::to_string(&report).expect("doctor json should serialize")
         );
     } else {
-        println!("status: {}", report.status);
-        println!("root: {}", report.root);
+        print!("{}", text_header("valid doctor"));
+        println!(
+            "{} {}",
+            text_status_badge(report.status.as_str()),
+            text_kv("root", report.root.as_str())
+        );
+        print!("{}", text_section("Checks"));
         for check in &report.checks {
-            println!("- {} [{}] {}", check.check_id, check.status, check.summary);
+            println!(
+                "{} {} {}",
+                text_bullet(check.check_id.as_str()),
+                text_status_badge(check.status.as_str()),
+                check.summary
+            );
             if let Some(details) = &check.details {
                 if !details.trim().is_empty() {
-                    println!("  details: {details}");
+                    println!("  {}", text_kv("details", details));
                 }
             }
             if let Some(repair_hint) = &check.repair_hint {
                 if !repair_hint.trim().is_empty() {
-                    println!("  repair_hint: {repair_hint}");
+                    println!("  {}", text_hint(repair_hint));
                 }
+            }
+        }
+        if report.status != "ok" {
+            print!("{}", text_section("Recovery"));
+            if report
+                .checks
+                .iter()
+                .any(|check| check.check_id == "project_scaffold" && check.status == "warn")
+            {
+                println!(
+                    "{}",
+                    text_bullet("Run `valid init --repair` for safe scaffold gaps.")
+                );
+                println!(
+                    "{}",
+                    text_bullet("Rerun `valid onboarding` once the repair completes.")
+                );
+            } else {
+                println!(
+                    "{}",
+                    text_bullet("Fix the first error-level check, then rerun `valid doctor`.")
+                );
             }
         }
     }
@@ -1160,25 +1197,58 @@ fn cmd_init_from_parsed(args: InitArgs) {
                 serde_json::to_string(&report).expect("init check json should serialize")
             );
         } else {
-            println!("status: {}", report.status);
-            println!("root: {}", report.root);
-            println!("cargo_project_detected: {}", report.cargo_project_detected);
-            println!("valid_toml_detected: {}", report.valid_toml_detected);
+            print!("{}", text_header("valid init --check"));
             println!(
-                "registry: {}",
-                report.registry.as_deref().unwrap_or("<missing>")
+                "{} {}",
+                text_status_badge(report.status.as_str()),
+                text_kv("root", report.root.as_str())
+            );
+            println!(
+                "{}",
+                text_kv(
+                    "cargo_project_detected",
+                    if report.cargo_project_detected {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                )
+            );
+            println!(
+                "{}",
+                text_kv(
+                    "valid_toml_detected",
+                    if report.valid_toml_detected {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                )
+            );
+            println!(
+                "{}",
+                text_kv(
+                    "registry",
+                    report.registry.as_deref().unwrap_or("<missing>")
+                )
             );
             if !report.missing_paths.is_empty() {
-                println!("missing_paths: {}", report.missing_paths.join(", "));
+                print!("{}", text_section("Missing Paths"));
+                for path in &report.missing_paths {
+                    println!("{}", text_bullet(path));
+                }
             }
             if !report.mismatched_paths.is_empty() {
-                println!("mismatched_paths: {}", report.mismatched_paths.join(", "));
+                print!("{}", text_section("Mismatched Paths"));
+                for path in &report.mismatched_paths {
+                    println!("{}", text_bullet(path));
+                }
             }
             if !report.recommended_repairs.is_empty() {
-                println!(
-                    "recommended_repairs: {}",
-                    report.recommended_repairs.join(" | ")
-                );
+                print!("{}", text_section("Recommended Repairs"));
+                for repair in &report.recommended_repairs {
+                    println!("{}", text_bullet(repair));
+                }
             }
         }
         let exit = match report.status.as_str() {
@@ -1197,25 +1267,35 @@ fn cmd_init_from_parsed(args: InitArgs) {
                 serde_json::to_string(&result).expect("init repair json should serialize")
             );
         } else {
-            println!("status: {}", result.status);
-            println!("root: {}", result.root);
+            print!("{}", text_header("valid init --repair"));
+            println!(
+                "{} {}",
+                text_status_badge(result.status.as_str()),
+                text_kv("root", result.root.as_str())
+            );
             if !result.repaired_files.is_empty() {
-                println!("repaired_files: {}", result.repaired_files.join(", "));
+                print!("{}", text_section("Repaired Files"));
+                for file in &result.repaired_files {
+                    println!("{}", text_bullet(file));
+                }
             }
             if !result.repaired_directories.is_empty() {
-                println!(
-                    "repaired_directories: {}",
-                    result.repaired_directories.join(", ")
-                );
+                print!("{}", text_section("Repaired Directories"));
+                for dir in &result.repaired_directories {
+                    println!("{}", text_bullet(dir));
+                }
             }
             if !result.skipped_existing.is_empty() {
-                println!("skipped_existing: {}", result.skipped_existing.join(", "));
+                print!("{}", text_section("Skipped Existing"));
+                for path in &result.skipped_existing {
+                    println!("{}", text_bullet(path));
+                }
             }
             if !result.remaining_warnings.is_empty() {
-                println!(
-                    "remaining_warnings: {}",
-                    result.remaining_warnings.join(" | ")
-                );
+                print!("{}", text_section("Remaining Warnings"));
+                for warning in &result.remaining_warnings {
+                    println!("{}", text_bullet(warning));
+                }
             }
         }
         let exit = if result.status == "warn" {
@@ -1267,26 +1347,65 @@ fn cmd_init_from_parsed(args: InitArgs) {
             serde_json::to_string(&result).expect("init result json should serialize")
         );
     } else {
-        println!("root: {}", result.root);
-        println!("cargo_init_ran: {}", result.cargo_init_ran);
-        println!("created: {}", result.created);
-        println!("registry: {}", result.scaffolded_registry);
-        println!("generated_tests_dir: {}", result.generated_tests_dir);
-        println!("artifacts_dir: {}", result.artifacts_dir);
+        print!("{}", text_header("valid init"));
         println!(
-            "benchmarks_baseline_dir: {}",
-            result.benchmarks_baseline_dir
+            "{} {}",
+            text_status_badge("ok"),
+            text_kv("root", result.root.as_str())
         );
-        println!("docs_rdd: {}", result.rdd_guide);
-        println!("ai_bootstrap_guide: {}", result.ai_bootstrap_guide);
+        println!(
+            "{}",
+            text_kv(
+                "cargo_init_ran",
+                if result.cargo_init_ran {
+                    "true"
+                } else {
+                    "false"
+                }
+            )
+        );
+        println!("{}", text_kv("created", result.created.as_str()));
+        println!(
+            "{}",
+            text_kv("registry", result.scaffolded_registry.as_str())
+        );
+        println!(
+            "{}",
+            text_kv("generated_tests_dir", result.generated_tests_dir.as_str())
+        );
+        println!(
+            "{}",
+            text_kv("artifacts_dir", result.artifacts_dir.as_str())
+        );
+        println!(
+            "{}",
+            text_kv(
+                "benchmarks_baseline_dir",
+                result.benchmarks_baseline_dir.as_str()
+            )
+        );
+        println!("{}", text_kv("docs_rdd", result.rdd_guide.as_str()));
+        println!(
+            "{}",
+            text_kv("ai_bootstrap_guide", result.ai_bootstrap_guide.as_str())
+        );
         if !result.skipped_existing.is_empty() {
-            println!("skipped_existing: {}", result.skipped_existing.join(", "));
+            print!("{}", text_section("Skipped Existing"));
+            for path in &result.skipped_existing {
+                println!("{}", text_bullet(path));
+            }
         }
-        println!("next_steps:");
-        println!("  valid init --check");
-        println!("  cargo valid models");
-        println!("  cargo valid inspect approval-model");
-        println!("  cargo valid handoff approval-model");
+        print!("{}", text_section("Next Steps"));
+        println!("{}", text_bullet(&text_command("valid init --check")));
+        println!("{}", text_bullet(&text_command("cargo valid models")));
+        println!(
+            "{}",
+            text_bullet(&text_command("cargo valid inspect approval-model"))
+        );
+        println!(
+            "{}",
+            text_bullet(&text_command("cargo valid handoff approval-model"))
+        );
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());
@@ -1494,11 +1613,14 @@ fn run_onboarding_stage(
     };
     let status = if stage_success { "success" } else { "error" };
     if !interactive && !json {
-        println!("[{stage_id}] {summary}");
-        println!("command: {command_label}");
-        println!("status: {status}");
+        println!(
+            "{} {}",
+            text_status_badge(status),
+            text_kv(stage_id, summary)
+        );
+        println!("  {}", text_kv("command", command_label));
         if let Some(excerpt) = &excerpt {
-            println!("output: {excerpt}");
+            println!("  {}", text_kv("output", excerpt));
         }
     }
     Some(OnboardingStageReport {
@@ -1575,21 +1697,57 @@ fn finish_onboarding(
             serde_json::to_string(&report).expect("onboarding report json should serialize")
         );
     } else {
-        println!("\nstatus: {}", report.status);
-        println!("root: {}", report.root);
-        println!("interactive: {}", report.interactive);
-        println!("what_you_now_have:");
-        println!("  - a scaffolded Cargo-first valid project");
-        println!("  - an inspectable starter model named approval-model");
-        println!("  - a first overview graph you can review");
-        println!("  - an implementation-facing handoff summary");
-        println!("recap_commands:");
-        println!("  cargo valid models");
-        println!("  cargo valid inspect approval-model");
-        println!("  cargo valid handoff approval-model");
-        println!("next_paths: {}", report.next_paths.join(", "));
+        print!("{}", text_header("valid onboarding"));
+        println!(
+            "{} {}",
+            text_status_badge(report.status.as_str()),
+            text_kv("root", report.root.as_str())
+        );
+        println!(
+            "{}",
+            text_kv(
+                "interactive",
+                if report.interactive { "true" } else { "false" }
+            )
+        );
+        print!("{}", text_section("You Now Have"));
+        println!("{}", text_bullet("a scaffolded Cargo-first valid project"));
+        println!(
+            "{}",
+            text_bullet("an inspectable starter model named approval-model")
+        );
+        println!("{}", text_bullet("a first overview graph you can review"));
+        println!(
+            "{}",
+            text_bullet("an implementation-facing handoff summary")
+        );
+        println!("{}", text_bullet("artifact directories at `artifacts/`, `generated-tests/`, and `benchmarks/baselines/`"));
+        print!("{}", text_section("Recap Commands"));
+        println!("{}", text_bullet(&text_command("cargo valid models")));
+        println!(
+            "{}",
+            text_bullet(&text_command("cargo valid inspect approval-model"))
+        );
+        println!(
+            "{}",
+            text_bullet(&text_command("cargo valid handoff approval-model"))
+        );
+        print!("{}", text_section("Next Paths"));
         for next_path in &report.next_path_summaries {
-            println!("  {}: {}", next_path.path_id, next_path.summary);
+            println!(
+                "{}",
+                text_bullet(&format!("{}: {}", next_path.path_id, next_path.summary))
+            );
+        }
+        if report.status != "ok" {
+            print!("{}", text_section("Recovery"));
+            println!(
+                "{}",
+                text_bullet(
+                    "Run `valid doctor` to diagnose the current environment or project state."
+                )
+            );
+            println!("{}", text_bullet("Run `valid init --repair` for safe scaffold repair, then rerun `valid onboarding`."));
         }
     }
     let exit = if report.status == "error" {

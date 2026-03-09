@@ -55,6 +55,10 @@ The summary now also carries:
 - `artifact_paths`
 - `recommended_next_command`
 - `recommended_conformance_surface`
+- `recommended_docs`
+- `recommended_mcp_tool`
+- `recommended_testgen_strategy`
+- `recommended_conformance_command`
 
 Recommended order for implementation handoff:
 

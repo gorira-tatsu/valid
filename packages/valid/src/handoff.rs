@@ -8,6 +8,7 @@ use crate::{
         ExplainResponse, InspectProperty, InspectResponse, OrchestratedRunSummary, TestgenResponse,
         TestgenVectorSummary,
     },
+    cli::{text_bullet, text_command, text_header, text_hint, text_kv, text_section},
     coverage::CoverageReport,
     support::{
         artifact::{generated_test_path, handoff_path},
@@ -65,6 +66,10 @@ pub struct HandoffTestgenSummary {
     pub generated_files: Vec<String>,
     pub recommended_next_step: Option<String>,
     pub recommended_conformance_surface: String,
+    pub recommended_docs: Vec<String>,
+    pub recommended_mcp_tool: Option<String>,
+    pub recommended_testgen_strategy: Option<String>,
+    pub recommended_conformance_command: Option<String>,
     pub recommended_vectors: Vec<HandoffRecommendedVector>,
     pub error: Option<String>,
 }
@@ -82,6 +87,10 @@ pub struct HandoffRecommendedVector {
     pub artifact_paths: Vec<String>,
     pub recommended_next_command: String,
     pub recommended_conformance_surface: String,
+    pub recommended_docs: Vec<String>,
+    pub recommended_mcp_tool: Option<String>,
+    pub recommended_testgen_strategy: Option<String>,
+    pub recommended_conformance_command: String,
     pub why_this_vector_matters: String,
 }
 
@@ -208,6 +217,14 @@ fn summarize_handoff_testgen(
                 recommended_conformance_surface: summarize_conformance_surface(
                     &recommended_vectors,
                 ),
+                recommended_docs: summarize_recommended_docs(&recommended_vectors),
+                recommended_mcp_tool: summarize_recommended_mcp_tool(&recommended_vectors),
+                recommended_testgen_strategy: summarize_recommended_testgen_strategy(
+                    &recommended_vectors,
+                ),
+                recommended_conformance_command: summarize_recommended_conformance_command(
+                    &recommended_vectors,
+                ),
                 recommended_vectors,
                 error: None,
             }
@@ -219,6 +236,10 @@ fn summarize_handoff_testgen(
             generated_files: Vec::new(),
             recommended_next_step: None,
             recommended_conformance_surface: "mixed".to_string(),
+            recommended_docs: Vec::new(),
+            recommended_mcp_tool: None,
+            recommended_testgen_strategy: None,
+            recommended_conformance_command: None,
             recommended_vectors: Vec::new(),
             error: error.map(str::to_string),
         },
@@ -265,6 +286,11 @@ fn recommended_handoff_vectors(
         let artifact_paths = artifact_paths_for_vector(vector, generated_files);
         let recommended_conformance_surface =
             recommended_conformance_surface(&vector.suggested_surface).to_string();
+        let recommended_docs = recommended_docs_for_vector(vector);
+        let recommended_mcp_tool = recommended_mcp_tool_for_vector(vector);
+        let recommended_testgen_strategy = recommended_testgen_strategy_for_vector(vector);
+        let recommended_conformance_command =
+            recommended_conformance_command(vector, &recommended_conformance_surface);
         selected.push(HandoffRecommendedVector {
             vector_id: vector.vector_id.clone(),
             property_id: vector.property_id.clone(),
@@ -277,6 +303,10 @@ fn recommended_handoff_vectors(
             artifact_paths,
             recommended_next_command: recommended_next_command(vector),
             recommended_conformance_surface,
+            recommended_docs,
+            recommended_mcp_tool,
+            recommended_testgen_strategy,
+            recommended_conformance_command,
             why_this_vector_matters: why_vector_matters(vector, failing_properties),
         });
     }
@@ -314,6 +344,59 @@ fn recommended_next_command(vector: &TestgenVectorSummary) -> String {
     }
 }
 
+fn recommended_docs_for_vector(vector: &TestgenVectorSummary) -> Vec<String> {
+    let mut docs = vec!["testgen-and-handoff-guide".to_string()];
+    match vector.strategy.as_str() {
+        "deadlock" | "enablement" => docs.push("testgen-strategies-guide".to_string()),
+        _ => {}
+    }
+    if vector.suggested_surface == "ui" || vector.suggested_surface == "api" {
+        docs.push("ai-conformance-workflow".to_string());
+    }
+    if !vector.requirement_clusters.is_empty() || !vector.risk_clusters.is_empty() {
+        docs.push("graph-and-review-guide".to_string());
+    }
+    docs.sort();
+    docs.dedup();
+    docs
+}
+
+fn recommended_mcp_tool_for_vector(vector: &TestgenVectorSummary) -> Option<String> {
+    match vector.strategy.as_str() {
+        "deadlock" | "enablement" | "counterexample" | "boundary" | "path" => {
+            Some("valid_testgen".to_string())
+        }
+        _ if vector.suggested_surface == "api" || vector.suggested_surface == "ui" => {
+            Some("valid_handoff".to_string())
+        }
+        _ => Some("valid_check".to_string()),
+    }
+}
+
+fn recommended_testgen_strategy_for_vector(vector: &TestgenVectorSummary) -> Option<String> {
+    Some(vector.strategy.clone())
+}
+
+fn recommended_conformance_command(
+    vector: &TestgenVectorSummary,
+    recommended_surface: &str,
+) -> String {
+    match recommended_surface {
+        "api" => "cargo valid conformance <model> --runner <api-runner> --json".to_string(),
+        "ui" => "cargo valid conformance <model> --runner <ui-runner> --json".to_string(),
+        "handler" => "cargo valid conformance <model> --runner <handler-runner> --json".to_string(),
+        _ => {
+            if vector.strategy == "enablement" {
+                "cargo valid testgen <model> --strategy=enablement --json".to_string()
+            } else if vector.strategy == "deadlock" {
+                "cargo valid testgen <model> --strategy=deadlock --json".to_string()
+            } else {
+                "cargo valid conformance <model> --runner <external-runner> --json".to_string()
+            }
+        }
+    }
+}
+
 fn recommended_conformance_surface(suggested_surface: &str) -> &'static str {
     match suggested_surface {
         "api" => "api",
@@ -342,6 +425,36 @@ fn recommended_next_step(vectors: &[HandoffRecommendedVector]) -> String {
         .first()
         .map(|vector| vector.recommended_next_command.clone())
         .unwrap_or_else(|| "cargo valid testgen <model> --json".to_string())
+}
+
+fn summarize_recommended_docs(vectors: &[HandoffRecommendedVector]) -> Vec<String> {
+    let mut docs = vectors
+        .iter()
+        .flat_map(|vector| vector.recommended_docs.clone())
+        .collect::<Vec<_>>();
+    docs.sort();
+    docs.dedup();
+    docs
+}
+
+fn summarize_recommended_mcp_tool(vectors: &[HandoffRecommendedVector]) -> Option<String> {
+    vectors
+        .first()
+        .and_then(|vector| vector.recommended_mcp_tool.clone())
+}
+
+fn summarize_recommended_testgen_strategy(vectors: &[HandoffRecommendedVector]) -> Option<String> {
+    vectors
+        .first()
+        .and_then(|vector| vector.recommended_testgen_strategy.clone())
+}
+
+fn summarize_recommended_conformance_command(
+    vectors: &[HandoffRecommendedVector],
+) -> Option<String> {
+    vectors
+        .first()
+        .map(|vector| vector.recommended_conformance_command.clone())
 }
 
 fn why_vector_matters(vector: &TestgenVectorSummary, failing_properties: &[String]) -> String {
@@ -388,9 +501,24 @@ fn section_recommended_test_vectors(summary: &HandoffTestgenSummary) -> HandoffS
                 .unwrap_or("cargo valid testgen <model> --json"),
             summary.recommended_conformance_surface
         ));
+        if !summary.recommended_docs.is_empty() {
+            bullets.push(format!(
+                "Recommended docs: {}.",
+                comma_or_none(&summary.recommended_docs)
+            ));
+        }
+        if let Some(tool) = &summary.recommended_mcp_tool {
+            bullets.push(format!("Recommended MCP tool: `{tool}`."));
+        }
+        if let Some(strategy) = &summary.recommended_testgen_strategy {
+            bullets.push(format!("Recommended testgen strategy: `{strategy}`."));
+        }
+        if let Some(command) = &summary.recommended_conformance_command {
+            bullets.push(format!("Recommended conformance command: `{command}`."));
+        }
         for vector in &summary.recommended_vectors {
             bullets.push(format!(
-                "`{}` for `{}` via `{}` on `{}` [{} -> {}] because {}. Next: `{}`. Artifacts: [{}].",
+                "`{}` for `{}` via `{}` on `{}` [{} -> {}] because {}. Next: `{}`. Conformance: `{}`. MCP: `{}`. Docs: [{}]. Artifacts: [{}].",
                 vector.vector_id,
                 vector.property_id,
                 vector.strategy,
@@ -399,6 +527,12 @@ fn section_recommended_test_vectors(summary: &HandoffTestgenSummary) -> HandoffS
                 comma_or_none(&vector.oracle_targets),
                 vector.why_this_vector_matters,
                 vector.recommended_next_command,
+                vector.recommended_conformance_command,
+                vector
+                    .recommended_mcp_tool
+                    .as_deref()
+                    .unwrap_or("n/a"),
+                comma_or_none(&vector.recommended_docs),
                 comma_or_none(&vector.artifact_paths)
             ));
         }
@@ -464,9 +598,50 @@ pub fn write_handoff(path: &str, generated: &GeneratedHandoff) -> Result<(), Str
 
 pub fn render_handoff_text(generated: &GeneratedHandoff, output_path: Option<&str>) -> String {
     let mut out = String::new();
+    out.push_str(&text_header(&format!(
+        "Implementation handoff: {}",
+        generated.model_id
+    )));
+    out.push_str(&format!(
+        "{} {}\n",
+        crate::cli::text_status_badge("generated"),
+        text_kv("contract_hash", generated.contract_hash.as_str())
+    ));
+    out.push_str(&text_section("What To Do Next"));
+    if let Some(step) = &generated.testgen_summary.recommended_next_step {
+        out.push_str(&format!(
+            "{}\n",
+            text_bullet(&format!("next command: {}", text_command(step)))
+        ));
+    }
+    if let Some(command) = &generated.testgen_summary.recommended_conformance_command {
+        out.push_str(&format!(
+            "{}\n",
+            text_bullet(&format!("conformance command: {}", text_command(command)))
+        ));
+    }
+    if let Some(tool) = &generated.testgen_summary.recommended_mcp_tool {
+        out.push_str(&format!(
+            "{}\n",
+            text_bullet(&format!("mcp tool: `{tool}`"))
+        ));
+    }
+    if !generated.testgen_summary.recommended_docs.is_empty() {
+        out.push_str(&format!(
+            "{}\n",
+            text_bullet(&format!(
+                "docs: {}",
+                generated.testgen_summary.recommended_docs.join(", ")
+            ))
+        ));
+    }
+    out.push('\n');
     out.push_str(&generated.markdown);
     if let Some(path) = output_path {
-        out.push_str(&format!("\noutput_path: {path}\n"));
+        out.push_str(&format!(
+            "\n{}\n",
+            text_hint(&format!("output_path: {path}"))
+        ));
     }
     out
 }
@@ -492,25 +667,41 @@ pub fn render_handoff_json(generated: &GeneratedHandoff, output_path: Option<&st
 
 pub fn render_handoff_check_text(report: &HandoffCheckReport) -> String {
     let mut out = String::new();
-    out.push_str(&format!("status: {}\n", report.status));
-    out.push_str(&format!("model_id: {}\n", report.model_id));
+    out.push_str(&text_header("handoff --check"));
+    out.push_str(&format!(
+        "{} {}\n",
+        crate::cli::text_status_badge(report.status.as_str()),
+        text_kv("model_id", report.model_id.as_str())
+    ));
     if let Some(property_id) = &report.property_id {
-        out.push_str(&format!("property_id: {property_id}\n"));
+        out.push_str(&format!("{}\n", text_kv("property_id", property_id)));
     }
-    out.push_str(&format!("output_path: {}\n", report.output_path));
-    out.push_str(&format!("source_hash: {}\n", report.source_hash));
-    out.push_str(&format!("generated_hash: {}\n", report.generated_hash));
-    out.push_str(&format!("contract_hash: {}\n", report.contract_hash));
+    out.push_str(&format!(
+        "{}\n",
+        text_kv("output_path", report.output_path.as_str())
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        text_kv("source_hash", report.source_hash.as_str())
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        text_kv("generated_hash", report.generated_hash.as_str())
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        text_kv("contract_hash", report.contract_hash.as_str())
+    ));
     if let Some(existing_hash) = &report.existing_hash {
-        out.push_str(&format!("existing_hash: {existing_hash}\n"));
+        out.push_str(&format!("{}\n", text_kv("existing_hash", existing_hash)));
     } else {
-        out.push_str("existing_hash: <missing>\n");
+        out.push_str(&format!("{}\n", text_kv("existing_hash", "<missing>")));
     }
     if !report.drift_sections.is_empty() {
-        out.push_str(&format!(
-            "drift_sections: {}\n",
-            report.drift_sections.join(",")
-        ));
+        out.push_str(&text_section("Drift Sections"));
+        for section in &report.drift_sections {
+            out.push_str(&format!("{}\n", text_bullet(section)));
+        }
     }
     out
 }

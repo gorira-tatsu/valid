@@ -71,7 +71,18 @@ Each recommended vector includes:
 - `artifact_paths`
 - `recommended_next_command`
 - `recommended_conformance_surface`
+- `recommended_docs`
+- `recommended_mcp_tool`
+- `recommended_testgen_strategy`
+- `recommended_conformance_command`
 - `why_this_vector_matters`
+
+The top-level `testgen_summary` now also includes:
+
+- `recommended_docs`
+- `recommended_mcp_tool`
+- `recommended_testgen_strategy`
+- `recommended_conformance_command`
 
 Use `handoff` when you want a brief. Use `testgen` when you need the full JSON
 or generated artifacts.
@@ -81,6 +92,7 @@ Canonical example:
 ```sh
 cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
 cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
+valid check examples/scenario_focus.valid --scenario=DeletedPost --json
 ```
 
 ## Recommended command flow

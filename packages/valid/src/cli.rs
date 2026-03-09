@@ -1,6 +1,8 @@
 use std::{
     env, fs,
+    io::{self, IsTerminal},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use clap::{Arg, ArgAction, Command};
@@ -17,6 +19,8 @@ use crate::{
 };
 
 pub const CLI_SCHEMA_VERSION: &str = "1.0.0";
+
+static FORCE_PLAIN_TEXT: AtomicBool = AtomicBool::new(false);
 
 const RUN_RESULT_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -308,6 +312,86 @@ impl ProgressReporter {
                 "exit_code": exit_code.code()
             }),
         );
+    }
+}
+
+pub fn set_plain_text_output(plain: bool) {
+    FORCE_PLAIN_TEXT.store(plain, Ordering::Relaxed);
+}
+
+pub fn text_ui_enabled() -> bool {
+    !FORCE_PLAIN_TEXT.load(Ordering::Relaxed)
+        && env::var_os("NO_COLOR").is_none()
+        && io::stdout().is_terminal()
+}
+
+fn style(code: &str, text: &str) -> String {
+    if text_ui_enabled() {
+        format!("\x1b[{code}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+pub fn text_header(title: &str) -> String {
+    if text_ui_enabled() {
+        format!("{}\n", style("1;38;5;39", title))
+    } else {
+        format!("{title}\n")
+    }
+}
+
+pub fn text_section(title: &str) -> String {
+    if text_ui_enabled() {
+        format!("\n{}\n", style("1;38;5;110", title))
+    } else {
+        format!("\n{title}\n")
+    }
+}
+
+pub fn text_status_badge(status: &str) -> String {
+    let normalized = status.to_ascii_uppercase();
+    let code = match normalized.as_str() {
+        "PASS" | "SUCCESS" | "OK" => "1;30;42",
+        "FAIL" | "ERROR" => "1;37;41",
+        "WARN" | "WARNING" | "UNKNOWN" | "PARTIAL" => "1;30;43",
+        "SKIPPED" => "1;30;47",
+        _ => "1;37;44",
+    };
+    let label = format!(" {} ", normalized);
+    if text_ui_enabled() {
+        style(code, &label)
+    } else {
+        format!("[{}]", normalized)
+    }
+}
+
+pub fn text_kv(key: &str, value: &str) -> String {
+    let styled_key = if text_ui_enabled() {
+        style("1;38;5;246", key)
+    } else {
+        key.to_string()
+    };
+    format!("{styled_key}: {value}")
+}
+
+pub fn text_bullet(value: &str) -> String {
+    if text_ui_enabled() {
+        format!("{} {value}", style("38;5;110", "•"))
+    } else {
+        format!("- {value}")
+    }
+}
+
+pub fn text_command(value: &str) -> String {
+    style("1;38;5;81", value)
+}
+
+pub fn text_hint(value: &str) -> String {
+    if text_ui_enabled() {
+        format!("{} {value}", style("1;38;5;214", "Hint"))
+    } else {
+        format!("hint: {value}")
     }
 }
 

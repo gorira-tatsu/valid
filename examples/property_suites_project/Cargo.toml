@@ -1,0 +1,9 @@
+[package]
+name = "property-suites-example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+valid = { path = "../..", version = "0.1.0" }
+
+[workspace]

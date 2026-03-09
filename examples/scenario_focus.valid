@@ -1,0 +1,18 @@
+model DeletedDetail
+state:
+  visible: bool
+  deleted: bool
+init:
+  visible = true
+  deleted = false
+predicates:
+  deleted_view: visible == false && deleted == true
+scenarios:
+  DeletedPost: deleted == true
+action Delete:
+  pre: visible == true
+  post:
+    visible = false
+    deleted = true
+property P_NOT_FOUND_WHEN_DELETED:
+  invariant: deleted == false || visible == false

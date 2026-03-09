@@ -114,5 +114,72 @@
       "cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json",
       "cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json"
     ]
+  },
+  {
+    "id": "scenario-focus",
+    "title": "Scenario focus",
+    "difficulty": "intro",
+    "concepts": ["scenario", "focused-review", "state-space-restriction"],
+    "mode": "dsl",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/scenario_focus.valid",
+    "recommended_order": 8,
+    "recommended_docs": ["dsl-guide", "language-spec", "quickstart-guide"],
+    "focus_models": ["DeletedDetail"],
+    "summary": "Smallest `.valid` example for scenario-focused checking and review.",
+    "commands": [
+      "valid inspect examples/scenario_focus.valid --json",
+      "valid check examples/scenario_focus.valid --scenario=DeletedPost --json"
+    ]
+  },
+  {
+    "id": "cover-review",
+    "title": "Cover review",
+    "difficulty": "intro",
+    "concepts": ["cover", "reachability", "review"],
+    "mode": "dsl",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/cover_review.valid",
+    "recommended_order": 9,
+    "recommended_docs": ["dsl-guide", "language-spec", "graph-and-review-guide"],
+    "focus_models": ["RetryReview"],
+    "summary": "Small `.valid` example for reachability-oriented cover review.",
+    "commands": [
+      "valid inspect examples/cover_review.valid --json",
+      "valid check examples/cover_review.valid --property=C_RECOVERED_PATH --json"
+    ]
+  },
+  {
+    "id": "property-suites-project",
+    "title": "Property suites project",
+    "difficulty": "intermediate",
+    "concepts": ["critical-properties", "property-suites", "project-policy"],
+    "mode": "project",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/property_suites_project/README.md",
+    "recommended_order": 10,
+    "recommended_docs": ["project-organization-guide", "dsl-guide", "quickstart-guide"],
+    "focus_models": ["suite-policy"],
+    "summary": "Small project-first example for `critical_properties` and named suites.",
+    "commands": [
+      "cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --critical --json",
+      "cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --suite=smoke --json"
+    ]
+  },
+  {
+    "id": "conformance-harness",
+    "title": "Conformance harness",
+    "difficulty": "intermediate",
+    "concepts": ["RustConformanceHarness", "testgen", "conformance"],
+    "mode": "example",
+    "backend_expectation": "explicit-ready",
+    "source_path": "examples/conformance_harness.rs",
+    "recommended_order": 11,
+    "recommended_docs": ["ai-conformance-workflow", "testgen-and-handoff-guide", "quickstart-guide"],
+    "focus_models": ["Counter"],
+    "summary": "Small in-process Rust conformance harness example driven from a generated vector.",
+    "commands": [
+      "cargo run --example conformance_harness"
+    ]
   }
 ]

@@ -20,6 +20,12 @@ Current examples:
 - `compose_helper_registry.rs`
   Small helper-based composition example that uses `compose_models(...)`
   directly and prints inspect/check output for the composed surface.
+- `conformance_harness.rs`
+  Small in-process Rust harness example that runs a generated vector against a
+  `RustConformanceHarness`.
+- `cover_review.valid`
+  Small `.valid` example for `cover`-oriented review and explicit reachability
+  checks.
 - `deadlock_enablement_registry.rs`
   Small registry for deadlock-oriented and blocked-action enablement-oriented
   test generation.
@@ -28,6 +34,11 @@ Current examples:
 - `handoff_testgen_registry.rs`
   Small registry that makes `handoff` and `testgen` line up around one failing
   review gate.
+- `property_suites_project/`
+  Small project-first example that demonstrates `critical_properties` and
+  named `property_suites`.
+- `scenario_focus.valid`
+  Small `.valid` example for scenario-focused review with `--scenario=...`.
 - `tenant_relation_registry.rs`
   Small declarative integration model that demonstrates the shared-state
   pattern for tenant membership plus tenant plan checks.
@@ -71,10 +82,17 @@ Typical commands:
 ```sh
 cargo valid --registry examples/valid_models.rs models
 cargo run --example compose_helper_registry
+cargo run --example conformance_harness
+valid inspect examples/scenario_focus.valid --json
+valid check examples/scenario_focus.valid --scenario=DeletedPost --json
+valid inspect examples/cover_review.valid --json
+valid check examples/cover_review.valid --property=C_RECOVERED_PATH --json
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
 cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
+cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --critical --json
+cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --suite=smoke --json
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 cargo valid --registry examples/password_policy.rs inspect password-policy-safe

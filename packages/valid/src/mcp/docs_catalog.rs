@@ -227,6 +227,16 @@ fn example_source_text(source_path: &str) -> &'static str {
         "examples/handoff_testgen_registry.rs" => {
             include_str!("../../../../examples/handoff_testgen_registry.rs")
         }
+        "examples/scenario_focus.valid" => {
+            include_str!("../../../../examples/scenario_focus.valid")
+        }
+        "examples/cover_review.valid" => include_str!("../../../../examples/cover_review.valid"),
+        "examples/property_suites_project/README.md" => {
+            include_str!("../../../../examples/property_suites_project/README.md")
+        }
+        "examples/conformance_harness.rs" => {
+            include_str!("../../../../examples/conformance_harness.rs")
+        }
         other => panic!("unmapped examples catalog source_path `{other}`"),
     }
 }

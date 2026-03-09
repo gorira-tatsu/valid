@@ -1,0 +1,25 @@
+model RetryReview
+state:
+  retry_scheduled: bool
+  recovered: bool
+  impossible_branch: bool
+init:
+  retry_scheduled = false
+  recovered = false
+  impossible_branch = false
+action ScheduleRetry:
+  pre: retry_scheduled == false
+  post:
+    retry_scheduled = true
+    recovered = recovered
+    impossible_branch = impossible_branch
+action Recover:
+  pre: retry_scheduled == true && recovered == false
+  post:
+    retry_scheduled = false
+    recovered = true
+    impossible_branch = impossible_branch
+property C_RECOVERED_PATH:
+  cover: recovered == true
+property P_IMPOSSIBLE_BRANCH_IS_FALSE:
+  invariant: impossible_branch == false

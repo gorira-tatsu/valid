@@ -479,6 +479,20 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
             .as_str()
             .is_some()
     );
+    assert!(handoff["testgen_summary"]["recommended_docs"]
+        .as_array()
+        .is_some());
+    assert!(handoff["testgen_summary"]["recommended_mcp_tool"]
+        .as_str()
+        .is_some());
+    assert!(handoff["testgen_summary"]["recommended_testgen_strategy"]
+        .as_str()
+        .is_some());
+    assert!(
+        handoff["testgen_summary"]["recommended_conformance_command"]
+            .as_str()
+            .is_some()
+    );
     assert!(handoff["markdown"]
         .as_str()
         .expect("markdown should be present")

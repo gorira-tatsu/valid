@@ -65,6 +65,7 @@ Canonical example registry:
 ```sh
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
+valid check examples/cover_review.valid --property=C_RECOVERED_PATH --json
 ```
 
 Use `--json` when you want the complete machine-readable vector contract.

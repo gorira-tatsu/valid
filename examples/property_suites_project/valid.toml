@@ -1,0 +1,11 @@
+registry = "valid/registry.rs"
+default_backend = "explicit"
+suite_models = ["suite-policy"]
+preferred_backends = ["explicit"]
+default_suite = "smoke"
+
+[critical_properties]
+suite-policy = ["P_READY_BOOLEAN"]
+
+[property_suites.smoke]
+entries = [{ model = "suite-policy", properties = ["P_RETRIES_BOUNDED"] }]
