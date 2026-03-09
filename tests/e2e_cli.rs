@@ -944,7 +944,9 @@ fn main_cli_handoff_check_reports_drift_structurally() {
     let first_stdout = String::from_utf8_lossy(&first.stdout);
     assert!(first_stdout.contains("\"model_id\":\"SafeCounter\""));
     assert!(first_stdout.contains("\"contract_hash\""));
+    assert!(first_stdout.contains("\"testgen_summary\""));
     assert!(first_stdout.contains("\"markdown\""));
+    assert!(first_stdout.contains("Recommended Test Vectors"));
 
     let unchanged = Command::new(binary_path())
         .arg("handoff")

@@ -2177,11 +2177,32 @@ fn handoff_tool(config: &ServerConfig, args: &BackendArgs) -> Result<ToolResult,
                     )?));
                 }
             };
+            let testgen_request = TestgenRequest {
+                request_id: "mcp-handoff-testgen".to_string(),
+                source_name: source_name.clone(),
+                source: source.clone(),
+                property_id: args.property_id.clone(),
+                focus_action_id: None,
+                strategy: "counterexample".to_string(),
+                seed: None,
+                backend: args.backend.clone(),
+                solver_executable: args.solver_executable.clone(),
+                solver_args: args.solver_args.clone(),
+            };
+            let testgen = testgen_source(&testgen_request);
+            let testgen_ref = testgen.as_ref().ok();
+            let testgen_error = testgen
+                .as_ref()
+                .err()
+                .and_then(|error| error.diagnostics.first())
+                .map(|diagnostic| diagnostic.message.as_str());
             let generated = generate_handoff(HandoffInputs {
                 inspect: &inspect,
                 runs: &orchestrated.runs,
                 coverage: &coverage,
                 explanations: &explanations,
+                testgen: testgen_ref,
+                testgen_error,
                 property_id: args.property_id.as_deref(),
                 source_hash: &source_hash,
                 contract_hash: &contract_hash,

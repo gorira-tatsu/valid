@@ -12,7 +12,10 @@ use crate::{
         eval::eval_expr,
         transition::{apply_action_transition, build_initial_state},
     },
-    testgen::{TestVector, VectorActionStep, VectorGrouping},
+    testgen::{
+        ImplementationHints, ObservationContract, RequiredInput, SetupContract, TestVector,
+        VectorActionStep, VectorGrouping,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +32,8 @@ pub struct ConformanceResponse {
     pub status: String,
     #[serde(default)]
     pub observations: Vec<BTreeMap<String, Value>>,
+    #[serde(default)]
+    pub side_effects: Vec<BTreeMap<String, Value>>,
     #[serde(default)]
     pub property_holds: Option<bool>,
     #[serde(default)]
@@ -179,7 +184,7 @@ pub fn build_vector_from_actions(
     });
 
     let business_action_ids = actions.iter().map(|step| step.action_id.clone()).collect();
-    Ok(TestVector {
+    let mut vector = TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!("vec-conformance-{}", model.model_id),
         run_id: format!("run-conformance-{}", model.model_id),
@@ -206,8 +211,16 @@ pub fn build_vector_from_actions(
         business_action_ids,
         notes: vec!["generated from spec replay for implementation conformance".to_string()],
         grouping: VectorGrouping::default(),
+        observation_contract: ObservationContract::default(),
+        observation_layers: Vec::new(),
+        oracle_targets: Vec::new(),
+        required_inputs: Vec::<RequiredInput>::new(),
+        setup_contract: SetupContract::default(),
+        implementation_hints: ImplementationHints::default(),
         replay_target: None,
-    })
+    };
+    vector.normalize_language_agnostic_contract();
+    Ok(vector)
 }
 
 pub fn run_conformance(
@@ -306,6 +319,7 @@ pub fn run_rust_conformance<H: RustConformanceHarness>(
             schema_version: "1.0.0".to_string(),
             status: "ok".to_string(),
             observations,
+            side_effects: Vec::new(),
             property_holds,
             message: None,
         },
@@ -682,7 +696,10 @@ mod tests {
     use crate::{
         frontend::compile_model,
         ir::{Path, Value},
-        testgen::{TestVector, VectorActionStep, VectorGrouping},
+        testgen::{
+            ImplementationHints, ObservationContract, SetupContract, TestVector, VectorActionStep,
+            VectorGrouping,
+        },
     };
 
     use super::{
@@ -722,6 +739,12 @@ mod tests {
             business_action_ids: vec!["Jump".to_string()],
             notes: Vec::new(),
             grouping: VectorGrouping::default(),
+            observation_contract: ObservationContract::default(),
+            observation_layers: Vec::new(),
+            oracle_targets: Vec::new(),
+            required_inputs: Vec::new(),
+            setup_contract: SetupContract::default(),
+            implementation_hints: ImplementationHints::default(),
             replay_target: None,
         }
     }
@@ -735,6 +758,7 @@ mod tests {
                 schema_version: "1.0.0".to_string(),
                 status: "ok".to_string(),
                 observations: vec![BTreeMap::from([("x".to_string(), Value::UInt(2))])],
+                side_effects: vec![],
                 property_holds: Some(false),
                 message: None,
             },
@@ -754,6 +778,7 @@ mod tests {
                 schema_version: "1.0.0".to_string(),
                 status: "ok".to_string(),
                 observations: vec![BTreeMap::from([("x".to_string(), Value::UInt(1))])],
+                side_effects: vec![],
                 property_holds: Some(true),
                 message: None,
             },
@@ -778,6 +803,7 @@ mod tests {
                 schema_version: "1.0.0".to_string(),
                 status: "ok".to_string(),
                 observations: vec![],
+                side_effects: vec![],
                 property_holds: Some(false),
                 message: None,
             },
@@ -801,6 +827,7 @@ mod tests {
                     BTreeMap::from([("x".to_string(), Value::UInt(2))]),
                     BTreeMap::from([("x".to_string(), Value::UInt(3))]),
                 ],
+                side_effects: vec![],
                 property_holds: Some(false),
                 message: None,
             },

@@ -537,12 +537,18 @@ pub struct TestgenResponse {
 pub struct TestgenVectorSummary {
     pub vector_id: String,
     pub run_id: String,
+    pub property_id: String,
     pub strictness: String,
     pub derivation: String,
     pub source_kind: String,
     pub strategy: String,
     pub requirement_clusters: Vec<String>,
     pub risk_clusters: Vec<String>,
+    pub observation_mode: String,
+    pub observation_layers: Vec<String>,
+    pub oracle_targets: Vec<String>,
+    pub suggested_surface: String,
+    pub state_visibility: String,
     pub focus_action_id: Option<String>,
     pub expected_guard_enabled: Option<bool>,
     pub notes: Vec<String>,
@@ -2354,6 +2360,9 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         vectors
     };
     backfill_testgen_grouping(target_property_id, &mut vectors);
+    for vector in &mut vectors {
+        vector.normalize_language_agnostic_contract();
+    }
     annotate_model_replay_targets(&request.source_name, target_property_id, &mut vectors);
     let generated_files =
         write_generated_test_files(&vectors).map_err(|message| CheckErrorEnvelope {
@@ -2379,12 +2388,18 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             .map(|vector| TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
                 run_id: vector.run_id.clone(),
+                property_id: vector.property_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
                 requirement_clusters: vector.grouping.requirement_clusters.clone(),
                 risk_clusters: vector.grouping.risk_clusters.clone(),
+                observation_mode: vector.observation_contract.mode.clone(),
+                observation_layers: vector.observation_layers.clone(),
+                oracle_targets: vector.oracle_targets.clone(),
+                suggested_surface: vector.implementation_hints.suggested_surface.clone(),
+                state_visibility: vector.implementation_hints.state_visibility.clone(),
                 focus_action_id: vector.focus_action_id.clone(),
                 expected_guard_enabled: vector.expected_guard_enabled,
                 notes: vector.notes.clone(),
@@ -5325,10 +5340,14 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
     for vector in &response.vectors {
         require_non_empty(&vector.vector_id, "vectors[].vector_id")?;
         require_non_empty(&vector.run_id, "vectors[].run_id")?;
+        require_non_empty(&vector.property_id, "vectors[].property_id")?;
         require_non_empty(&vector.strictness, "vectors[].strictness")?;
         require_non_empty(&vector.derivation, "vectors[].derivation")?;
         require_non_empty(&vector.source_kind, "vectors[].source_kind")?;
         require_non_empty(&vector.strategy, "vectors[].strategy")?;
+        require_non_empty(&vector.observation_mode, "vectors[].observation_mode")?;
+        require_non_empty(&vector.suggested_surface, "vectors[].suggested_surface")?;
+        require_non_empty(&vector.state_visibility, "vectors[].state_visibility")?;
         if let Some(action_id) = &vector.focus_action_id {
             require_non_empty(action_id, "vectors[].focus_action_id")?;
         }
@@ -5337,6 +5356,12 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
         }
         for cluster in &vector.risk_clusters {
             require_non_empty(cluster, "vectors[].risk_clusters[]")?;
+        }
+        for layer in &vector.observation_layers {
+            require_non_empty(layer, "vectors[].observation_layers[]")?;
+        }
+        for target in &vector.oracle_targets {
+            require_non_empty(target, "vectors[].oracle_targets[]")?;
         }
         for note in &vector.notes {
             require_non_empty(note, "vectors[].notes[]")?;

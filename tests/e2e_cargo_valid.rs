@@ -914,6 +914,8 @@ fn cargo_valid_handoff_check_reports_drift() {
     assert!(first.status.success());
     let first_stdout = String::from_utf8_lossy(&first.stdout);
     assert!(first_stdout.contains("\"model_id\":\"CounterModel\""));
+    assert!(first_stdout.contains("\"testgen_summary\""));
+    assert!(first_stdout.contains("Recommended Test Vectors"));
     assert!(first_stdout.contains("\"markdown\""));
 
     let unchanged = Command::new(cargo_valid_path())

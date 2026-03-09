@@ -462,10 +462,14 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     assert_eq!(handoff["model_id"], "FailingCounter");
     assert_eq!(handoff["property_id"], "P_FAIL");
     assert!(handoff["contract_hash"].as_str().is_some());
+    assert_eq!(handoff["testgen_summary"]["status"], "available");
+    assert!(handoff["testgen_summary"]["vector_count"]
+        .as_u64()
+        .is_some());
     assert!(handoff["markdown"]
         .as_str()
         .expect("markdown should be present")
-        .contains("Implementation Handoff"));
+        .contains("Recommended Test Vectors"));
 
     let inspect = structured_content(
         client.call_tool("valid_inspect", json!({ "model_file": model_file_str })),

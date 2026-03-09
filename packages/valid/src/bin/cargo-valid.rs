@@ -1272,11 +1272,32 @@ fn cmd_handoff(parsed: ParsedArgs) {
                 response.actions.join(","),
                 response.properties.join(",")
             ));
+            let testgen_request = TestgenRequest {
+                request_id: "cargo-valid-handoff-testgen".to_string(),
+                source_name: source_name.clone(),
+                source: String::new(),
+                property_id: parsed.property_id.clone(),
+                focus_action_id: None,
+                strategy: "counterexample".to_string(),
+                seed: None,
+                backend: parsed.backend.clone(),
+                solver_executable: parsed.solver_executable.clone(),
+                solver_args: parsed.solver_args.clone(),
+            };
+            let testgen = testgen_source(&testgen_request);
+            let testgen_ref = testgen.as_ref().ok();
+            let testgen_error = testgen
+                .as_ref()
+                .err()
+                .and_then(|error| error.diagnostics.first())
+                .map(|diagnostic| diagnostic.message.as_str());
             let generated = generate_handoff(HandoffInputs {
                 inspect: &response,
                 runs: &orchestrated.runs,
                 coverage: &coverage,
                 explanations: &explanations,
+                testgen: testgen_ref,
+                testgen_error,
                 property_id: parsed.property_id.as_deref(),
                 source_hash: &source_hash,
                 contract_hash: &contract_hash,
@@ -1677,15 +1698,21 @@ fn cmd_testgen(parsed: ParsedArgs) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
+                            vector.property_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
                             vector.strategy,
                             vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
                             vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                            vector.observation_mode,
+                            vector.observation_layers.iter().map(|layer| format!("\"{}\"", layer)).collect::<Vec<_>>().join(","),
+                            vector.oracle_targets.iter().map(|target| format!("\"{}\"", target)).collect::<Vec<_>>().join(","),
+                            vector.suggested_surface,
+                            vector.state_visibility,
                             vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
                             vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
                             vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
@@ -1711,9 +1738,10 @@ fn cmd_testgen(parsed: ParsedArgs) {
                     println!("vectors:");
                     for vector in &response.vectors {
                         println!(
-                            "- {} run_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
+                            "- {} run_id={} property_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} observation_mode={} layers={} targets={} surface={} state_visibility={} focus_action={} guard_enabled={} notes={}",
                             vector.vector_id,
                             vector.run_id,
+                            vector.property_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
@@ -1728,6 +1756,19 @@ fn cmd_testgen(parsed: ParsedArgs) {
                             } else {
                                 vector.risk_clusters.join(",")
                             },
+                            vector.observation_mode,
+                            if vector.observation_layers.is_empty() {
+                                "-".to_string()
+                            } else {
+                                vector.observation_layers.join(",")
+                            },
+                            if vector.oracle_targets.is_empty() {
+                                "-".to_string()
+                            } else {
+                                vector.oracle_targets.join(",")
+                            },
+                            vector.suggested_surface,
+                            vector.state_visibility,
                             vector.focus_action_id.as_deref().unwrap_or("-"),
                             vector
                                 .expected_guard_enabled

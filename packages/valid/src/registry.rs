@@ -436,11 +436,19 @@ fn cmd_handoff(models: &[RegisteredModel], args: Vec<String>) {
         .map(|snapshot| snapshot.contract_hash)
         .unwrap_or_else(|_| stable_hash_hex(model.name));
     let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract_hash));
+    let testgen = (model.testgen)(
+        parsed.property_id.as_deref(),
+        "counterexample",
+        None,
+        parsed.json,
+    );
     let generated = generate_handoff(HandoffInputs {
         inspect: &inspect,
         runs: &orchestrated.runs,
         coverage: &coverage,
         explanations: &explanations,
+        testgen: Some(&testgen),
+        testgen_error: None,
         property_id: parsed.property_id.as_deref(),
         source_hash: &source_hash,
         contract_hash: &contract_hash,
@@ -835,14 +843,20 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                 .vectors
                 .iter()
                 .map(|vector| format!(
-                    "{{\"vector_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
+                    "{{\"vector_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"notes\":[{}]}}",
                     vector.vector_id,
+                    vector.property_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
                     vector.strategy,
                     vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
                     vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
+                    vector.observation_mode,
+                    vector.observation_layers.iter().map(|layer| format!("\"{}\"", layer)).collect::<Vec<_>>().join(","),
+                    vector.oracle_targets.iter().map(|target| format!("\"{}\"", target)).collect::<Vec<_>>().join(","),
+                    vector.suggested_surface,
+                    vector.state_visibility,
                     vector.focus_action_id.as_ref().map(|id| format!("\"{}\"", id)).unwrap_or_else(|| "null".to_string()),
                     vector.expected_guard_enabled.map(|value| value.to_string()).unwrap_or_else(|| "null".to_string()),
                     vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
@@ -868,8 +882,9 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
             println!("vectors:");
             for vector in &response.vectors {
                 println!(
-                    "- {} strictness={} derivation={} source={} strategy={} requirements={} risks={} focus_action={} guard_enabled={} notes={}",
+                    "- {} property_id={} strictness={} derivation={} source={} strategy={} requirements={} risks={} observation_mode={} layers={} targets={} surface={} state_visibility={} focus_action={} guard_enabled={} notes={}",
                     vector.vector_id,
+                    vector.property_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
@@ -884,6 +899,19 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                     } else {
                         vector.risk_clusters.join(",")
                     },
+                    vector.observation_mode,
+                    if vector.observation_layers.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.observation_layers.join(",")
+                    },
+                    if vector.oracle_targets.is_empty() {
+                        "-".to_string()
+                    } else {
+                        vector.oracle_targets.join(",")
+                    },
+                    vector.suggested_surface,
+                    vector.state_visibility,
                     vector.focus_action_id.as_deref().unwrap_or("-"),
                     vector
                         .expected_guard_enabled
@@ -1214,12 +1242,18 @@ fn testgen_machine<M: VerifiedMachine>(
             .map(|vector| crate::api::TestgenVectorSummary {
                 vector_id: vector.vector_id.clone(),
                 run_id: vector.run_id.clone(),
+                property_id: vector.property_id.clone(),
                 strictness: vector.strictness.clone(),
                 derivation: vector.derivation.clone(),
                 source_kind: vector.source_kind.clone(),
                 strategy: vector.strategy.clone(),
                 requirement_clusters: vector.grouping.requirement_clusters.clone(),
                 risk_clusters: vector.grouping.risk_clusters.clone(),
+                observation_mode: vector.observation_contract.mode.clone(),
+                observation_layers: vector.observation_layers.clone(),
+                oracle_targets: vector.oracle_targets.clone(),
+                suggested_surface: vector.implementation_hints.suggested_surface.clone(),
+                state_visibility: vector.implementation_hints.state_visibility.clone(),
                 focus_action_id: vector.focus_action_id.clone(),
                 expected_guard_enabled: vector.expected_guard_enabled,
                 notes: vector.notes.clone(),

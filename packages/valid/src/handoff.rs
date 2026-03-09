@@ -4,7 +4,10 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::{
-    api::{ExplainResponse, InspectProperty, InspectResponse, OrchestratedRunSummary},
+    api::{
+        ExplainResponse, InspectProperty, InspectResponse, OrchestratedRunSummary, TestgenResponse,
+        TestgenVectorSummary,
+    },
     coverage::CoverageReport,
     support::{artifact::handoff_path, hash::stable_hash_hex, io::write_text_file},
 };
@@ -25,6 +28,7 @@ pub struct GeneratedHandoff {
     pub contract_hash: String,
     pub generated_hash: String,
     pub sections: Vec<HandoffSection>,
+    pub testgen_summary: HandoffTestgenSummary,
     pub failing_properties: Vec<String>,
     pub open_ambiguities: Vec<String>,
     pub markdown: String,
@@ -43,9 +47,33 @@ pub struct HandoffCheckReport {
     pub contract_hash: String,
     pub drift_sections: Vec<String>,
     pub sections: Vec<HandoffSection>,
+    pub testgen_summary: HandoffTestgenSummary,
     pub failing_properties: Vec<String>,
     pub open_ambiguities: Vec<String>,
     pub markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HandoffTestgenSummary {
+    pub status: String,
+    pub generated_at_strategy: String,
+    pub vector_count: usize,
+    pub generated_files: Vec<String>,
+    pub recommended_vectors: Vec<HandoffRecommendedVector>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HandoffRecommendedVector {
+    pub vector_id: String,
+    pub property_id: String,
+    pub strategy: String,
+    pub grouping: Vec<String>,
+    pub observation_layers: Vec<String>,
+    pub oracle_targets: Vec<String>,
+    pub suggested_surface: String,
+    pub state_visibility: String,
+    pub why_this_vector_matters: String,
 }
 
 pub struct HandoffInputs<'a> {
@@ -53,6 +81,8 @@ pub struct HandoffInputs<'a> {
     pub runs: &'a [OrchestratedRunSummary],
     pub coverage: &'a CoverageReport,
     pub explanations: &'a [ExplainResponse],
+    pub testgen: Option<&'a TestgenResponse>,
+    pub testgen_error: Option<&'a str>,
     pub property_id: Option<&'a str>,
     pub source_hash: &'a str,
     pub contract_hash: &'a str,
@@ -75,6 +105,8 @@ pub fn generate_handoff(inputs: HandoffInputs<'_>) -> GeneratedHandoff {
         .filter(|run| run.status == "FAIL")
         .map(|run| run.property_id.clone())
         .collect::<Vec<_>>();
+    let testgen_summary =
+        summarize_handoff_testgen(inputs.testgen, inputs.testgen_error, &failing_properties);
     let open_ambiguities = build_open_ambiguities(
         inputs.inspect,
         &selected_runs,
@@ -88,6 +120,8 @@ pub fn generate_handoff(inputs: HandoffInputs<'_>) -> GeneratedHandoff {
             inputs.property_id,
             inputs.contract_hash,
         ),
+        section_execution_contract(),
+        section_recommended_test_vectors(&testgen_summary),
         section_required_behaviors(&selected_properties, &selected_runs),
         section_forbidden_behaviors(&selected_runs, &explain_by_property),
         section_state_facts(inputs.inspect),
@@ -119,9 +153,159 @@ pub fn generate_handoff(inputs: HandoffInputs<'_>) -> GeneratedHandoff {
         contract_hash: inputs.contract_hash.to_string(),
         generated_hash: stable_hash_hex(&markdown),
         sections,
+        testgen_summary,
         failing_properties,
         open_ambiguities,
         markdown,
+    }
+}
+
+fn section_execution_contract() -> HandoffSection {
+    HandoffSection {
+        id: "execution-contract".to_string(),
+        title: "Execution Contract".to_string(),
+        bullets: vec![
+            "Treat generated vectors as language-agnostic test specs, not framework-specific test code.".to_string(),
+            "Use observations as the primary oracle; use state snapshots only as optional debug or projection hints.".to_string(),
+            "Let the implementation test layer choose hooks, mocks, fixtures, and assertion style.".to_string(),
+            "Prefer API or handler-facing checks unless the model or path tags clearly require a UI surface.".to_string(),
+        ],
+    }
+}
+
+fn summarize_handoff_testgen(
+    response: Option<&TestgenResponse>,
+    error: Option<&str>,
+    failing_properties: &[String],
+) -> HandoffTestgenSummary {
+    match response {
+        Some(response) => HandoffTestgenSummary {
+            status: "available".to_string(),
+            generated_at_strategy: response
+                .vectors
+                .first()
+                .map(|vector| vector.strategy.clone())
+                .unwrap_or_else(|| "counterexample".to_string()),
+            vector_count: response.vectors.len(),
+            generated_files: response.generated_files.clone(),
+            recommended_vectors: recommended_handoff_vectors(&response.vectors, failing_properties),
+            error: None,
+        },
+        None => HandoffTestgenSummary {
+            status: "unavailable".to_string(),
+            generated_at_strategy: "counterexample".to_string(),
+            vector_count: 0,
+            generated_files: Vec::new(),
+            recommended_vectors: Vec::new(),
+            error: error.map(str::to_string),
+        },
+    }
+}
+
+fn recommended_handoff_vectors(
+    vectors: &[TestgenVectorSummary],
+    failing_properties: &[String],
+) -> Vec<HandoffRecommendedVector> {
+    let mut ordered = vectors
+        .iter()
+        .map(|vector| {
+            let mut score = 0i32;
+            if failing_properties
+                .iter()
+                .any(|property| property == &vector.property_id)
+            {
+                score += 100;
+            }
+            if matches!(
+                vector.strategy.as_str(),
+                "deadlock" | "enablement" | "boundary" | "path"
+            ) {
+                score += 50;
+            }
+            if !vector.requirement_clusters.is_empty() || !vector.risk_clusters.is_empty() {
+                score += 25;
+            }
+            (score, vector)
+        })
+        .collect::<Vec<_>>();
+    ordered.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left.vector_id.cmp(&right.vector_id))
+    });
+
+    let mut selected = Vec::new();
+    for (_, vector) in ordered.into_iter().take(5) {
+        let mut grouping = vector.requirement_clusters.clone();
+        grouping.extend(vector.risk_clusters.clone());
+        selected.push(HandoffRecommendedVector {
+            vector_id: vector.vector_id.clone(),
+            property_id: vector.property_id.clone(),
+            strategy: vector.strategy.clone(),
+            grouping,
+            observation_layers: vector.observation_layers.clone(),
+            oracle_targets: vector.oracle_targets.clone(),
+            suggested_surface: vector.suggested_surface.clone(),
+            state_visibility: vector.state_visibility.clone(),
+            why_this_vector_matters: why_vector_matters(vector, failing_properties),
+        });
+    }
+    selected
+}
+
+fn why_vector_matters(vector: &TestgenVectorSummary, failing_properties: &[String]) -> String {
+    if failing_properties
+        .iter()
+        .any(|property| property == &vector.property_id)
+    {
+        return "reproduces or guards a failing behavior".to_string();
+    }
+    if vector.strategy == "deadlock" {
+        return "captures a deadlock-focused path worth guarding in implementation".to_string();
+    }
+    if vector.strategy == "enablement" {
+        return "shows how to enable a currently blocked action in the SUT".to_string();
+    }
+    if !vector.requirement_clusters.is_empty() || !vector.risk_clusters.is_empty() {
+        return "covers a named requirement or risk cluster for regression review".to_string();
+    }
+    "provides a representative execution contract for implementation tests".to_string()
+}
+
+fn section_recommended_test_vectors(summary: &HandoffTestgenSummary) -> HandoffSection {
+    let mut bullets = Vec::new();
+    if summary.status != "available" {
+        bullets.push(format!(
+            "Test vectors unavailable: {}.",
+            summary
+                .error
+                .as_deref()
+                .unwrap_or("no testgen summary was produced")
+        ));
+    } else {
+        bullets.push(format!(
+            "Generated {} vector(s) using `{}` strategy; {} generated test file(s) are available.",
+            summary.vector_count,
+            summary.generated_at_strategy,
+            summary.generated_files.len()
+        ));
+        for vector in &summary.recommended_vectors {
+            bullets.push(format!(
+                "`{}` for `{}` via `{}` on `{}` [{} -> {}] because {}.",
+                vector.vector_id,
+                vector.property_id,
+                vector.strategy,
+                vector.suggested_surface,
+                comma_or_none(&vector.observation_layers),
+                comma_or_none(&vector.oracle_targets),
+                vector.why_this_vector_matters
+            ));
+        }
+    }
+    HandoffSection {
+        id: "recommended-test-vectors".to_string(),
+        title: "Recommended Test Vectors".to_string(),
+        bullets,
     }
 }
 
@@ -166,6 +350,7 @@ pub fn check_handoff(
         contract_hash: generated.contract_hash.clone(),
         drift_sections,
         sections: generated.sections.clone(),
+        testgen_summary: generated.testgen_summary.clone(),
         failing_properties: generated.failing_properties.clone(),
         open_ambiguities: generated.open_ambiguities.clone(),
         markdown: generated.markdown.clone(),
@@ -196,6 +381,7 @@ pub fn render_handoff_json(generated: &GeneratedHandoff, output_path: Option<&st
         "generated_hash": generated.generated_hash,
         "output_path": output_path,
         "sections": generated.sections,
+        "testgen_summary": generated.testgen_summary,
         "failing_properties": generated.failing_properties,
         "open_ambiguities": generated.open_ambiguities,
         "markdown": generated.markdown,
@@ -241,6 +427,7 @@ pub fn render_handoff_check_json(report: &HandoffCheckReport) -> String {
         "contract_hash": report.contract_hash,
         "drift_sections": report.drift_sections,
         "sections": report.sections,
+        "testgen_summary": report.testgen_summary,
         "failing_properties": report.failing_properties,
         "open_ambiguities": report.open_ambiguities,
         "markdown": report.markdown,
@@ -813,6 +1000,37 @@ mod tests {
             depth_histogram: BTreeMap::from([(0, 1)]),
             step_count: 1,
         };
+        let testgen = crate::api::TestgenResponse {
+            schema_version: "1.0.0".to_string(),
+            request_id: "req-testgen".to_string(),
+            status: "ok".to_string(),
+            vector_ids: vec!["vec-1".to_string()],
+            vectors: vec![crate::api::TestgenVectorSummary {
+                vector_id: "vec-1".to_string(),
+                run_id: "run-1".to_string(),
+                property_id: "P_SAFE".to_string(),
+                strictness: "strict".to_string(),
+                derivation: "explicit".to_string(),
+                source_kind: "counterexample".to_string(),
+                strategy: "counterexample".to_string(),
+                requirement_clusters: vec!["property:P_SAFE".to_string()],
+                risk_clusters: Vec::new(),
+                observation_mode: "exact".to_string(),
+                observation_layers: vec!["output".to_string()],
+                oracle_targets: vec!["observations".to_string()],
+                suggested_surface: "api_or_handler".to_string(),
+                state_visibility: "optional".to_string(),
+                focus_action_id: None,
+                expected_guard_enabled: None,
+                notes: vec!["counterexample vector".to_string()],
+            }],
+            vector_groups: vec![crate::api::TestgenGroupSummary {
+                group_kind: "requirement".to_string(),
+                group_id: "property:P_SAFE".to_string(),
+                vector_ids: vec!["vec-1".to_string()],
+            }],
+            generated_files: vec!["artifacts/generated-tests/vec-1.rs".to_string()],
+        };
         let generated = generate_handoff(HandoffInputs {
             inspect: &inspect,
             runs: &[OrchestratedRunSummary {
@@ -823,10 +1041,15 @@ mod tests {
             }],
             coverage: &coverage,
             explanations: &[],
+            testgen: Some(&testgen),
+            testgen_error: None,
             property_id: None,
             source_hash: "sha256:source",
             contract_hash: "sha256:contract",
         });
+        assert_eq!(generated.testgen_summary.status, "available");
+        assert_eq!(generated.testgen_summary.recommended_vectors.len(), 1);
+        assert!(generated.markdown.contains("Recommended Test Vectors"));
         let report = check_handoff(
             "artifacts/handoff/Demo.md".to_string(),
             Some(&(generated.markdown.clone() + "\nmanual drift\n")),

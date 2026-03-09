@@ -19,7 +19,13 @@
     "setup_action_ids",
     "business_action_ids",
     "notes",
-    "grouping"
+    "grouping",
+    "observation_contract",
+    "observation_layers",
+    "oracle_targets",
+    "required_inputs",
+    "setup_contract",
+    "implementation_hints"
   ],
   "properties": {
     "schema_version": { "type": "string" },
@@ -53,6 +59,46 @@
       "properties": {
         "requirement_clusters": { "type": "array", "items": { "type": "string" } },
         "risk_clusters": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "observation_contract": {
+      "type": "object",
+      "required": ["mode", "required_fields"],
+      "properties": {
+        "mode": { "type": "string" },
+        "required_fields": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "observation_layers": { "type": "array", "items": { "type": "string" } },
+    "oracle_targets": { "type": "array", "items": { "type": "string" } },
+    "required_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step_index", "action_id", "payload_fields"],
+        "properties": {
+          "step_index": { "type": "integer" },
+          "action_id": { "type": "string" },
+          "payload_fields": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "setup_contract": {
+      "type": "object",
+      "required": ["mode", "setup_actions", "assumptions"],
+      "properties": {
+        "mode": { "type": "string" },
+        "setup_actions": { "type": "array", "items": { "type": "string" } },
+        "assumptions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "implementation_hints": {
+      "type": "object",
+      "required": ["suggested_surface", "state_visibility", "notes"],
+      "properties": {
+        "suggested_surface": { "type": "string" },
+        "state_visibility": { "type": "string" },
+        "notes": { "type": "array", "items": { "type": "string" } }
       }
     },
     "replay_target": { "type": ["object", "null"] }

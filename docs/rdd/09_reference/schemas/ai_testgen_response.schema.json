@@ -24,7 +24,12 @@
           "strategy",
           "notes",
           "requirement_clusters",
-          "risk_clusters"
+          "risk_clusters",
+          "observation_mode",
+          "observation_layers",
+          "oracle_targets",
+          "suggested_surface",
+          "state_visibility"
         ],
         "properties": {
           "vector_id": { "type": "string" },
@@ -33,6 +38,17 @@
           "derivation": { "type": "string" },
           "source_kind": { "type": "string" },
           "strategy": { "type": "string" },
+          "observation_mode": { "type": "string" },
+          "observation_layers": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "oracle_targets": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "suggested_surface": { "type": "string", "minLength": 1 },
+          "state_visibility": { "type": "string", "minLength": 1 },
           "focus_action_id": { "type": ["string", "null"] },
           "expected_guard_enabled": { "type": ["boolean", "null"] },
           "notes": {

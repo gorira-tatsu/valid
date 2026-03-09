@@ -2730,7 +2730,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 .get(&action_id)
                 .map(String::as_str)
                 .unwrap_or("business");
-            vectors.push(TestVector {
+            let mut vector = TestVector {
                 schema_version: "1.0.0".to_string(),
                 vector_id: format!(
                     "vec-{}",
@@ -2782,8 +2782,16 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 grouping: crate::testgen::vector_grouping_from_path_tags(
                     &machine_transition_tags_for_action::<M>(&action_id),
                 ),
+                observation_contract: crate::testgen::ObservationContract::default(),
+                observation_layers: Vec::new(),
+                oracle_targets: Vec::new(),
+                required_inputs: Vec::new(),
+                setup_contract: crate::testgen::SetupContract::default(),
+                implementation_hints: crate::testgen::ImplementationHints::default(),
                 replay_target: None,
-            });
+            };
+            vector.normalize_language_agnostic_contract();
+            vectors.push(vector);
         }
     }
     vectors
@@ -3247,7 +3255,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         .map(|step| step.action_id.clone())
         .collect::<Vec<_>>();
     let grouping = crate::testgen::vector_grouping_from_path_tags(&expected_path_tags);
-    Some(TestVector {
+    let mut vector = TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
             "vec-{}",
@@ -3310,8 +3318,16 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         business_action_ids,
         notes,
         grouping,
+        observation_contract: crate::testgen::ObservationContract::default(),
+        observation_layers: Vec::new(),
+        oracle_targets: Vec::new(),
+        required_inputs: Vec::new(),
+        setup_contract: crate::testgen::SetupContract::default(),
+        implementation_hints: crate::testgen::ImplementationHints::default(),
         replay_target: None,
-    })
+    };
+    vector.normalize_language_agnostic_contract();
+    Some(vector)
 }
 
 #[cfg(any(debug_assertions, feature = "verification-runtime"))]

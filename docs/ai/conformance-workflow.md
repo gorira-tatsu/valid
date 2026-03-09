@@ -6,6 +6,11 @@ is whether an implementation still matches it.
 This is the bridge between formal model review and implementation-facing test
 or runner workflows.
 
+`valid` should be treated as the source of language-agnostic test specs.
+The framework-specific test body, hooks, fixtures, mocks, and assertion style
+still belong to the target codebase and can be filled in by an AI agent or a
+human reviewer.
+
 ## Conformance order
 
 1. Confirm that the model itself is understandable and reviewed.
@@ -16,6 +21,12 @@ or runner workflows.
    - the model
    - the implementation
    - the requirement
+
+When turning vectors into real tests:
+
+- treat `expected_observations` as the primary oracle
+- treat `expected_states` as optional debug/projection hints
+- keep framework-specific test code out of the core `valid` contract
 
 ## Useful commands
 
@@ -33,6 +44,11 @@ Useful MCP tools:
 - `valid_testgen`
 - `valid_contract_check`
 - `valid_explain`
+
+`valid_handoff` now includes a `testgen_summary` block that highlights the
+recommended generated vectors for the current model/property scope. Treat that
+summary as the shortlist for implementation-facing tests, and use
+`valid_testgen` when you need the full vector bodies or generated artifacts.
 
 ## Rust-native harnesses
 

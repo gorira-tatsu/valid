@@ -28,6 +28,67 @@ pub struct ReplayTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservationContract {
+    pub mode: String,
+    #[serde(default)]
+    pub required_fields: Vec<String>,
+}
+
+impl Default for ObservationContract {
+    fn default() -> Self {
+        Self {
+            mode: "exact".to_string(),
+            required_fields: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequiredInput {
+    pub step_index: usize,
+    pub action_id: String,
+    #[serde(default)]
+    pub payload_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupContract {
+    pub mode: String,
+    #[serde(default)]
+    pub setup_actions: Vec<String>,
+    #[serde(default)]
+    pub assumptions: Vec<String>,
+}
+
+impl Default for SetupContract {
+    fn default() -> Self {
+        Self {
+            mode: "none".to_string(),
+            setup_actions: Vec::new(),
+            assumptions: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImplementationHints {
+    pub suggested_surface: String,
+    pub state_visibility: String,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+impl Default for ImplementationHints {
+    fn default() -> Self {
+        Self {
+            suggested_surface: "api_or_handler".to_string(),
+            state_visibility: "optional".to_string(),
+            notes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestVector {
     pub schema_version: String,
     pub vector_id: String,
@@ -66,6 +127,18 @@ pub struct TestVector {
     #[serde(default)]
     pub grouping: VectorGrouping,
     #[serde(default)]
+    pub observation_contract: ObservationContract,
+    #[serde(default)]
+    pub observation_layers: Vec<String>,
+    #[serde(default)]
+    pub oracle_targets: Vec<String>,
+    #[serde(default)]
+    pub required_inputs: Vec<RequiredInput>,
+    #[serde(default)]
+    pub setup_contract: SetupContract,
+    #[serde(default)]
+    pub implementation_hints: ImplementationHints,
+    #[serde(default)]
     pub replay_target: Option<ReplayTarget>,
 }
 
@@ -89,6 +162,112 @@ pub struct MinimizeResult {
     pub original_steps: usize,
     pub minimized_steps: usize,
     pub vector: TestVector,
+}
+
+impl TestVector {
+    pub fn normalize_language_agnostic_contract(&mut self) {
+        if self.observation_contract.required_fields.is_empty() {
+            self.observation_contract.required_fields =
+                collect_observation_fields(&self.expected_observations);
+        }
+        if self.observation_layers.is_empty() {
+            self.observation_layers = infer_observation_layers(self);
+        }
+        if self.oracle_targets.is_empty() {
+            self.oracle_targets = infer_oracle_targets(self);
+        }
+        if self.required_inputs.is_empty() {
+            self.required_inputs = self
+                .actions
+                .iter()
+                .map(|step| RequiredInput {
+                    step_index: step.index,
+                    action_id: step.action_id.clone(),
+                    payload_fields: Vec::new(),
+                })
+                .collect();
+        }
+        if self.setup_contract.mode == "none" && !self.setup_action_ids.is_empty() {
+            self.setup_contract = SetupContract {
+                mode: "setup_actions".to_string(),
+                setup_actions: self.setup_action_ids.clone(),
+                assumptions: vec!["initial_state_available".to_string()],
+            };
+        }
+        if self.implementation_hints.notes.is_empty() {
+            self.implementation_hints = infer_implementation_hints(self);
+        }
+    }
+}
+
+fn collect_observation_fields(observations: &[BTreeMap<String, Value>]) -> Vec<String> {
+    observations
+        .iter()
+        .flat_map(|observation| observation.keys().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn infer_observation_layers(vector: &TestVector) -> Vec<String> {
+    let mut layers = vec!["output".to_string()];
+    if vector.initial_state.is_some() || !vector.expected_states.is_empty() {
+        layers.push("state".to_string());
+    }
+    layers
+}
+
+fn infer_oracle_targets(vector: &TestVector) -> Vec<String> {
+    let mut targets = vec!["observations".to_string()];
+    if vector.expected_property_holds.is_some() {
+        targets.push("property_holds".to_string());
+    }
+    if vector.source_kind == "deadlock"
+        || vector
+            .notes
+            .iter()
+            .any(|note| note.contains("terminal_state"))
+    {
+        targets.push("terminal_state".to_string());
+    }
+    targets
+}
+
+fn infer_implementation_hints(vector: &TestVector) -> ImplementationHints {
+    let suggested_surface = if vector
+        .expected_path_tags
+        .iter()
+        .any(|tag| tag.contains("ui") || tag.contains("screen") || tag.contains("render"))
+    {
+        "ui".to_string()
+    } else if vector
+        .expected_path_tags
+        .iter()
+        .any(|tag| tag.contains("api") || tag.contains("http"))
+    {
+        "api".to_string()
+    } else {
+        "api_or_handler".to_string()
+    };
+    let state_visibility = if vector.expected_states.is_empty() {
+        "hidden".to_string()
+    } else {
+        "optional".to_string()
+    };
+    let mut notes = vec!["prefer output observations as the primary oracle".to_string()];
+    if vector.focus_action_id.is_some() {
+        notes.push("targeted_vector".to_string());
+    }
+    ImplementationHints {
+        suggested_surface,
+        state_visibility,
+        notes,
+    }
+}
+
+fn normalized_vector(mut vector: TestVector) -> TestVector {
+    vector.normalize_language_agnostic_contract();
+    vector
 }
 
 fn vector_provenance(source_kind: &str, strategy: &str) -> (&'static str, &'static str) {
@@ -201,7 +380,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
     let expected_path = trace_path(trace);
     let expected_path_tags = path_tags_or_empty(&expected_path);
     let grouping = infer_vector_grouping(&expected_path_tags);
-    Ok(TestVector {
+    Ok(normalized_vector(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: trace.evidence_id.replace("ev-", "vec-"),
         run_id: trace.run_id.clone(),
@@ -228,8 +407,14 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         business_action_ids: Vec::new(),
         notes: Vec::new(),
         grouping,
+        observation_contract: ObservationContract::default(),
+        observation_layers: Vec::new(),
+        oracle_targets: Vec::new(),
+        required_inputs: Vec::new(),
+        setup_contract: SetupContract::default(),
+        implementation_hints: ImplementationHints::default(),
         replay_target: None,
-    })
+    }))
 }
 
 pub fn build_transition_coverage_vectors(
@@ -608,7 +793,7 @@ fn build_model_deadlock_vector(
             .replace("sha256:", "")
     );
 
-    TestVector {
+    normalized_vector(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!("vec-{}", run_id.trim_start_matches("run-")),
         run_id,
@@ -641,8 +826,14 @@ fn build_model_deadlock_vector(
             None => vec!["deadlock_reached".to_string()],
         },
         grouping: VectorGrouping::default(),
+        observation_contract: ObservationContract::default(),
+        observation_layers: Vec::new(),
+        oracle_targets: Vec::new(),
+        required_inputs: Vec::new(),
+        setup_contract: SetupContract::default(),
+        implementation_hints: ImplementationHints::default(),
         replay_target: None,
-    }
+    })
 }
 
 trait DeadlockNode {
@@ -1063,7 +1254,10 @@ pub fn render_test_vector_json(vector: &TestVector) -> Result<String, String> {
 }
 
 pub fn parse_test_vector_json(body: &str) -> Result<TestVector, String> {
-    serde_json::from_str(body).map_err(|err| format!("failed to parse test vector json: {err}"))
+    let mut vector: TestVector = serde_json::from_str(body)
+        .map_err(|err| format!("failed to parse test vector json: {err}"))?;
+    vector.normalize_language_agnostic_contract();
+    Ok(vector)
 }
 
 pub fn render_replay_json(
@@ -1605,7 +1799,7 @@ fn build_model_vector_for_node(
         .collect::<Vec<_>>();
     let expected_path_tags = path_tags_or_empty(&expected_path);
     let grouping = infer_vector_grouping(&expected_path_tags);
-    Some(TestVector {
+    Some(normalized_vector(TestVector {
         schema_version: "1.0.0".to_string(),
         vector_id: format!(
             "vec-{}",
@@ -1649,8 +1843,14 @@ fn build_model_vector_for_node(
         business_action_ids,
         notes,
         grouping,
+        observation_contract: ObservationContract::default(),
+        observation_layers: Vec::new(),
+        oracle_targets: Vec::new(),
+        required_inputs: Vec::new(),
+        setup_contract: SetupContract::default(),
+        implementation_hints: ImplementationHints::default(),
         replay_target: None,
-    })
+    }))
 }
 
 struct ModelPathStep {
@@ -1805,7 +2005,7 @@ mod tests {
     use super::{
         build_counterexample_vector, build_synthetic_witness_vectors,
         build_transition_coverage_vectors, build_witness_vector, minimize_counterexample_vector,
-        render_rust_test,
+        parse_test_vector_json, render_rust_test,
     };
 
     fn trace_with_actions(actions: &[&str]) -> EvidenceTrace {
@@ -1935,7 +2135,98 @@ mod tests {
             vector.initial_state,
             Some(BTreeMap::from([("x".to_string(), Value::UInt(0))]))
         );
+        assert_eq!(vector.observation_contract.mode, "exact");
+        assert!(vector
+            .observation_contract
+            .required_fields
+            .contains(&"x".to_string()));
+        assert!(vector.observation_layers.contains(&"output".to_string()));
+        assert!(vector.observation_layers.contains(&"state".to_string()));
+        assert!(vector.oracle_targets.contains(&"observations".to_string()));
+        assert!(vector
+            .oracle_targets
+            .contains(&"property_holds".to_string()));
+        assert_eq!(vector.required_inputs.len(), 1);
+        assert_eq!(vector.required_inputs[0].action_id, "A_INC");
+        assert_eq!(vector.setup_contract.mode, "none");
+        assert_eq!(
+            vector.implementation_hints.suggested_surface,
+            "api_or_handler"
+        );
+        assert_eq!(vector.implementation_hints.state_visibility, "optional");
         assert!(render_rust_test(&vector).contains("generated_vec_000001"));
+    }
+
+    #[test]
+    fn parse_test_vector_json_backfills_language_agnostic_fields() {
+        let body = r#"{
+          "schema_version": "1.0.0",
+          "vector_id": "vec-legacy",
+          "run_id": "run-legacy",
+          "property_id": "P_SAFE",
+          "property_hash": "sha256:p",
+          "model_hash": "sha256:m",
+          "source_kind": "counterexample",
+          "strictness": "strict",
+          "derivation": "explicit",
+          "evidence_id": null,
+          "strategy": "counterexample",
+          "generator_version": "1.0.0",
+          "seed": null,
+          "actions": [
+            {
+              "index": 0,
+              "action_id": "A_SUBMIT",
+              "action_label": "Submit",
+              "path_tags": [],
+              "before_state_id": "s-0",
+              "after_state_id": "s-1",
+              "state_after": {"status": "ok"}
+            }
+          ],
+          "initial_state": {"status": "draft"},
+          "expected_observations": [{"status": "ok"}],
+          "expected_states": ["status=ok"],
+          "minimized": false,
+          "focus_action_id": null,
+          "focus_field": null,
+          "expected_guard_enabled": null,
+          "expected_property_holds": true,
+          "expected_path_tags": [],
+          "expected_path": {"decisions": []},
+          "setup_action_ids": ["A_SETUP"],
+          "business_action_ids": ["A_SUBMIT"],
+          "notes": [],
+          "grouping": {},
+          "replay_target": null
+        }"#;
+
+        let vector = parse_test_vector_json(body).expect("legacy vector should parse");
+        assert_eq!(vector.observation_contract.mode, "exact");
+        assert_eq!(
+            vector.observation_contract.required_fields,
+            vec!["status".to_string()]
+        );
+        assert_eq!(
+            vector.observation_layers,
+            vec!["output".to_string(), "state".to_string()]
+        );
+        assert_eq!(
+            vector.oracle_targets,
+            vec!["observations".to_string(), "property_holds".to_string()]
+        );
+        assert_eq!(vector.required_inputs.len(), 1);
+        assert_eq!(vector.required_inputs[0].action_id, "A_SUBMIT");
+        assert_eq!(vector.setup_contract.mode, "setup_actions");
+        assert_eq!(
+            vector.setup_contract.setup_actions,
+            vec!["A_SETUP".to_string()]
+        );
+        assert_eq!(
+            vector.implementation_hints.suggested_surface,
+            "api_or_handler"
+        );
+        assert_eq!(vector.implementation_hints.state_visibility, "optional");
     }
 
     #[test]
