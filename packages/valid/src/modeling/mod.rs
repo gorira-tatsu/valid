@@ -1921,6 +1921,20 @@ macro_rules! valid_model_transition_descriptor {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! valid_model_guard_eval {
+    ([$state:expr] |$guard_state:ident| true => $body:block) => {{
+        $body
+    }};
+    ([$state:expr] |$guard_state:ident| $guard_expr:expr => $body:block) => {{
+        let $guard_state = $state;
+        if $guard_expr {
+            $body
+        }
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! valid_model_push_properties {
     ($properties:ident [$model:ident] [$state_ty:ty]; assume $property:ident |$holds_state:ident| $holds_expr:expr; $($rest:tt)*) => {
         $properties.push($crate::modeling::ModelProperty::assume_invariant_expr(
@@ -1987,10 +2001,9 @@ macro_rules! valid_model {
                 let mut next_states = Vec::new();
                 $(
                     if matches!(action, <$action_ty>::$transition_action) {
-                        let $guard_state = state;
-                        if $guard_expr {
+                        $crate::valid_model_guard_eval!([state] |$guard_state| $guard_expr => {
                             $crate::valid_model_transition_push!(next_states, [$($next_state)+]);
-                        }
+                        });
                     }
                 )+
                 next_states
