@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use serde_json::Value;
 use valid::api::{
     check_source, distinguish_source, explain_source, inspect_source, lint_source,
     orchestrate_source, render_inspect_json, testgen_source, CheckRequest, DistinguishRequest,
@@ -55,6 +56,10 @@ fn rewrite_valid_dependency_to_local_path(project_dir: &Path) {
         &local,
     );
     fs::write(cargo_toml_path, rewritten).expect("Cargo.toml should be rewritten");
+}
+
+fn local_valid_dep_path() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR")).display().to_string()
 }
 
 #[test]
@@ -1323,6 +1328,116 @@ fn cli_init_generated_project_reaches_cargo_valid_models() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("approval-model"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_onboarding_bootstraps_empty_project_non_interactively() {
+    let project_dir = unique_temp_dir("valid-cli-onboarding-fresh");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("onboarding")
+        .arg("--non-interactive")
+        .arg("--json")
+        .output()
+        .expect("valid onboarding should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("onboarding json");
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["interactive"], false);
+    assert_eq!(report["cargo_project_detected"], false);
+    assert_eq!(report["valid_project_detected"], false);
+    assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
+    assert_eq!(report["stages"][1]["status"], "success");
+    assert_eq!(report["stages"][6]["stage_id"], "handoff_starter_model");
+    assert_eq!(report["stages"][6]["status"], "success");
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_onboarding_skips_init_for_existing_scaffold() {
+    let project_dir = unique_temp_dir("valid-cli-onboarding-existing");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("onboarding")
+        .arg("--non-interactive")
+        .arg("--json")
+        .output()
+        .expect("valid onboarding should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("onboarding json");
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["cargo_project_detected"], true);
+    assert_eq!(report["valid_project_detected"], true);
+    assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
+    assert_eq!(report["stages"][1]["status"], "skipped");
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_onboarding_reports_partial_failure_for_broken_scaffold() {
+    let project_dir = unique_temp_dir("valid-cli-onboarding-broken");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+    fs::remove_file(project_dir.join("valid").join("registry.rs"))
+        .expect("registry should be removed");
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("onboarding")
+        .arg("--non-interactive")
+        .arg("--json")
+        .output()
+        .expect("valid onboarding should run");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("onboarding json");
+    assert_eq!(report["status"], "partial");
+    assert_eq!(report["stages"][2]["stage_id"], "check_scaffold");
+    assert_eq!(report["stages"][2]["status"], "error");
+    assert!(report["stages"][2]["repair_hint"]
+        .as_str()
+        .expect("repair hint")
+        .contains("valid init --check"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

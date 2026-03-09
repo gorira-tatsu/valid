@@ -10,15 +10,25 @@ planning to author Rust models on day one.
 3. Run:
 
 ```sh
+valid onboarding
+```
+
+This gives you a working scaffold, confirms that the scaffold is healthy, shows
+the starter model, renders the first overview graph, and produces an
+implementation-facing handoff summary.
+
+## Manual Equivalent
+
+`valid onboarding` is a guided wrapper around this sequence:
+
+```sh
 valid init
 valid init --check
 cargo valid models
 cargo valid inspect approval-model
+cargo valid graph approval-model --view=overview
 cargo valid handoff approval-model
 ```
-
-This gives you a working scaffold, confirms that the scaffold is healthy, shows
-the starter model, and produces an implementation-facing handoff summary.
 
 ## What You Get
 
@@ -52,7 +62,7 @@ cargo valid handoff approval-model
 Look at the generated graph:
 
 ```sh
-cargo valid graph approval-model --view=failure
+cargo valid graph approval-model --view=overview
 ```
 
 ## If You Only Want Review and Handoff
@@ -62,10 +72,8 @@ day one.
 
 Start with:
 
-- `valid init`
-- `valid init --check`
-- `cargo valid inspect approval-model`
-- `cargo valid handoff approval-model`
+- `valid onboarding`
+- or the manual sequence above if you prefer copy-paste commands
 
 That path lets you review a model, inspect its properties, and hand a concrete
 brief to an implementation team or AI workflow.

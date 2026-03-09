@@ -1,11 +1,12 @@
 use std::{
     env, fs,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::PathBuf,
     process::{self, Command},
 };
 
 use clap::{ArgAction, Args, Parser, Subcommand};
+use serde::Serialize;
 use serde_json::Value;
 use valid::{
     api::{
@@ -77,6 +78,7 @@ struct ValidCli {
 #[derive(Subcommand, Debug)]
 enum ValidCommand {
     Init(InitArgs),
+    Onboarding(OnboardingArgs),
     #[command(alias = "verify")]
     Check(CommonModelArgs),
     Inspect(ModelPathArgs),
@@ -139,9 +141,40 @@ struct InitArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+struct OnboardingArgs {
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+    #[arg(long = "progress", default_value = None)]
+    progress: Option<String>,
+    #[arg(long = "non-interactive", action = ArgAction::SetTrue)]
+    non_interactive: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 struct JsonOnlyArgs {
     #[arg(long, action = ArgAction::SetTrue)]
     json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct OnboardingStageReport {
+    stage_id: String,
+    command: String,
+    status: String,
+    summary: String,
+    stdout_excerpt: Option<String>,
+    repair_hint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct OnboardingReport {
+    status: String,
+    root: String,
+    interactive: bool,
+    cargo_project_detected: bool,
+    valid_project_detected: bool,
+    stages: Vec<OnboardingStageReport>,
+    next_paths: Vec<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -368,6 +401,7 @@ fn main() {
     };
     match cli.command {
         Some(ValidCommand::Init(args)) => cmd_init_from_parsed(args),
+        Some(ValidCommand::Onboarding(args)) => cmd_onboarding_from_parsed(args),
         Some(ValidCommand::Check(args)) => cmd_check_from_parsed(common_to_parsed(args)),
         Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
@@ -743,6 +777,285 @@ fn cmd_init_from_parsed(args: InitArgs) {
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());
+}
+
+fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
+    let progress = ProgressReporter::new("onboarding", args.progress.as_deref() == Some("json"));
+    progress.start(None);
+    let interactive = !args.non_interactive && !args.json;
+    let root = env::current_dir().unwrap_or_else(|error| {
+        message_exit(
+            "onboarding",
+            args.json,
+            &format!("failed to resolve current directory: {error}"),
+            None,
+        )
+    });
+    let cargo_project_detected = root.join("Cargo.toml").exists();
+    let valid_project_detected = root.join("valid.toml").exists();
+    let mut stages = Vec::new();
+
+    stages.push(OnboardingStageReport {
+        stage_id: "detect_environment".to_string(),
+        command: "detect environment".to_string(),
+        status: "success".to_string(),
+        summary: if cargo_project_detected || valid_project_detected {
+            "Detected an existing project context and selected the review-first walkthrough."
+                .to_string()
+        } else {
+            "No scaffold detected; onboarding will bootstrap a new project first.".to_string()
+        },
+        stdout_excerpt: None,
+        repair_hint: None,
+    });
+
+    if !cargo_project_detected || !valid_project_detected {
+        if let Some(stage) = run_onboarding_stage(
+            interactive,
+            args.json,
+            "bootstrap_project",
+            "valid init",
+            "Create the project scaffold so the starter model and MCP snippets exist.",
+            &current_exe_or_exit(),
+            &["init", "--json"],
+            &root,
+            None,
+        ) {
+            let failed = stage.status == "error";
+            stages.push(stage);
+            if failed {
+                finish_onboarding(
+                    args.json,
+                    progress,
+                    root,
+                    interactive,
+                    cargo_project_detected,
+                    valid_project_detected,
+                    stages,
+                );
+            }
+        }
+    } else {
+        stages.push(OnboardingStageReport {
+            stage_id: "bootstrap_project".to_string(),
+            command: "valid init".to_string(),
+            status: "skipped".to_string(),
+            summary: "Skipped scaffold creation because the project already looks initialized."
+                .to_string(),
+            stdout_excerpt: None,
+            repair_hint: None,
+        });
+    }
+
+    for (stage_id, command, summary, repair_hint) in [
+        (
+            "check_scaffold",
+            vec!["init", "--check", "--json"],
+            "Validate that the scaffold still matches the supported layout.",
+            Some("Run `valid init --check` and restore the missing scaffold paths.".to_string()),
+        ),
+        (
+            "list_models",
+            vec!["valid", "models"],
+            "Confirm that the starter registry loads and exposes the scaffolded model.",
+            Some("Install Cargo and make sure the scaffolded project can run `cargo valid models`.".to_string()),
+        ),
+        (
+            "inspect_starter_model",
+            vec!["valid", "inspect", "approval-model"],
+            "Inspect the starter model to see its states, actions, and properties.",
+            Some("Run `cargo valid inspect approval-model` after fixing the registry or Cargo setup.".to_string()),
+        ),
+        (
+            "graph_starter_model",
+            vec!["valid", "graph", "approval-model", "--view=overview"],
+            "Render the first graph view for the starter model.",
+            Some("Run `cargo valid graph approval-model --view=overview` after the starter model loads cleanly.".to_string()),
+        ),
+        (
+            "handoff_starter_model",
+            vec!["valid", "handoff", "approval-model"],
+            "Generate the implementation-facing handoff summary for the starter model.",
+            Some("Run `cargo valid handoff approval-model` after inspect and graph are healthy.".to_string()),
+        ),
+    ] {
+        let (program, argv): (String, Vec<String>) = if command[0] == "init" {
+            let current = current_exe_or_exit();
+            (
+                current.to_string_lossy().to_string(),
+                command.iter().map(|s| s.to_string()).collect(),
+            )
+        } else {
+            (
+                "cargo".to_string(),
+                command.iter().map(|s| s.to_string()).collect(),
+            )
+        };
+        if let Some(stage) = run_onboarding_stage(
+            interactive,
+            args.json,
+            stage_id,
+            &format!("{} {}", if program == "cargo" { "cargo" } else { "valid" }, command.join(" ")),
+            summary,
+            &PathBuf::from(program),
+            &argv.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            &root,
+            repair_hint,
+        ) {
+            let failed = stage.status == "error";
+            stages.push(stage);
+            if failed {
+                finish_onboarding(args.json, progress, root, interactive, cargo_project_detected, valid_project_detected, stages);
+            }
+        }
+    }
+
+    finish_onboarding(
+        args.json,
+        progress,
+        root,
+        interactive,
+        cargo_project_detected,
+        valid_project_detected,
+        stages,
+    );
+}
+
+fn current_exe_or_exit() -> PathBuf {
+    env::current_exe().unwrap_or_else(|error| {
+        message_exit(
+            "onboarding",
+            false,
+            &format!("failed to resolve current executable: {error}"),
+            None,
+        )
+    })
+}
+
+fn run_onboarding_stage(
+    interactive: bool,
+    json: bool,
+    stage_id: &str,
+    command_label: &str,
+    summary: &str,
+    program: &PathBuf,
+    args: &[&str],
+    root: &PathBuf,
+    repair_hint: Option<String>,
+) -> Option<OnboardingStageReport> {
+    if interactive {
+        println!("\n[{stage_id}] {summary}");
+        println!("command: {command_label}");
+        print!("Press Enter to continue...");
+        let _ = io::stdout().flush();
+        let mut line = String::new();
+        let _ = io::stdin().read_line(&mut line);
+    }
+    let output = Command::new(program)
+        .current_dir(root)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| {
+            message_exit(
+                "onboarding",
+                false,
+                &format!("failed to run `{command_label}`: {error}"),
+                None,
+            )
+        });
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let excerpt = onboarding_excerpt(if stdout.is_empty() { &stderr } else { &stdout });
+    let stage_success = if stage_id == "check_scaffold" && output.status.success() {
+        serde_json::from_str::<Value>(&stdout)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(|s| s == "ok")
+            })
+            .unwrap_or(false)
+    } else {
+        output.status.success()
+    };
+    let status = if stage_success { "success" } else { "error" };
+    if !interactive && !json {
+        println!("[{stage_id}] {summary}");
+        println!("command: {command_label}");
+        println!("status: {status}");
+        if let Some(excerpt) = &excerpt {
+            println!("output: {excerpt}");
+        }
+    }
+    Some(OnboardingStageReport {
+        stage_id: stage_id.to_string(),
+        command: command_label.to_string(),
+        status: status.to_string(),
+        summary: summary.to_string(),
+        stdout_excerpt: excerpt,
+        repair_hint: if stage_success { None } else { repair_hint },
+    })
+}
+
+fn onboarding_excerpt(output: &str) -> Option<String> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let excerpt = trimmed.lines().take(8).collect::<Vec<_>>().join(" | ");
+    Some(excerpt)
+}
+
+fn finish_onboarding(
+    json: bool,
+    progress: ProgressReporter,
+    root: PathBuf,
+    interactive: bool,
+    cargo_project_detected: bool,
+    valid_project_detected: bool,
+    stages: Vec<OnboardingStageReport>,
+) -> ! {
+    let has_error = stages.iter().any(|stage| stage.status == "error");
+    let has_success = stages.iter().any(|stage| stage.status == "success");
+    let report = OnboardingReport {
+        status: if has_error && has_success {
+            "partial".to_string()
+        } else if has_error {
+            "error".to_string()
+        } else {
+            "ok".to_string()
+        },
+        root: root.display().to_string(),
+        interactive,
+        cargo_project_detected,
+        valid_project_detected,
+        stages,
+        next_paths: vec![
+            "review_models".to_string(),
+            "generate_test_specs".to_string(),
+            "connect_mcp".to_string(),
+            "start_authoring".to_string(),
+        ],
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&report).expect("onboarding report json should serialize")
+        );
+    } else {
+        println!("\nstatus: {}", report.status);
+        println!("root: {}", report.root);
+        println!("interactive: {}", report.interactive);
+        println!("next_paths: {}", report.next_paths.join(", "));
+    }
+    let exit = if report.status == "error" {
+        ExitCode::Error
+    } else {
+        ExitCode::Success
+    };
+    progress.finish(exit);
+    process::exit(exit.code());
 }
 fn cmd_schema_from_parsed(args: SchemaArgs) {
     cmd_schema(vec![args.command]);

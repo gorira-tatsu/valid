@@ -511,6 +511,16 @@ const CHECK_ARG: ArgSpec = ArgSpec {
     description: "Enable migration check mode.",
     values: &[],
 };
+const NON_INTERACTIVE_ARG: ArgSpec = ArgSpec {
+    name: "non_interactive",
+    syntax: "--non-interactive",
+    value_type: "boolean",
+    required: false,
+    multiple: false,
+    positional: false,
+    description: "Run the walkthrough without waiting for Enter between steps.",
+    values: &[],
+};
 const MANIFEST_ARG: ArgSpec = ArgSpec {
     name: "manifest_path",
     syntax: "--manifest-path <path>",
@@ -797,6 +807,7 @@ const BENCHMARK_OPTIONS: &[ArgSpec] = &[
 ];
 const MIGRATE_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, WRITE_ARG, CHECK_ARG];
 const INIT_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, CHECK_ARG];
+const ONBOARDING_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, NON_INTERACTIVE_ARG];
 const VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "init",
@@ -807,6 +818,18 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         options: INIT_OPTIONS,
         request_schema: None,
         response_schema: Some(SchemaRef { id: "schema.cli.init_response", builder: init_response_schema }),
+        supports_json: true,
+        supports_progress: true,
+    },
+    CommandSpec {
+        name: "onboarding",
+        aliases: &[],
+        description: "Run the guided first-run walkthrough.",
+        usage: "valid onboarding [--json] [--progress=json] [--non-interactive]",
+        positional: &[],
+        options: ONBOARDING_OPTIONS,
+        request_schema: None,
+        response_schema: Some(SchemaRef { id: "schema.cli.onboarding_response", builder: onboarding_response_schema }),
         supports_json: true,
         supports_progress: true,
     },
@@ -3129,6 +3152,41 @@ fn init_response_schema() -> Value {
                 "items": { "type": "string" }
             },
             "recommended_repairs": {
+                "type": "array",
+                "items": { "type": "string" }
+            }
+        }
+    })
+}
+
+fn onboarding_response_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "schema.cli.onboarding_response",
+        "type": "object",
+        "required": ["status", "root", "interactive", "cargo_project_detected", "valid_project_detected", "stages", "next_paths"],
+        "properties": {
+            "status": { "type": "string", "enum": ["ok", "partial", "error"] },
+            "root": { "type": "string" },
+            "interactive": { "type": "boolean" },
+            "cargo_project_detected": { "type": "boolean" },
+            "valid_project_detected": { "type": "boolean" },
+            "stages": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["stage_id", "command", "status", "summary"],
+                    "properties": {
+                        "stage_id": { "type": "string" },
+                        "command": { "type": "string" },
+                        "status": { "type": "string", "enum": ["success", "skipped", "error"] },
+                        "summary": { "type": "string" },
+                        "stdout_excerpt": { "type": ["string", "null"] },
+                        "repair_hint": { "type": ["string", "null"] }
+                    }
+                }
+            },
+            "next_paths": {
                 "type": "array",
                 "items": { "type": "string" }
             }

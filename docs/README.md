@@ -3,7 +3,7 @@
 - [Task Guide](#task-guide)
   Recommended starting points by workflow.
 - [Quickstart Guide](./quickstart.md)
-  Shortest path from install to `valid init`, `inspect`, and `handoff`.
+  Shortest path from install to `valid onboarding`, `inspect`, and `handoff`.
 - [Install Guide](./install.md)
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
 - [CI Workflow Templates](./ci/README.md)

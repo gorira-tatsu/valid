@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, env, fs, path::Path};
 
 use serde::Serialize;
 
@@ -705,6 +705,10 @@ pub fn render_bootstrap_ai_readme() -> String {
 
 This project was initialized with `valid init`.
 
+For the shortest human-friendly walkthrough, run:
+
+1. `valid onboarding`
+
 Recommended first steps:
 
 1. Run `valid init --check` to confirm the scaffold is still healthy.
@@ -833,8 +837,15 @@ fn ensure_valid_dependency(
     {
         return Ok(());
     }
-    let dependency =
-        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }\n";
+    let dependency = if let Ok(local_path) = env::var("VALID_LOCAL_DEP_PATH") {
+        format!(
+            "valid = {{ path = {:?}, features = [\"verification-runtime\"] }}\n",
+            local_path
+        )
+    } else {
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }\n"
+            .to_string()
+    };
     let next = if body.contains("[dependencies]") {
         body.replacen(
             "[dependencies]\n",

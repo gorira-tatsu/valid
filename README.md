@@ -84,15 +84,12 @@ If you are evaluating `valid`, start here.
 3. Run:
 
 ```sh
-valid init
-valid init --check
-cargo valid models
-cargo valid inspect approval-model
-cargo valid handoff approval-model
+valid onboarding
 ```
 
 That is enough to bootstrap a project, confirm the scaffold is healthy, inspect
-the starter model, and produce an implementation-facing handoff summary.
+the starter model, render the first overview graph, and produce an
+implementation-facing handoff summary.
 
 If you want the longer walkthrough, read [docs/quickstart.md](./docs/quickstart.md).
 If you want installation details, read [docs/install.md](./docs/install.md).
@@ -102,7 +99,7 @@ If you want installation details, read [docs/install.md](./docs/install.md).
 There are two user stories:
 
 - `binary user`
-  install a prebuilt binary, use `valid init`, and review models through
+  install a prebuilt binary, use `valid onboarding`, and review models through
   inspect/graph/handoff flows
 - `Rust model author`
   install with Cargo and use `cargo valid` against Rust registries
@@ -117,6 +114,12 @@ Initialize a project once:
 
 ```sh
 valid init
+```
+
+Or run the guided first-run walkthrough:
+
+```sh
+valid onboarding
 ```
 
 `valid init` creates or bootstraps a Cargo binary project, writes a minimal
@@ -176,10 +179,7 @@ selected.
 After init, the shortest AI-assisted setup path is:
 
 ```sh
-valid init --check
-cargo valid models
-cargo valid inspect approval-model
-cargo valid handoff approval-model
+valid onboarding
 cat .mcp/codex.toml
 ```
 
