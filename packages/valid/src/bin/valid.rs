@@ -164,10 +164,23 @@ struct JsonOnlyArgs {
     json: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct OnboardingStageGuide {
+    stage_id: String,
+    title: String,
+    command: String,
+    purpose: String,
+    effect_kind: String,
+    effect_summary: String,
+    key_paths: Vec<String>,
+    expected_result: String,
+    writes_repo_state: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct OnboardingStageReport {
-    stage_id: String,
-    command: String,
+    #[serde(flatten)]
+    guide: OnboardingStageGuide,
     status: String,
     summary: String,
     stdout_excerpt: Option<String>,
@@ -181,6 +194,7 @@ struct OnboardingReport {
     interactive: bool,
     cargo_project_detected: bool,
     valid_project_detected: bool,
+    overview: Vec<OnboardingStageGuide>,
     stages: Vec<OnboardingStageReport>,
     next_paths: Vec<String>,
     next_path_summaries: Vec<OnboardingNextPathSummary>,
@@ -207,6 +221,166 @@ struct DoctorReport {
     root: String,
     checks: Vec<DoctorCheckReport>,
 }
+
+#[derive(Clone, Copy)]
+enum OnboardingProgram {
+    Synthetic,
+    CurrentExe,
+    Cargo,
+}
+
+#[derive(Clone, Copy)]
+struct OnboardingStageDescriptor {
+    stage_id: &'static str,
+    title: &'static str,
+    command: &'static str,
+    purpose: &'static str,
+    effect_kind: &'static str,
+    effect_summary: &'static str,
+    key_paths: &'static [&'static str],
+    expected_result: &'static str,
+    writes_repo_state: bool,
+    program: OnboardingProgram,
+    args: &'static [&'static str],
+    repair_hint: Option<&'static str>,
+}
+
+const ONBOARDING_STAGE_DESCRIPTORS: &[OnboardingStageDescriptor] = &[
+    OnboardingStageDescriptor {
+        stage_id: "detect_environment",
+        title: "Detect Project Context",
+        command: "detect environment",
+        purpose: "Check whether this directory already looks like a Cargo/valid project so onboarding can decide whether to bootstrap or skip straight to review.",
+        effect_kind: "context_detection",
+        effect_summary: "Reads the current directory layout and decides whether scaffold creation is needed.",
+        key_paths: &["Cargo.toml", "valid.toml"],
+        expected_result: "Onboarding chooses between creating the starter scaffold or reusing the current project.",
+        writes_repo_state: false,
+        program: OnboardingProgram::Synthetic,
+        args: &[],
+        repair_hint: None,
+    },
+    OnboardingStageDescriptor {
+        stage_id: "bootstrap_project",
+        title: "Bootstrap Project",
+        command: "valid init",
+        purpose: "Create the starter valid project scaffold, including the registry entrypoint, starter model, local MCP snippets, and artifact directories.",
+        effect_kind: "scaffold_write",
+        effect_summary: "Creates starter project files and directories in this repository without asking you to author model logic yet.",
+        key_paths: &[
+            "valid.toml",
+            "valid/registry.rs",
+            "valid/models/approval.rs",
+            "src/main.rs",
+            ".mcp/codex.toml",
+            "docs/ai/bootstrap.md",
+            "docs/rdd/README.md",
+            "generated-tests/",
+            "artifacts/",
+            "benchmarks/baselines/",
+        ],
+        expected_result: "This directory becomes a runnable starter valid project with one reviewable model.",
+        writes_repo_state: true,
+        program: OnboardingProgram::CurrentExe,
+        args: &["init", "--json"],
+        repair_hint: None,
+    },
+    OnboardingStageDescriptor {
+        stage_id: "check_scaffold",
+        title: "Check Scaffold",
+        command: "valid init --check --json",
+        purpose: "Validate that the expected starter files still exist and that the supported layout is intact before review commands run.",
+        effect_kind: "scaffold_validation",
+        effect_summary: "Performs a read-only health check over the scaffolded layout.",
+        key_paths: &[
+            "valid.toml",
+            "valid/registry.rs",
+            "valid/models/approval.rs",
+            ".mcp/codex.toml",
+            "docs/ai/bootstrap.md",
+            "docs/rdd/README.md",
+        ],
+        expected_result: "You learn whether the scaffold is healthy or needs repair before continuing.",
+        writes_repo_state: false,
+        program: OnboardingProgram::CurrentExe,
+        args: &["init", "--check", "--json"],
+        repair_hint: Some("Run `valid doctor` to inspect the scaffold state, then use `valid init --repair` for any safe missing files."),
+    },
+    OnboardingStageDescriptor {
+        stage_id: "warm_project_build",
+        title: "Warm Project Build",
+        command: "cargo build --quiet",
+        purpose: "Warm the local Cargo build so the first review commands focus on model output instead of dependency resolution and compile noise.",
+        effect_kind: "build_warmup",
+        effect_summary: "Builds the starter project, may create `Cargo.lock`, and populates local Cargo/target artifacts for faster follow-up commands.",
+        key_paths: &["Cargo.toml", "Cargo.lock", "target/"],
+        expected_result: "Later `cargo valid ...` steps run with much less build noise and fail earlier if the toolchain is unhealthy.",
+        writes_repo_state: true,
+        program: OnboardingProgram::Cargo,
+        args: &["build", "--quiet"],
+        repair_hint: Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo build` once the project toolchain is healthy."),
+    },
+    OnboardingStageDescriptor {
+        stage_id: "list_models",
+        title: "List Starter Models",
+        command: "cargo valid models",
+        purpose: "Confirm that the registry loads and exposes the scaffolded starter model before deeper inspection.",
+        effect_kind: "registry_review",
+        effect_summary: "Runs a read-only registry listing to prove the starter model is discoverable.",
+        key_paths: &["valid/registry.rs", "valid/models/mod.rs", "valid/models/approval.rs"],
+        expected_result: "You see `approval-model` in the registry output.",
+        writes_repo_state: false,
+        program: OnboardingProgram::Cargo,
+        args: &["valid", "models"],
+        repair_hint: Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo valid models` once project-first loading is healthy."),
+    },
+    OnboardingStageDescriptor {
+        stage_id: "inspect_starter_model",
+        title: "Inspect Starter Model",
+        command: "cargo valid inspect approval-model",
+        purpose: "Show the starter model's state fields, actions, and properties so the user can read the contract before authoring anything.",
+        effect_kind: "model_inspection",
+        effect_summary: "Runs a read-only model inspection and prints the starter model structure.",
+        key_paths: &["valid/models/approval.rs", "valid/registry.rs"],
+        expected_result: "You can map the CLI output back to the starter model file and understand what the model currently expresses.",
+        writes_repo_state: false,
+        program: OnboardingProgram::Cargo,
+        args: &["valid", "inspect", "approval-model"],
+        repair_hint: Some("Run `valid doctor` first, then `cargo valid inspect approval-model` after the registry and Cargo setup are healthy."),
+    },
+    OnboardingStageDescriptor {
+        stage_id: "graph_starter_model",
+        title: "Render Starter Graph",
+        command: "cargo valid graph approval-model --view=overview",
+        purpose: "Render the first graph view so the starter model is visible as a quick overview rather than only as Rust source.",
+        effect_kind: "graph_render",
+        effect_summary: "Runs a read-only graph render of the starter model overview.",
+        key_paths: &["valid/models/approval.rs", "valid/registry.rs"],
+        expected_result: "You get an overview graph that matches the starter model's fields, actions, and property.",
+        writes_repo_state: false,
+        program: OnboardingProgram::Cargo,
+        args: &["valid", "graph", "approval-model", "--view=overview"],
+        repair_hint: Some("Run `valid doctor` and, if needed, `valid init --repair` before retrying `cargo valid graph approval-model --view=overview`."),
+    },
+    OnboardingStageDescriptor {
+        stage_id: "handoff_starter_model",
+        title: "Generate Starter Handoff",
+        command: "cargo valid handoff approval-model",
+        purpose: "Produce the implementation-facing handoff summary so the user can see the artifact that downstream engineers or AI tools would consume.",
+        effect_kind: "artifact_generation",
+        effect_summary: "Generates the starter handoff artifact and points at the file you can read next.",
+        key_paths: &[
+            "valid/models/approval.rs",
+            "artifacts/handoff/ApprovalModel.md",
+            "generated-tests/",
+        ],
+        expected_result: "You have a concrete handoff artifact on disk for the starter model.",
+        writes_repo_state: true,
+        program: OnboardingProgram::Cargo,
+        args: &["valid", "handoff", "approval-model"],
+        repair_hint: Some("Run `valid doctor` first, then retry `cargo valid handoff approval-model` after inspect and graph are healthy."),
+    },
+];
 
 #[derive(Args, Debug, Clone)]
 struct ModelPathArgs {
@@ -1434,34 +1608,30 @@ fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
     });
     let cargo_project_detected = root.join("Cargo.toml").exists();
     let valid_project_detected = root.join("valid.toml").exists();
+    let overview = onboarding_overview();
     let mut stages = Vec::new();
 
-    stages.push(OnboardingStageReport {
-        stage_id: "detect_environment".to_string(),
-        command: "detect environment".to_string(),
-        status: "success".to_string(),
-        summary: if cargo_project_detected || valid_project_detected {
+    if !args.json {
+        print_onboarding_overview(&overview);
+    }
+
+    let detect_stage = onboarding_stage_descriptor("detect_environment");
+    stages.push(onboarding_stage_report(
+        detect_stage,
+        "success",
+        if cargo_project_detected || valid_project_detected {
             "Detected an existing project context and selected the review-first walkthrough."
                 .to_string()
         } else {
             "No scaffold detected; onboarding will bootstrap a new project first.".to_string()
         },
-        stdout_excerpt: None,
-        repair_hint: None,
-    });
+        None,
+        None,
+    ));
 
     if !cargo_project_detected || !valid_project_detected {
-        if let Some(stage) = run_onboarding_stage(
-            interactive,
-            args.json,
-            "bootstrap_project",
-            "valid init",
-            "Create the project scaffold so the starter model and MCP snippets exist.",
-            &current_exe_or_exit(),
-            &["init", "--json"],
-            &root,
-            None,
-        ) {
+        let bootstrap_stage = onboarding_stage_descriptor("bootstrap_project");
+        if let Some(stage) = run_onboarding_stage(interactive, args.json, bootstrap_stage, &root) {
             let failed = stage.status == "error";
             stages.push(stage);
             if failed {
@@ -1472,87 +1642,45 @@ fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
                     interactive,
                     cargo_project_detected,
                     valid_project_detected,
+                    overview.clone(),
                     stages,
                 );
             }
         }
     } else {
-        stages.push(OnboardingStageReport {
-            stage_id: "bootstrap_project".to_string(),
-            command: "valid init".to_string(),
-            status: "skipped".to_string(),
-            summary: "Skipped scaffold creation because the project already looks initialized."
-                .to_string(),
-            stdout_excerpt: None,
-            repair_hint: None,
-        });
+        let bootstrap_stage = onboarding_stage_descriptor("bootstrap_project");
+        stages.push(onboarding_stage_report(
+            bootstrap_stage,
+            "skipped",
+            "Skipped scaffold creation because the project already looks initialized.".to_string(),
+            None,
+            None,
+        ));
     }
 
-    for (stage_id, command, summary, repair_hint) in [
-        (
-            "check_scaffold",
-            vec!["init", "--check", "--json"],
-            "Validate that the scaffold still matches the supported layout.",
-            Some("Run `valid doctor` to inspect the scaffold state, then use `valid init --repair` for any safe missing files.".to_string()),
-        ),
-        (
-            "warm_project_build",
-            vec!["build", "--quiet"],
-            "Warm the local Cargo build so the first review commands focus on model output instead of compile logs.",
-            Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo build` once the project toolchain is healthy.".to_string()),
-        ),
-        (
-            "list_models",
-            vec!["valid", "models"],
-            "Confirm that the starter registry loads and exposes the scaffolded model.",
-            Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo valid models` once project-first loading is healthy.".to_string()),
-        ),
-        (
-            "inspect_starter_model",
-            vec!["valid", "inspect", "approval-model"],
-            "Inspect the starter model to see its states, actions, and properties.",
-            Some("Run `valid doctor` first, then `cargo valid inspect approval-model` after the registry and Cargo setup are healthy.".to_string()),
-        ),
-        (
-            "graph_starter_model",
-            vec!["valid", "graph", "approval-model", "--view=overview"],
-            "Render the first graph view for the starter model.",
-            Some("Run `valid doctor` and, if needed, `valid init --repair` before retrying `cargo valid graph approval-model --view=overview`.".to_string()),
-        ),
-        (
-            "handoff_starter_model",
-            vec!["valid", "handoff", "approval-model"],
-            "Generate the implementation-facing handoff summary for the starter model.",
-            Some("Run `valid doctor` first, then retry `cargo valid handoff approval-model` after inspect and graph are healthy.".to_string()),
-        ),
+    for stage_id in [
+        "check_scaffold",
+        "warm_project_build",
+        "list_models",
+        "inspect_starter_model",
+        "graph_starter_model",
+        "handoff_starter_model",
     ] {
-        let (program, argv): (String, Vec<String>) = if command[0] == "init" {
-            let current = current_exe_or_exit();
-            (
-                current.to_string_lossy().to_string(),
-                command.iter().map(|s| s.to_string()).collect(),
-            )
-        } else {
-            (
-                "cargo".to_string(),
-                command.iter().map(|s| s.to_string()).collect(),
-            )
-        };
-        if let Some(stage) = run_onboarding_stage(
-            interactive,
-            args.json,
-            stage_id,
-            &format!("{} {}", if program == "cargo" { "cargo" } else { "valid" }, command.join(" ")),
-            summary,
-            &PathBuf::from(program),
-            &argv.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            &root,
-            repair_hint,
-        ) {
+        let descriptor = onboarding_stage_descriptor(stage_id);
+        if let Some(stage) = run_onboarding_stage(interactive, args.json, descriptor, &root) {
             let failed = stage.status == "error";
             stages.push(stage);
             if failed {
-                finish_onboarding(args.json, progress, root, interactive, cargo_project_detected, valid_project_detected, stages);
+                finish_onboarding(
+                    args.json,
+                    progress,
+                    root,
+                    interactive,
+                    cargo_project_detected,
+                    valid_project_detected,
+                    overview.clone(),
+                    stages,
+                );
             }
         }
     }
@@ -1564,6 +1692,7 @@ fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
         interactive,
         cargo_project_detected,
         valid_project_detected,
+        overview,
         stages,
     );
 }
@@ -1582,28 +1711,23 @@ fn current_exe_or_exit() -> PathBuf {
 fn run_onboarding_stage(
     interactive: bool,
     json: bool,
-    stage_id: &str,
-    command_label: &str,
-    summary: &str,
-    program: &PathBuf,
-    args: &[&str],
+    descriptor: &OnboardingStageDescriptor,
     root: &PathBuf,
-    repair_hint: Option<String>,
 ) -> Option<OnboardingStageReport> {
+    let guide = onboarding_stage_guide(descriptor);
     if interactive {
-        print!("{}", text_section(stage_id));
-        println!("{}", text_bullet(summary));
-        println!("  {}", text_kv("command", command_label));
+        print_onboarding_stage_context(&guide);
     }
-    let output = Command::new(program)
+    let (program, args) = onboarding_stage_command(descriptor);
+    let output = Command::new(&program)
         .current_dir(root)
-        .args(args)
+        .args(&args)
         .output()
         .unwrap_or_else(|error| {
             message_exit(
                 "onboarding",
                 false,
-                &format!("failed to run `{command_label}`: {error}"),
+                &format!("failed to run `{}`: {error}", descriptor.command),
                 None,
             )
         });
@@ -1614,7 +1738,7 @@ fn run_onboarding_stage(
         || "terminated by signal".to_string(),
         |code| code.to_string(),
     );
-    let stage_success = if stage_id == "check_scaffold" && output.status.success() {
+    let stage_success = if descriptor.stage_id == "check_scaffold" && output.status.success() {
         serde_json::from_str::<Value>(&stdout)
             .ok()
             .and_then(|value| {
@@ -1628,19 +1752,22 @@ fn run_onboarding_stage(
         output.status.success()
     };
     let status = if stage_success { "success" } else { "error" };
+    let repair_hint = if stage_success {
+        None
+    } else {
+        descriptor.repair_hint.map(|hint| hint.to_string())
+    };
     if interactive {
         println!(
             "{} {}",
             text_status_badge(status),
-            text_kv("command", command_label)
+            text_kv("command", descriptor.command)
         );
         println!("  {}", text_kv("exit_code", &exit_code));
         print_onboarding_command_output("stdout", &stdout, None);
         print_onboarding_command_output("stderr", &stderr, None);
-        if !stage_success {
-            if let Some(repair_hint) = &repair_hint {
-                println!("  {}", text_hint(repair_hint));
-            }
+        if let Some(repair_hint) = &repair_hint {
+            println!("  {}", text_hint(repair_hint));
         }
         if stage_success {
             print!("{}", onboarding_continue_prompt());
@@ -1652,27 +1779,119 @@ fn run_onboarding_stage(
         println!(
             "{} {}",
             text_status_badge(status),
-            text_kv(stage_id, summary)
+            text_kv("stage", guide.title.as_str())
         );
-        println!("  {}", text_kv("command", command_label));
+        println!("  {}", text_kv("command", descriptor.command));
+        println!("  {}", text_kv("purpose", guide.purpose.as_str()));
+        println!("  {}", text_kv("effect", guide.effect_summary.as_str()));
+        if !guide.key_paths.is_empty() {
+            println!("  {}", text_kv("look_at", &guide.key_paths.join(", ")));
+        }
+        println!("  {}", text_kv("expect", guide.expected_result.as_str()));
         println!("  {}", text_kv("exit_code", &exit_code));
         if let Some(excerpt) = &excerpt {
             println!("  {}", text_kv("output", excerpt));
         }
-        if !stage_success {
-            if let Some(repair_hint) = &repair_hint {
-                println!("  {}", text_hint(repair_hint));
-            }
+        if let Some(repair_hint) = &repair_hint {
+            println!("  {}", text_hint(repair_hint));
         }
     }
-    Some(OnboardingStageReport {
-        stage_id: stage_id.to_string(),
-        command: command_label.to_string(),
+    Some(onboarding_stage_report(
+        descriptor,
+        status,
+        descriptor.purpose.to_string(),
+        excerpt,
+        repair_hint,
+    ))
+}
+
+fn onboarding_stage_descriptor(stage_id: &str) -> &'static OnboardingStageDescriptor {
+    ONBOARDING_STAGE_DESCRIPTORS
+        .iter()
+        .find(|descriptor| descriptor.stage_id == stage_id)
+        .unwrap_or_else(|| panic!("missing onboarding stage descriptor: {stage_id}"))
+}
+
+fn onboarding_stage_guide(descriptor: &OnboardingStageDescriptor) -> OnboardingStageGuide {
+    OnboardingStageGuide {
+        stage_id: descriptor.stage_id.to_string(),
+        title: descriptor.title.to_string(),
+        command: descriptor.command.to_string(),
+        purpose: descriptor.purpose.to_string(),
+        effect_kind: descriptor.effect_kind.to_string(),
+        effect_summary: descriptor.effect_summary.to_string(),
+        key_paths: descriptor
+            .key_paths
+            .iter()
+            .map(|path| path.to_string())
+            .collect(),
+        expected_result: descriptor.expected_result.to_string(),
+        writes_repo_state: descriptor.writes_repo_state,
+    }
+}
+
+fn onboarding_overview() -> Vec<OnboardingStageGuide> {
+    ONBOARDING_STAGE_DESCRIPTORS
+        .iter()
+        .map(onboarding_stage_guide)
+        .collect()
+}
+
+fn onboarding_stage_report(
+    descriptor: &OnboardingStageDescriptor,
+    status: &str,
+    summary: String,
+    stdout_excerpt: Option<String>,
+    repair_hint: Option<String>,
+) -> OnboardingStageReport {
+    OnboardingStageReport {
+        guide: onboarding_stage_guide(descriptor),
         status: status.to_string(),
-        summary: summary.to_string(),
-        stdout_excerpt: excerpt,
-        repair_hint: if stage_success { None } else { repair_hint },
-    })
+        summary,
+        stdout_excerpt,
+        repair_hint,
+    }
+}
+
+fn onboarding_stage_command(
+    descriptor: &OnboardingStageDescriptor,
+) -> (PathBuf, Vec<&'static str>) {
+    match descriptor.program {
+        OnboardingProgram::CurrentExe => (current_exe_or_exit(), descriptor.args.to_vec()),
+        OnboardingProgram::Cargo => (PathBuf::from("cargo"), descriptor.args.to_vec()),
+        OnboardingProgram::Synthetic => (PathBuf::new(), Vec::new()),
+    }
+}
+
+fn print_onboarding_overview(overview: &[OnboardingStageGuide]) {
+    print!("{}", text_section("Onboarding Overview"));
+    println!(
+        "{}",
+        text_bullet(
+            "This walkthrough explains what each step will do, which files matter, and what result to expect before deeper authoring work begins."
+        )
+    );
+    for guide in overview {
+        println!("{}", text_bullet(guide.title.as_str()));
+        println!("  {}", text_kv("command", guide.command.as_str()));
+        println!("  {}", text_kv("purpose", guide.purpose.as_str()));
+        println!("  {}", text_kv("effect", guide.effect_summary.as_str()));
+        if !guide.key_paths.is_empty() {
+            println!("  {}", text_kv("look_at", &guide.key_paths.join(", ")));
+        }
+        println!("  {}", text_kv("expect", guide.expected_result.as_str()));
+    }
+}
+
+fn print_onboarding_stage_context(guide: &OnboardingStageGuide) {
+    print!("{}", text_section(guide.title.as_str()));
+    println!("{}", text_bullet(guide.purpose.as_str()));
+    println!("  {}", text_kv("command", guide.command.as_str()));
+    println!("  {}", text_kv("effect", guide.effect_summary.as_str()));
+    if !guide.key_paths.is_empty() {
+        println!("  {}", text_kv("look_at", &guide.key_paths.join(", ")));
+    }
+    println!("  {}", text_kv("expect", guide.expected_result.as_str()));
 }
 
 fn onboarding_excerpt(output: &str) -> Option<String> {
@@ -1730,6 +1949,7 @@ fn finish_onboarding(
     interactive: bool,
     cargo_project_detected: bool,
     valid_project_detected: bool,
+    overview: Vec<OnboardingStageGuide>,
     stages: Vec<OnboardingStageReport>,
 ) -> ! {
     let has_error = stages.iter().any(|stage| stage.status == "error");
@@ -1746,6 +1966,7 @@ fn finish_onboarding(
         interactive,
         cargo_project_detected,
         valid_project_detected,
+        overview,
         stages,
         next_paths: vec![
             "review_models".to_string(),
@@ -1806,7 +2027,12 @@ fn finish_onboarding(
             "{}",
             text_bullet("an implementation-facing handoff summary")
         );
-        println!("{}", text_bullet("artifact directories at `artifacts/`, `generated-tests/`, and `benchmarks/baselines/`"));
+        println!(
+            "{}",
+            text_bullet(
+                "artifact directories at `artifacts/`, `generated-tests/`, and `benchmarks/baselines/`"
+            )
+        );
         print!("{}", text_section("Recap Commands"));
         println!("{}", text_bullet(&text_command("cargo build --quiet")));
         println!("{}", text_bullet(&text_command("cargo valid models")));
@@ -1817,6 +2043,33 @@ fn finish_onboarding(
         println!(
             "{}",
             text_bullet(&text_command("cargo valid handoff approval-model"))
+        );
+        print!("{}", text_section("Where To Look Next"));
+        println!(
+            "{}",
+            text_bullet("valid/models/approval.rs: read the starter model itself")
+        );
+        println!(
+            "{}",
+            text_bullet(
+                "valid/registry.rs: see how the starter model is exported to `cargo valid`"
+            )
+        );
+        println!(
+            "{}",
+            text_bullet(
+                "docs/rdd/README.md: capture the requirement or rule family you want to model next"
+            )
+        );
+        println!(
+            "{}",
+            text_bullet(
+                ".mcp/codex.toml: wire the local project into AI tooling from the scaffold"
+            )
+        );
+        println!(
+            "{}",
+            text_bullet("artifacts/handoff/ApprovalModel.md: inspect the generated implementation-facing starter artifact")
         );
         print!("{}", text_section("Next Paths"));
         for next_path in &report.next_path_summaries {

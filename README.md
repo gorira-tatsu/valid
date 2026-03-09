@@ -99,6 +99,18 @@ implementation-facing handoff summary.
 Onboarding also warms the local Cargo build before the first `cargo valid ...`
 review step so later output stays centered on model results.
 
+As it runs, onboarding now explains:
+
+- whether the current directory already looks like a Cargo/valid project
+- which starter files it creates, including `valid.toml`, `valid/registry.rs`,
+  `valid/models/approval.rs`, `src/main.rs`, `.mcp/codex.toml`, and
+  `docs/rdd/README.md`
+- when it is only doing a read-only scaffold check
+- when it is warming the local build and may create `Cargo.lock` plus `target/`
+  artifacts
+- which file to read next for the starter model and where the generated handoff
+  artifact lands
+
 If the walkthrough or local shell setup fails, run:
 
 ```sh
@@ -160,6 +172,14 @@ cargo valid inspect approval-model
 cargo valid graph approval-model --view=overview
 cargo valid handoff approval-model
 ```
+
+The main files to inspect after onboarding are:
+
+- `valid/models/approval.rs`
+- `valid/registry.rs`
+- `docs/rdd/README.md`
+- `.mcp/codex.toml`
+- `artifacts/handoff/ApprovalModel.md`
 
 ```toml
 registry = "valid/registry.rs"

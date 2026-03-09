@@ -3310,21 +3310,52 @@ fn onboarding_response_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "schema.cli.onboarding_response",
         "type": "object",
-        "required": ["status", "root", "interactive", "cargo_project_detected", "valid_project_detected", "stages", "next_paths"],
+        "required": ["status", "root", "interactive", "cargo_project_detected", "valid_project_detected", "overview", "stages", "next_paths"],
         "properties": {
             "status": { "type": "string", "enum": ["ok", "partial", "error"] },
             "root": { "type": "string" },
             "interactive": { "type": "boolean" },
             "cargo_project_detected": { "type": "boolean" },
             "valid_project_detected": { "type": "boolean" },
+            "overview": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["stage_id", "title", "command", "purpose", "effect_kind", "effect_summary", "key_paths", "expected_result", "writes_repo_state"],
+                    "properties": {
+                        "stage_id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "command": { "type": "string" },
+                        "purpose": { "type": "string" },
+                        "effect_kind": { "type": "string" },
+                        "effect_summary": { "type": "string" },
+                        "key_paths": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        },
+                        "expected_result": { "type": "string" },
+                        "writes_repo_state": { "type": "boolean" }
+                    }
+                }
+            },
             "stages": {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["stage_id", "command", "status", "summary"],
+                    "required": ["stage_id", "title", "command", "purpose", "effect_kind", "effect_summary", "key_paths", "expected_result", "writes_repo_state", "status", "summary"],
                     "properties": {
                         "stage_id": { "type": "string" },
+                        "title": { "type": "string" },
                         "command": { "type": "string" },
+                        "purpose": { "type": "string" },
+                        "effect_kind": { "type": "string" },
+                        "effect_summary": { "type": "string" },
+                        "key_paths": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        },
+                        "expected_result": { "type": "string" },
+                        "writes_repo_state": { "type": "boolean" },
                         "status": { "type": "string", "enum": ["success", "skipped", "error"] },
                         "summary": { "type": "string" },
                         "stdout_excerpt": { "type": ["string", "null"] },

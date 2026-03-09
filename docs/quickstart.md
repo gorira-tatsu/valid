@@ -22,6 +22,18 @@ implementation-facing handoff summary.
 Before the first model review command, onboarding also warms the local Cargo
 build so later steps stay focused on model output instead of compile logs.
 
+What onboarding explains as it runs:
+
+- detect the current project context by checking `Cargo.toml` and `valid.toml`
+- create starter files such as `valid.toml`, `valid/registry.rs`,
+  `valid/models/approval.rs`, `src/main.rs`, `.mcp/codex.toml`, and
+  `docs/rdd/README.md` when bootstrap is needed
+- validate that those scaffold files are still present before review commands
+- warm the local build, which may create `Cargo.lock` and local `target/`
+  artifacts
+- show you which source file to read for the starter model and where the
+  generated handoff artifact lands on disk
+
 If this flow fails, run `valid doctor` first. If `doctor` reports missing
 scaffold files, use `valid init --repair` and rerun onboarding.
 
@@ -38,6 +50,14 @@ cargo valid inspect approval-model
 cargo valid graph approval-model --view=overview
 cargo valid handoff approval-model
 ```
+
+Key files to look at after the walkthrough:
+
+- `valid/models/approval.rs` for the starter model itself
+- `valid/registry.rs` for the registry wiring used by `cargo valid`
+- `docs/rdd/README.md` for the scaffolded requirement notes location
+- `.mcp/codex.toml` for local AI/MCP wiring
+- `artifacts/handoff/ApprovalModel.md` for the generated starter handoff
 
 For recovery:
 

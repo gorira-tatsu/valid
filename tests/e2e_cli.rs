@@ -1546,11 +1546,30 @@ fn cli_onboarding_bootstraps_empty_project_non_interactively() {
     assert_eq!(report["interactive"], false);
     assert_eq!(report["cargo_project_detected"], false);
     assert_eq!(report["valid_project_detected"], false);
+    assert_eq!(report["overview"].as_array().unwrap().len(), 8);
+    assert_eq!(report["overview"][1]["stage_id"], "bootstrap_project");
+    assert_eq!(report["overview"][1]["title"], "Bootstrap Project");
+    assert!(report["overview"][1]["key_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path == "valid/registry.rs"));
     assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
+    assert_eq!(report["stages"][1]["title"], "Bootstrap Project");
     assert_eq!(report["stages"][1]["status"], "success");
     assert_eq!(report["stages"][3]["stage_id"], "warm_project_build");
+    assert_eq!(report["stages"][3]["writes_repo_state"], true);
+    assert!(report["stages"][3]["effect_summary"]
+        .as_str()
+        .unwrap()
+        .contains("Cargo.lock"));
     assert_eq!(report["stages"][3]["status"], "success");
     assert_eq!(report["stages"][7]["stage_id"], "handoff_starter_model");
+    assert!(report["stages"][7]["key_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path == "artifacts/handoff/ApprovalModel.md"));
     assert_eq!(report["stages"][7]["status"], "success");
     assert!(report["next_path_summaries"]
         .as_array()
@@ -1580,9 +1599,15 @@ fn cli_onboarding_text_output_recaps_first_value() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Onboarding Overview"));
+    assert!(stdout.contains("purpose:"));
+    assert!(stdout.contains("look_at:"));
+    assert!(stdout.contains("valid/registry.rs"));
     assert!(stdout.contains("You Now Have"));
     assert!(stdout.contains("approval-model"));
     assert!(stdout.contains("Recap Commands"));
+    assert!(stdout.contains("Where To Look Next"));
+    assert!(stdout.contains("artifacts/handoff/ApprovalModel.md"));
     assert!(stdout.contains("cargo build --quiet"));
     assert!(stdout.contains("cargo valid models"));
     assert!(stdout.contains("cargo valid inspect approval-model"));
@@ -1622,6 +1647,8 @@ fn cli_onboarding_interactive_shows_command_output_before_next_prompt() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Onboarding Overview"));
+    assert!(stdout.contains("look_at:"));
     assert!(stdout.contains("stdout:"));
     assert!(stdout.contains("exit_code: 0"));
     assert!(stdout.contains("Press Enter for the next step"));
@@ -1667,6 +1694,7 @@ fn cli_onboarding_skips_init_for_existing_scaffold() {
     assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
     assert_eq!(report["stages"][1]["status"], "skipped");
     assert_eq!(report["stages"][3]["stage_id"], "warm_project_build");
+    assert_eq!(report["stages"][3]["title"], "Warm Project Build");
     assert_eq!(report["stages"][3]["status"], "success");
 
     let _ = fs::remove_dir_all(project_dir);
