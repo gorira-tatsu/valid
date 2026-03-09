@@ -511,6 +511,17 @@ const CHECK_ARG: ArgSpec = ArgSpec {
     description: "Enable migration check mode.",
     values: &[],
 };
+const REPAIR_ARG: ArgSpec = ArgSpec {
+    name: "repair",
+    syntax: "--repair",
+    value_type: "boolean",
+    required: false,
+    multiple: false,
+    positional: false,
+    description:
+        "Restore missing scaffold files and directories without overwriting existing files.",
+    values: &[],
+};
 const NON_INTERACTIVE_ARG: ArgSpec = ArgSpec {
     name: "non_interactive",
     syntax: "--non-interactive",
@@ -806,18 +817,30 @@ const BENCHMARK_OPTIONS: &[ArgSpec] = &[
     SOLVER_ARG_ARG,
 ];
 const MIGRATE_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, WRITE_ARG, CHECK_ARG];
-const INIT_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, CHECK_ARG];
+const INIT_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, CHECK_ARG, REPAIR_ARG];
 const ONBOARDING_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, NON_INTERACTIVE_ARG];
 const VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "init",
         aliases: &[],
         description: "Create a Cargo project scaffold plus valid project layout.",
-        usage: "valid init [--json] [--progress=json] [--check]",
+        usage: "valid init [--json] [--progress=json] [--check|--repair]",
         positional: &[],
         options: INIT_OPTIONS,
         request_schema: None,
         response_schema: Some(SchemaRef { id: "schema.cli.init_response", builder: init_response_schema }),
+        supports_json: true,
+        supports_progress: true,
+    },
+    CommandSpec {
+        name: "doctor",
+        aliases: &[],
+        description: "Diagnose environment and project scaffold issues.",
+        usage: "valid doctor [--json] [--progress=json]",
+        positional: &[],
+        options: &[JSON_ARG, PROGRESS_ARG],
+        request_schema: None,
+        response_schema: Some(SchemaRef { id: "schema.cli.doctor_response", builder: doctor_response_schema }),
         supports_json: true,
         supports_progress: true,
     },
@@ -3154,6 +3177,45 @@ fn init_response_schema() -> Value {
             "recommended_repairs": {
                 "type": "array",
                 "items": { "type": "string" }
+            },
+            "repaired_files": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "repaired_directories": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "remaining_warnings": {
+                "type": "array",
+                "items": { "type": "string" }
+            }
+        }
+    })
+}
+
+fn doctor_response_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "schema.cli.doctor_response",
+        "type": "object",
+        "required": ["status", "root", "checks"],
+        "properties": {
+            "status": { "type": "string", "enum": ["ok", "warn", "error"] },
+            "root": { "type": "string" },
+            "checks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["check_id", "status", "summary"],
+                    "properties": {
+                        "check_id": { "type": "string" },
+                        "status": { "type": "string", "enum": ["ok", "warn", "error"] },
+                        "summary": { "type": "string" },
+                        "details": { "type": ["string", "null"] },
+                        "repair_hint": { "type": ["string", "null"] }
+                    }
+                }
             }
         }
     })

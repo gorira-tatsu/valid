@@ -114,6 +114,12 @@ This path is intentionally review-first. It lets you confirm the scaffold,
 inspect the starter model, review the first overview graph, and get a handoff summary
 before you write your own models.
 
+If that first run fails, use:
+
+```sh
+valid doctor
+```
+
 ## Project Setup
 
 Create a project skeleton:
@@ -129,6 +135,13 @@ cargo valid models
 cargo valid inspect approval-model
 cargo valid handoff approval-model
 valid init --check
+```
+
+If the scaffold exists but some standard files disappeared, restore the safe
+layout without overwriting existing files:
+
+```sh
+valid init --repair
 ```
 
 If you want embedded SAT, use it on a small boolean declarative model:

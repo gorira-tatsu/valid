@@ -98,6 +98,16 @@ pub struct InitCheckResult {
     pub recommended_repairs: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InitRepairResult {
+    pub status: String,
+    pub root: String,
+    pub repaired_files: Vec<String>,
+    pub repaired_directories: Vec<String>,
+    pub skipped_existing: Vec<String>,
+    pub remaining_warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ConfigSection {
     TopLevel,
@@ -462,6 +472,144 @@ pub fn check_project_init(root: &Path, expected_registry: &str) -> InitCheckResu
         mismatched_paths,
         recommended_repairs,
     }
+}
+
+pub fn repair_project_init(
+    root: &Path,
+    expected_registry: &str,
+) -> Result<InitRepairResult, String> {
+    let cargo_toml = root.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return Err(format!(
+            "`{}` is missing; run `valid init` before `valid init --repair`",
+            cargo_toml.display()
+        ));
+    }
+    let config_path = root.join("valid.toml");
+    if !config_path.exists() {
+        return Err(format!(
+            "`{}` is missing; run `valid init` before `valid init --repair`",
+            config_path.display()
+        ));
+    }
+
+    let generated_dir = root.join("generated-tests");
+    let artifacts_dir = root.join("artifacts");
+    let benchmark_baseline_dir = root.join("benchmarks").join("baselines");
+    let mcp_dir = root.join(".mcp");
+    let docs_ai_dir = root.join("docs").join("ai");
+    let docs_rdd_dir = root.join("docs").join("rdd");
+    let valid_dir = root.join("valid");
+    let valid_models_dir = valid_dir.join("models");
+    let registry_path = root.join(expected_registry);
+    let model_mod_path = valid_models_dir.join("mod.rs");
+    let model_path = valid_models_dir.join("approval.rs");
+    let codex_config = mcp_dir.join("codex.toml");
+    let claude_code_config = mcp_dir.join("claude-code.json");
+    let claude_desktop_config = mcp_dir.join("claude-desktop.json");
+    let bootstrap_readme = docs_ai_dir.join("bootstrap.md");
+    let rdd_readme = docs_rdd_dir.join("README.md");
+
+    let mut repaired_files = Vec::new();
+    let mut repaired_directories = Vec::new();
+    let mut skipped_existing = Vec::new();
+
+    create_dir_if_missing(&generated_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&artifacts_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&benchmark_baseline_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&mcp_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&docs_ai_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&docs_rdd_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&valid_dir, &mut repaired_directories)?;
+    create_dir_if_missing(&valid_models_dir, &mut repaired_directories)?;
+
+    write_file_if_missing(
+        &registry_path,
+        &render_registry_source_template(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &model_mod_path,
+        &render_registry_models_mod_template(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &model_path,
+        &render_registry_model_template(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &generated_dir.join(".gitkeep"),
+        "",
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &artifacts_dir.join(".gitkeep"),
+        "",
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &benchmark_baseline_dir.join(".gitkeep"),
+        "",
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &codex_config,
+        &render_bootstrap_codex_config(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &claude_code_config,
+        &render_bootstrap_claude_code_config(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &claude_desktop_config,
+        &render_bootstrap_claude_desktop_config(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &bootstrap_readme,
+        &render_bootstrap_ai_readme(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &rdd_readme,
+        &render_rdd_readme(),
+        &mut repaired_files,
+        &mut skipped_existing,
+    )?;
+
+    let report = check_project_init(root, expected_registry);
+    let status = if report.status == "error" {
+        "warn"
+    } else {
+        report.status.as_str()
+    };
+    let mut remaining_warnings = report.missing_paths;
+    remaining_warnings.extend(report.mismatched_paths);
+    if report.status != "ok" {
+        remaining_warnings.extend(report.recommended_repairs);
+    }
+
+    Ok(InitRepairResult {
+        status: status.to_string(),
+        root: root.display().to_string(),
+        repaired_files,
+        repaired_directories,
+        skipped_existing,
+        remaining_warnings,
+    })
 }
 
 pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRecommendations {

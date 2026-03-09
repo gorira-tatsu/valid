@@ -8,21 +8,44 @@ fn repo_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
 }
 
-fn cleanup_ci_template_outputs() {
-    let _ = fs::remove_dir_all(repo_path("template-artifacts"));
-    let _ = fs::remove_file(repo_path(
-        "tests/fixtures/projects/ci_template_project/artifacts/docs/safe_counter.md",
-    ));
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock should be available")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
+}
 
-    let generated_dir = repo_path("tests/fixtures/projects/ci_template_project/generated-tests");
-    if let Ok(entries) = fs::read_dir(&generated_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-                let _ = fs::remove_file(path);
-            }
+fn copy_dir_recursive(src: &Path, dest: &Path) {
+    fs::create_dir_all(dest).expect("destination dir should exist");
+    for entry in fs::read_dir(src).expect("source dir should be readable") {
+        let entry = entry.expect("dir entry");
+        let source_path = entry.path();
+        let target_path = dest.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &target_path);
+        } else {
+            fs::copy(&source_path, &target_path).expect("file should copy");
         }
     }
+}
+
+fn prepare_ci_template_fixture_copy() -> PathBuf {
+    let temp_root = unique_temp_dir("valid-ci-template");
+    let fixture_src = repo_path("tests/fixtures/projects/ci_template_project");
+    let fixture_dest = temp_root.join("ci_template_project");
+    copy_dir_recursive(&fixture_src, &fixture_dest);
+    let cargo_toml_path = fixture_dest.join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(&cargo_toml_path).expect("fixture Cargo.toml");
+    let rewritten = cargo_toml.replace(
+        "valid = { path = \"../../../..\", features = [\"verification-runtime\"] }",
+        &format!(
+            "valid = {{ path = {:?}, features = [\"verification-runtime\"] }}",
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+        ),
+    );
+    fs::write(cargo_toml_path, rewritten).expect("fixture Cargo.toml should be rewritten");
+    temp_root
 }
 
 fn run_script(script: &str, args: &[&Path]) {
@@ -41,16 +64,12 @@ fn run_script(script: &str, args: &[&Path]) {
 
 #[test]
 fn ci_template_scripts_run_against_fixture_project() {
-    cleanup_ci_template_outputs();
-
-    let fixture_manifest = repo_path("tests/fixtures/projects/ci_template_project/Cargo.toml");
-    let fixture_model =
-        repo_path("tests/fixtures/projects/ci_template_project/fixtures/models/safe_counter.valid");
-    let fixture_runner = repo_path(
-        "tests/fixtures/projects/ci_template_project/fixtures/runners/mock_counter_pass.sh",
-    );
-    let fixture_doc_output =
-        repo_path("tests/fixtures/projects/ci_template_project/artifacts/docs/safe_counter.md");
+    let temp_root = prepare_ci_template_fixture_copy();
+    let fixture_root = temp_root.join("ci_template_project");
+    let fixture_manifest = fixture_root.join("Cargo.toml");
+    let fixture_model = fixture_root.join("fixtures/models/safe_counter.valid");
+    let fixture_runner = fixture_root.join("fixtures/runners/mock_counter_pass.sh");
+    let fixture_doc_output = fixture_root.join("artifacts/docs/safe_counter.md");
 
     run_script(
         "scripts/ci/template_inspect_check.sh",
@@ -115,5 +134,6 @@ fn ci_template_scripts_run_against_fixture_project() {
             .expect("doc artifact should exist");
     assert!(doc_markdown.contains("# SafeCounter"));
 
-    cleanup_ci_template_outputs();
+    let _ = fs::remove_dir_all(repo_path("template-artifacts"));
+    let _ = fs::remove_dir_all(temp_root);
 }

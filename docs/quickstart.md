@@ -17,6 +17,9 @@ This gives you a working scaffold, confirms that the scaffold is healthy, shows
 the starter model, renders the first overview graph, and produces an
 implementation-facing handoff summary.
 
+If this flow fails, run `valid doctor` first. If the scaffold exists but
+standard files are missing, use `valid init --repair`.
+
 ## Manual Equivalent
 
 `valid onboarding` is a guided wrapper around this sequence:
@@ -28,6 +31,13 @@ cargo valid models
 cargo valid inspect approval-model
 cargo valid graph approval-model --view=overview
 cargo valid handoff approval-model
+```
+
+For recovery:
+
+```sh
+valid doctor
+valid init --repair
 ```
 
 ## What You Get

@@ -52,7 +52,8 @@ use valid::{
     },
     mcp::{serve_stdio, ServerConfig},
     project::{
-        check_project_init, load_project_config, rerun_recommendations, scaffold_project_init,
+        check_project_init, load_project_config, repair_project_init, rerun_recommendations,
+        scaffold_project_init,
     },
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
@@ -79,6 +80,7 @@ struct ValidCli {
 enum ValidCommand {
     Init(InitArgs),
     Onboarding(OnboardingArgs),
+    Doctor(JsonProgressArgs),
     #[command(alias = "verify")]
     Check(CommonModelArgs),
     Inspect(ModelPathArgs),
@@ -138,6 +140,8 @@ struct InitArgs {
     progress: Option<String>,
     #[arg(long, action = ArgAction::SetTrue)]
     check: bool,
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "check")]
+    repair: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -175,6 +179,22 @@ struct OnboardingReport {
     valid_project_detected: bool,
     stages: Vec<OnboardingStageReport>,
     next_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCheckReport {
+    check_id: String,
+    status: String,
+    summary: String,
+    details: Option<String>,
+    repair_hint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    status: String,
+    root: String,
+    checks: Vec<DoctorCheckReport>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -402,6 +422,7 @@ fn main() {
     match cli.command {
         Some(ValidCommand::Init(args)) => cmd_init_from_parsed(args),
         Some(ValidCommand::Onboarding(args)) => cmd_onboarding_from_parsed(args),
+        Some(ValidCommand::Doctor(args)) => cmd_doctor_from_parsed(args),
         Some(ValidCommand::Check(args)) => cmd_check_from_parsed(common_to_parsed(args)),
         Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
@@ -437,7 +458,7 @@ fn main() {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <init|inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
+                "usage: valid <init|onboarding|doctor|inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
             );
         }
     }
@@ -666,6 +687,179 @@ fn cmd_commands_from_parsed(args: JsonOnlyArgs) {
         Vec::new()
     });
 }
+
+fn command_is_available(name: &str, arg: &str) -> bool {
+    Command::new(name)
+        .arg(arg)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn current_exe_dir_on_path() -> bool {
+    let Ok(exe) = env::current_exe() else {
+        return false;
+    };
+    let Some(parent) = exe.parent() else {
+        return false;
+    };
+    env::var_os("PATH")
+        .map(|paths| env::split_paths(&paths).any(|path| path == parent))
+        .unwrap_or(false)
+}
+
+fn build_doctor_report(root: &PathBuf) -> DoctorReport {
+    let mut checks = Vec::new();
+    let exe_on_path = current_exe_dir_on_path();
+    checks.push(DoctorCheckReport {
+        check_id: "valid_path".to_string(),
+        status: if exe_on_path { "ok" } else { "warn" }.to_string(),
+        summary: if exe_on_path {
+            "`valid` appears to be discoverable on PATH.".to_string()
+        } else {
+            "`valid` is running, but the current executable directory is not on PATH.".to_string()
+        },
+        details: env::current_exe()
+            .ok()
+            .map(|path| format!("current_executable={}", path.display())),
+        repair_hint: if exe_on_path {
+            None
+        } else {
+            Some("Add the directory that contains `valid` to PATH for your shell session and shell config.".to_string())
+        },
+    });
+
+    let cargo_available = command_is_available("cargo", "--version");
+    checks.push(DoctorCheckReport {
+        check_id: "cargo_available".to_string(),
+        status: if cargo_available { "ok" } else { "error" }.to_string(),
+        summary: if cargo_available {
+            "`cargo` is available.".to_string()
+        } else {
+            "`cargo` is not available on PATH.".to_string()
+        },
+        details: None,
+        repair_hint: if cargo_available {
+            None
+        } else {
+            Some("Install Rust/Cargo and make sure `cargo` is available on PATH before using project-first workflows.".to_string())
+        },
+    });
+
+    let cargo_valid_available = command_is_available("cargo-valid", "--version");
+    checks.push(DoctorCheckReport {
+        check_id: "cargo_valid_available".to_string(),
+        status: if cargo_valid_available { "ok" } else { "warn" }.to_string(),
+        summary: if cargo_valid_available {
+            "`cargo-valid` is available.".to_string()
+        } else {
+            "`cargo-valid` is not available on PATH.".to_string()
+        },
+        details: None,
+        repair_hint: if cargo_valid_available {
+            None
+        } else {
+            Some("Reinstall `valid` so the Cargo subcommand is available, or add the install directory to PATH.".to_string())
+        },
+    });
+
+    let init_report = check_project_init(root, "valid/registry.rs");
+    checks.push(DoctorCheckReport {
+        check_id: "project_scaffold".to_string(),
+        status: init_report.status.clone(),
+        summary: match init_report.status.as_str() {
+            "ok" => "The current directory matches the expected `valid init` scaffold.".to_string(),
+            "warn" => "The current directory is a valid project, but some scaffold assets are missing.".to_string(),
+            _ => "The current directory has blocking scaffold/config issues.".to_string(),
+        },
+        details: Some(format!(
+            "cargo_project_detected={}, valid_toml_detected={}, missing_paths={}, mismatched_paths={}",
+            init_report.cargo_project_detected,
+            init_report.valid_toml_detected,
+            init_report.missing_paths.join(", "),
+            init_report.mismatched_paths.join(", ")
+        )),
+        repair_hint: match init_report.status.as_str() {
+            "warn" => Some("Run `valid init --repair` to restore the safe scaffold files and directories.".to_string()),
+            "error" => init_report.recommended_repairs.first().cloned(),
+            _ => None,
+        },
+    });
+
+    let mcp_dir = root.join(".mcp");
+    checks.push(DoctorCheckReport {
+        check_id: "mcp_snippets".to_string(),
+        status: if mcp_dir.exists() { "ok" } else { "warn" }.to_string(),
+        summary: if mcp_dir.exists() {
+            "Local MCP snippets are present.".to_string()
+        } else {
+            "Local MCP snippets are missing.".to_string()
+        },
+        details: Some(mcp_dir.display().to_string()),
+        repair_hint: if mcp_dir.exists() {
+            None
+        } else {
+            Some("Run `valid init --repair` to restore the `.mcp/` snippet files.".to_string())
+        },
+    });
+
+    let status = if checks.iter().any(|check| check.status == "error") {
+        "error"
+    } else if checks.iter().any(|check| check.status == "warn") {
+        "warn"
+    } else {
+        "ok"
+    };
+    DoctorReport {
+        status: status.to_string(),
+        root: root.display().to_string(),
+        checks,
+    }
+}
+
+fn cmd_doctor_from_parsed(args: JsonProgressArgs) {
+    let progress = ProgressReporter::new("doctor", args.progress.as_deref() == Some("json"));
+    progress.start(None);
+    let root = env::current_dir().unwrap_or_else(|error| {
+        message_exit(
+            "doctor",
+            args.json,
+            &format!("failed to resolve current directory: {error}"),
+            None,
+        )
+    });
+    let report = build_doctor_report(&root);
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string(&report).expect("doctor json should serialize")
+        );
+    } else {
+        println!("status: {}", report.status);
+        println!("root: {}", report.root);
+        for check in &report.checks {
+            println!("- {} [{}] {}", check.check_id, check.status, check.summary);
+            if let Some(details) = &check.details {
+                if !details.trim().is_empty() {
+                    println!("  details: {details}");
+                }
+            }
+            if let Some(repair_hint) = &check.repair_hint {
+                if !repair_hint.trim().is_empty() {
+                    println!("  repair_hint: {repair_hint}");
+                }
+            }
+        }
+    }
+    let exit = if report.status == "error" {
+        ExitCode::Error
+    } else {
+        ExitCode::Success
+    };
+    progress.finish(exit);
+    process::exit(exit.code());
+}
+
 fn cmd_init_from_parsed(args: InitArgs) {
     let progress = ProgressReporter::new("init", args.progress.as_deref() == Some("json"));
     progress.start(None);
@@ -709,6 +903,44 @@ fn cmd_init_from_parsed(args: InitArgs) {
         let exit = match report.status.as_str() {
             "error" => ExitCode::Error,
             _ => ExitCode::Success,
+        };
+        progress.finish(exit);
+        process::exit(exit.code());
+    }
+    if args.repair {
+        let result = repair_project_init(&root, "valid/registry.rs")
+            .unwrap_or_else(|message| message_exit("init", args.json, &message, None));
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string(&result).expect("init repair json should serialize")
+            );
+        } else {
+            println!("status: {}", result.status);
+            println!("root: {}", result.root);
+            if !result.repaired_files.is_empty() {
+                println!("repaired_files: {}", result.repaired_files.join(", "));
+            }
+            if !result.repaired_directories.is_empty() {
+                println!(
+                    "repaired_directories: {}",
+                    result.repaired_directories.join(", ")
+                );
+            }
+            if !result.skipped_existing.is_empty() {
+                println!("skipped_existing: {}", result.skipped_existing.join(", "));
+            }
+            if !result.remaining_warnings.is_empty() {
+                println!(
+                    "remaining_warnings: {}",
+                    result.remaining_warnings.join(" | ")
+                );
+            }
+        }
+        let exit = if result.status == "warn" {
+            ExitCode::Success
+        } else {
+            ExitCode::Success
         };
         progress.finish(exit);
         process::exit(exit.code());

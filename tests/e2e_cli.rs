@@ -767,7 +767,9 @@ fn cli_readiness_and_clean_work() {
         .arg("--json")
         .output()
         .expect("readiness should run");
-    assert_eq!(lint.status.code(), Some(0));
+    assert_eq!(lint.status.code(), Some(1));
+    let lint_stdout = String::from_utf8_lossy(&lint.stdout);
+    assert!(lint_stdout.contains("\"severity\":\"warn\""));
 
     let clean = Command::new(binary_path())
         .current_dir(&temp_root)
@@ -1328,6 +1330,139 @@ fn cli_init_generated_project_reaches_cargo_valid_models() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("approval-model"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_doctor_reports_ok_for_fresh_scaffold() {
+    let project_dir = unique_temp_dir("valid-cli-doctor-ok");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("doctor")
+        .arg("--json")
+        .output()
+        .expect("valid doctor should run");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    let scaffold = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "project_scaffold")
+        .expect("project scaffold check");
+    assert_eq!(scaffold["status"], "ok");
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_doctor_reports_repair_hint_for_missing_scaffold_files() {
+    let project_dir = unique_temp_dir("valid-cli-doctor-broken");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+    fs::remove_file(project_dir.join(".mcp").join("codex.toml"))
+        .expect("codex config should be removed");
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("doctor")
+        .arg("--json")
+        .output()
+        .expect("valid doctor should run");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    assert_eq!(report["status"], "warn");
+    let scaffold = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "project_scaffold")
+        .expect("project scaffold check");
+    assert_eq!(scaffold["status"], "warn");
+    assert!(scaffold["repair_hint"]
+        .as_str()
+        .unwrap()
+        .contains("valid init --repair"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_init_repair_restores_missing_scaffold_files_without_rewriting_registry() {
+    let project_dir = unique_temp_dir("valid-cli-init-repair");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    fs::remove_file(project_dir.join(".mcp").join("codex.toml"))
+        .expect("codex config should be removed");
+    fs::remove_file(project_dir.join("docs").join("ai").join("bootstrap.md"))
+        .expect("bootstrap readme should be removed");
+    fs::write(
+        project_dir.join("valid.toml"),
+        fs::read_to_string(project_dir.join("valid.toml"))
+            .expect("valid.toml should exist")
+            .replace(
+                "registry = \"valid/registry.rs\"",
+                "registry = \"examples/alt_registry.rs\"",
+            ),
+    )
+    .expect("valid.toml should be rewritten");
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--repair")
+        .arg("--json")
+        .output()
+        .expect("valid init --repair should run");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("repair json");
+    assert_eq!(report["status"], "warn");
+    assert!(project_dir.join(".mcp").join("codex.toml").exists());
+    assert!(project_dir
+        .join("docs")
+        .join("ai")
+        .join("bootstrap.md")
+        .exists());
+    assert!(report["remaining_warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("valid.toml registry")));
+
+    let valid_toml = fs::read_to_string(project_dir.join("valid.toml")).expect("valid.toml");
+    assert!(valid_toml.contains("registry = \"examples/alt_registry.rs\""));
 
     let _ = fs::remove_dir_all(project_dir);
 }
