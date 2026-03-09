@@ -796,14 +796,15 @@ const BENCHMARK_OPTIONS: &[ArgSpec] = &[
     SOLVER_ARG_ARG,
 ];
 const MIGRATE_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, WRITE_ARG, CHECK_ARG];
+const INIT_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, CHECK_ARG];
 const VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "init",
         aliases: &[],
         description: "Create a Cargo project scaffold plus valid project layout.",
-        usage: "valid init [--json] [--progress=json]",
+        usage: "valid init [--json] [--progress=json] [--check]",
         positional: &[],
-        options: &[JSON_ARG, PROGRESS_ARG],
+        options: INIT_OPTIONS,
         request_schema: None,
         response_schema: Some(SchemaRef { id: "schema.cli.init_response", builder: init_response_schema }),
         supports_json: true,
@@ -3080,13 +3081,13 @@ fn init_response_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "schema.cli.init_response",
         "type": "object",
-        "required": ["status", "created", "registry", "scaffolded_registry", "generated_tests_dir", "root", "cargo_init_ran", "created_files", "created_directories", "skipped_existing", "model_files", "mcp_configs", "ai_bootstrap_guide", "rdd_guide"],
+        "required": ["status", "root"],
         "properties": {
-            "status": { "type": "string", "enum": ["ok"] },
+            "status": { "type": "string", "enum": ["ok", "warn", "error"] },
             "root": { "type": "string" },
             "cargo_init_ran": { "type": "boolean" },
             "created": { "type": "string" },
-            "registry": { "type": "string" },
+            "registry": { "type": ["string", "null"] },
             "scaffolded_registry": { "type": "string" },
             "generated_tests_dir": { "type": "string" },
             "artifacts_dir": { "type": "string" },
@@ -3112,7 +3113,25 @@ fn init_response_schema() -> Value {
                 "items": { "type": "string" }
             },
             "ai_bootstrap_guide": { "type": "string" },
-            "rdd_guide": { "type": "string" }
+            "rdd_guide": { "type": "string" },
+            "cargo_project_detected": { "type": "boolean" },
+            "valid_toml_detected": { "type": "boolean" },
+            "checked_paths": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "missing_paths": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "mismatched_paths": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "recommended_repairs": {
+                "type": "array",
+                "items": { "type": "string" }
+            }
         }
     })
 }

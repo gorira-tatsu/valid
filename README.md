@@ -102,7 +102,8 @@ valid init
 `valid.toml`, scaffolds a starter registry under `valid/registry.rs`, creates
 `valid/models/`, `docs/rdd/`, `generated-tests/`, `artifacts/`, and
 `benchmarks/baselines/`, and writes project-local AI/MCP bootstrap snippets
-under `.mcp/` plus `docs/ai/bootstrap.md`. `cargo valid init` remains the
+under `.mcp/` plus `docs/ai/bootstrap.md`. Run `valid init --check` later if
+you want to confirm the scaffold still matches the supported layout. `cargo valid init` remains the
 compatibility path for an already-existing Cargo project:
 
 ```toml
@@ -242,9 +243,24 @@ cargo valid handoff counter --json
 cargo valid testgen counter --json
 ```
 
+`handoff` now includes deterministic next-step guidance:
+
+- recommended vector artifact paths
+- recommended next commands
+- a normalized recommended conformance surface such as `api`, `handler`, or `ui`
+
 The current guidance for that workflow lives in
 [docs/testgen-and-handoff.md](./docs/testgen-and-handoff.md) and
 [docs/testgen-strategies.md](./docs/testgen-strategies.md).
+
+Canonical examples for the newer public surfaces:
+
+```sh
+cargo run --example compose_helper_registry
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
+cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
+```
 
 Try the legacy `.valid` path:
 

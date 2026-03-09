@@ -79,6 +79,16 @@ Keep the concrete wiring thin:
 
 That keeps the review surface explicit and test generation still understandable.
 
+Canonical example:
+
+```sh
+cargo run --example compose_helper_registry
+```
+
+That example keeps the current supported story honest: compile two small models,
+compose them with explicit sync fields, then inspect/check the composed helper
+surface directly.
+
 ## Next read
 
 - [Project Organization Guide](./project-organization.md)

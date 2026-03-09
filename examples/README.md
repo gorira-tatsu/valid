@@ -17,8 +17,17 @@ Current examples:
 
 - `valid_models.rs`
   Minimal step-first registry with `counter` and `failing-counter`.
+- `compose_helper_registry.rs`
+  Small helper-based composition example that uses `compose_models(...)`
+  directly and prints inspect/check output for the composed surface.
+- `deadlock_enablement_registry.rs`
+  Small registry for deadlock-oriented and blocked-action enablement-oriented
+  test generation.
 - `fizzbuzz.rs`
   Small declarative arithmetic model using grouped `on Action { ... }`.
+- `handoff_testgen_registry.rs`
+  Small registry that makes `handoff` and `testgen` line up around one failing
+  review gate.
 - `tenant_relation_registry.rs`
   Small declarative integration model that demonstrates the shared-state
   pattern for tenant membership plus tenant plan checks.
@@ -61,7 +70,11 @@ Typical commands:
 
 ```sh
 cargo valid --registry examples/valid_models.rs models
+cargo run --example compose_helper_registry
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
+cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 cargo valid --registry examples/password_policy.rs inspect password-policy-safe
@@ -70,13 +83,13 @@ cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```
 
-Project-first flow still scaffolds `examples/valid_models.rs`:
+Project-first flow now scaffolds `valid/registry.rs` plus `valid/models/approval.rs`:
 
 ```sh
-cargo valid init
+valid init
 cargo valid models
-cargo valid inspect counter
-cargo valid verify failing-counter
+cargo valid inspect approval-model
+cargo valid handoff approval-model
 ```
 
 Generated tests are written under `generated-tests/`, not under `tests/`.

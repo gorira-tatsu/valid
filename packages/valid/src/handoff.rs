@@ -9,7 +9,11 @@ use crate::{
         TestgenVectorSummary,
     },
     coverage::CoverageReport,
-    support::{artifact::handoff_path, hash::stable_hash_hex, io::write_text_file},
+    support::{
+        artifact::{generated_test_path, handoff_path},
+        hash::stable_hash_hex,
+        io::write_text_file,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -59,6 +63,8 @@ pub struct HandoffTestgenSummary {
     pub generated_at_strategy: String,
     pub vector_count: usize,
     pub generated_files: Vec<String>,
+    pub recommended_next_step: Option<String>,
+    pub recommended_conformance_surface: String,
     pub recommended_vectors: Vec<HandoffRecommendedVector>,
     pub error: Option<String>,
 }
@@ -73,6 +79,9 @@ pub struct HandoffRecommendedVector {
     pub oracle_targets: Vec<String>,
     pub suggested_surface: String,
     pub state_visibility: String,
+    pub artifact_paths: Vec<String>,
+    pub recommended_next_command: String,
+    pub recommended_conformance_surface: String,
     pub why_this_vector_matters: String,
 }
 
@@ -179,23 +188,37 @@ fn summarize_handoff_testgen(
     failing_properties: &[String],
 ) -> HandoffTestgenSummary {
     match response {
-        Some(response) => HandoffTestgenSummary {
-            status: "available".to_string(),
-            generated_at_strategy: response
+        Some(response) => {
+            let generated_at_strategy = response
                 .vectors
                 .first()
                 .map(|vector| vector.strategy.clone())
-                .unwrap_or_else(|| "counterexample".to_string()),
-            vector_count: response.vectors.len(),
-            generated_files: response.generated_files.clone(),
-            recommended_vectors: recommended_handoff_vectors(&response.vectors, failing_properties),
-            error: None,
-        },
+                .unwrap_or_else(|| "counterexample".to_string());
+            let recommended_vectors = recommended_handoff_vectors(
+                &response.vectors,
+                &response.generated_files,
+                failing_properties,
+            );
+            HandoffTestgenSummary {
+                status: "available".to_string(),
+                generated_at_strategy,
+                vector_count: response.vectors.len(),
+                generated_files: response.generated_files.clone(),
+                recommended_next_step: Some(recommended_next_step(&recommended_vectors)),
+                recommended_conformance_surface: summarize_conformance_surface(
+                    &recommended_vectors,
+                ),
+                recommended_vectors,
+                error: None,
+            }
+        }
         None => HandoffTestgenSummary {
             status: "unavailable".to_string(),
             generated_at_strategy: "counterexample".to_string(),
             vector_count: 0,
             generated_files: Vec::new(),
+            recommended_next_step: None,
+            recommended_conformance_surface: "mixed".to_string(),
             recommended_vectors: Vec::new(),
             error: error.map(str::to_string),
         },
@@ -204,6 +227,7 @@ fn summarize_handoff_testgen(
 
 fn recommended_handoff_vectors(
     vectors: &[TestgenVectorSummary],
+    generated_files: &[String],
     failing_properties: &[String],
 ) -> Vec<HandoffRecommendedVector> {
     let mut ordered = vectors
@@ -238,6 +262,9 @@ fn recommended_handoff_vectors(
     for (_, vector) in ordered.into_iter().take(5) {
         let mut grouping = vector.requirement_clusters.clone();
         grouping.extend(vector.risk_clusters.clone());
+        let artifact_paths = artifact_paths_for_vector(vector, generated_files);
+        let recommended_conformance_surface =
+            recommended_conformance_surface(&vector.suggested_surface).to_string();
         selected.push(HandoffRecommendedVector {
             vector_id: vector.vector_id.clone(),
             property_id: vector.property_id.clone(),
@@ -247,10 +274,74 @@ fn recommended_handoff_vectors(
             oracle_targets: vector.oracle_targets.clone(),
             suggested_surface: vector.suggested_surface.clone(),
             state_visibility: vector.state_visibility.clone(),
+            artifact_paths,
+            recommended_next_command: recommended_next_command(vector),
+            recommended_conformance_surface,
             why_this_vector_matters: why_vector_matters(vector, failing_properties),
         });
     }
     selected
+}
+
+fn artifact_paths_for_vector(
+    vector: &TestgenVectorSummary,
+    generated_files: &[String],
+) -> Vec<String> {
+    let expected = generated_test_path(&vector.vector_id);
+    if generated_files.iter().any(|path| path == &expected) {
+        vec![expected]
+    } else {
+        Vec::new()
+    }
+}
+
+fn recommended_next_command(vector: &TestgenVectorSummary) -> String {
+    if vector.strategy == "enablement" {
+        if let Some(action_id) = &vector.focus_action_id {
+            return format!(
+                "cargo valid testgen <model> --strategy=enablement --focus-action={action_id} --json"
+            );
+        }
+    }
+    if vector.strategy == "deadlock" {
+        return "cargo valid testgen <model> --strategy=deadlock --json".to_string();
+    }
+    match recommended_conformance_surface(&vector.suggested_surface) {
+        "api" => "cargo valid conformance <model> --runner <api-runner>".to_string(),
+        "ui" => "cargo valid conformance <model> --runner <ui-runner>".to_string(),
+        "handler" => "cargo valid conformance <model> --runner <handler-runner>".to_string(),
+        _ => "cargo valid testgen <model> --json".to_string(),
+    }
+}
+
+fn recommended_conformance_surface(suggested_surface: &str) -> &'static str {
+    match suggested_surface {
+        "api" => "api",
+        "ui" => "ui",
+        "handler" | "api_or_handler" => "handler",
+        _ => "external-runner",
+    }
+}
+
+fn summarize_conformance_surface(vectors: &[HandoffRecommendedVector]) -> String {
+    let mut surfaces = vectors
+        .iter()
+        .map(|vector| vector.recommended_conformance_surface.as_str())
+        .collect::<Vec<_>>();
+    surfaces.sort_unstable();
+    surfaces.dedup();
+    if surfaces.len() == 1 {
+        surfaces[0].to_string()
+    } else {
+        "mixed".to_string()
+    }
+}
+
+fn recommended_next_step(vectors: &[HandoffRecommendedVector]) -> String {
+    vectors
+        .first()
+        .map(|vector| vector.recommended_next_command.clone())
+        .unwrap_or_else(|| "cargo valid testgen <model> --json".to_string())
 }
 
 fn why_vector_matters(vector: &TestgenVectorSummary, failing_properties: &[String]) -> String {
@@ -289,16 +380,26 @@ fn section_recommended_test_vectors(summary: &HandoffTestgenSummary) -> HandoffS
             summary.generated_at_strategy,
             summary.generated_files.len()
         ));
+        bullets.push(format!(
+            "Recommended next step: `{}` on conformance surface `{}`.",
+            summary
+                .recommended_next_step
+                .as_deref()
+                .unwrap_or("cargo valid testgen <model> --json"),
+            summary.recommended_conformance_surface
+        ));
         for vector in &summary.recommended_vectors {
             bullets.push(format!(
-                "`{}` for `{}` via `{}` on `{}` [{} -> {}] because {}.",
+                "`{}` for `{}` via `{}` on `{}` [{} -> {}] because {}. Next: `{}`. Artifacts: [{}].",
                 vector.vector_id,
                 vector.property_id,
                 vector.strategy,
                 vector.suggested_surface,
                 comma_or_none(&vector.observation_layers),
                 comma_or_none(&vector.oracle_targets),
-                vector.why_this_vector_matters
+                vector.why_this_vector_matters,
+                vector.recommended_next_command,
+                comma_or_none(&vector.artifact_paths)
             ));
         }
     }
@@ -1029,7 +1130,7 @@ mod tests {
                 group_id: "property:P_SAFE".to_string(),
                 vector_ids: vec!["vec-1".to_string()],
             }],
-            generated_files: vec!["artifacts/generated-tests/vec-1.rs".to_string()],
+            generated_files: vec!["generated-tests/vec-1.rs".to_string()],
         };
         let generated = generate_handoff(HandoffInputs {
             inspect: &inspect,
@@ -1049,6 +1150,20 @@ mod tests {
         });
         assert_eq!(generated.testgen_summary.status, "available");
         assert_eq!(generated.testgen_summary.recommended_vectors.len(), 1);
+        assert_eq!(
+            generated.testgen_summary.recommended_conformance_surface,
+            "handler"
+        );
+        assert!(generated
+            .testgen_summary
+            .recommended_next_step
+            .as_deref()
+            .unwrap_or_default()
+            .contains("cargo valid conformance"));
+        assert_eq!(
+            generated.testgen_summary.recommended_vectors[0].artifact_paths,
+            vec!["generated-tests/vec-1.rs".to_string()]
+        );
         assert!(generated.markdown.contains("Recommended Test Vectors"));
         let report = check_handoff(
             "artifacts/handoff/Demo.md".to_string(),

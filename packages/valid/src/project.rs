@@ -85,6 +85,19 @@ pub struct InitScaffoldResult {
     pub rdd_guide: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InitCheckResult {
+    pub status: String,
+    pub root: String,
+    pub cargo_project_detected: bool,
+    pub valid_toml_detected: bool,
+    pub registry: Option<String>,
+    pub checked_paths: Vec<String>,
+    pub missing_paths: Vec<String>,
+    pub mismatched_paths: Vec<String>,
+    pub recommended_repairs: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ConfigSection {
     TopLevel,
@@ -331,6 +344,126 @@ pub fn scaffold_project_init(
     })
 }
 
+pub fn check_project_init(root: &Path, expected_registry: &str) -> InitCheckResult {
+    let cargo_toml = root.join("Cargo.toml");
+    let valid_toml = root.join("valid.toml");
+    let expected_paths = [
+        root.join(expected_registry),
+        root.join("valid").join("models").join("mod.rs"),
+        root.join("valid").join("models").join("approval.rs"),
+        root.join(".mcp").join("codex.toml"),
+        root.join(".mcp").join("claude-code.json"),
+        root.join(".mcp").join("claude-desktop.json"),
+        root.join("docs").join("ai").join("bootstrap.md"),
+        root.join("docs").join("rdd").join("README.md"),
+        root.join("generated-tests"),
+        root.join("artifacts"),
+        root.join("benchmarks").join("baselines"),
+    ];
+
+    let mut checked_paths = vec![
+        cargo_toml.display().to_string(),
+        valid_toml.display().to_string(),
+    ];
+    checked_paths.extend(expected_paths.iter().map(|path| path.display().to_string()));
+
+    let cargo_project_detected = cargo_toml.exists();
+    let valid_toml_detected = valid_toml.exists();
+    let mut missing_paths = Vec::new();
+    let mut mismatched_paths = Vec::new();
+    let mut recommended_repairs = Vec::new();
+    let mut registry = None;
+
+    if !cargo_project_detected {
+        missing_paths.push(cargo_toml.display().to_string());
+        recommended_repairs
+            .push("Run `valid init` from the project root to create Cargo.toml.".to_string());
+    }
+    if !valid_toml_detected {
+        missing_paths.push(valid_toml.display().to_string());
+        recommended_repairs.push(
+            "Run `valid init` to scaffold valid.toml and the standard valid layout.".to_string(),
+        );
+    } else {
+        match load_project_config(root) {
+            Ok(Some(config)) => {
+                registry = config.registry.clone();
+                match config.registry.as_deref() {
+                    Some(path) if path == expected_registry => {}
+                    Some(path) => {
+                        mismatched_paths.push(format!(
+                            "valid.toml registry = {:?}; expected {:?}",
+                            path, expected_registry
+                        ));
+                        recommended_repairs.push(format!(
+                            "Update `valid.toml` so `registry = {:?}` for the scaffolded layout.",
+                            expected_registry
+                        ));
+                    }
+                    None => {
+                        mismatched_paths.push("valid.toml does not set `registry`".to_string());
+                        recommended_repairs.push(format!(
+                            "Set `registry = {:?}` in valid.toml.",
+                            expected_registry
+                        ));
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                mismatched_paths.push(format!("valid.toml could not be parsed: {error}"));
+                recommended_repairs
+                    .push("Repair valid.toml so the scaffold can be read again.".to_string());
+            }
+        }
+    }
+
+    for path in expected_paths {
+        if !path.exists() {
+            missing_paths.push(path.display().to_string());
+        }
+    }
+    if missing_paths
+        .iter()
+        .any(|path| path.ends_with("valid/registry.rs"))
+    {
+        recommended_repairs.push(
+            "Restore `valid/registry.rs` or rerun `valid init` in a fresh directory.".to_string(),
+        );
+    }
+    if missing_paths
+        .iter()
+        .any(|path| path.ends_with("docs/ai/bootstrap.md"))
+    {
+        recommended_repairs.push(
+            "Restore `docs/ai/bootstrap.md` to keep the onboarding guide available.".to_string(),
+        );
+    }
+    if missing_paths.iter().any(|path| path.contains(".mcp/")) {
+        recommended_repairs.push("Restore the `.mcp/` snippets so local AI clients can attach with `valid mcp --project .`.".to_string());
+    }
+
+    let status = if !mismatched_paths.is_empty() {
+        "error"
+    } else if !missing_paths.is_empty() {
+        "warn"
+    } else {
+        "ok"
+    };
+
+    InitCheckResult {
+        status: status.to_string(),
+        root: root.display().to_string(),
+        cargo_project_detected,
+        valid_toml_detected,
+        registry,
+        checked_paths,
+        missing_paths,
+        mismatched_paths,
+        recommended_repairs,
+    }
+}
+
 pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRecommendations {
     let affected_critical_properties = config
         .critical_properties
@@ -484,13 +617,13 @@ pub fn render_registry_model_template() -> String {
     r#"use valid::{valid_actions, valid_model, valid_state};
 
 valid_state! {
-    pub struct State {
+    struct State {
         approved: bool,
     }
 }
 
 valid_actions! {
-    pub enum Action {
+    enum Action {
         Approve => "APPROVE" [reads = ["approved"], writes = ["approved"]],
     }
 }
@@ -576,11 +709,12 @@ Recommended first steps:
 
 1. Run `cargo valid models` to confirm the registry loads.
 2. Run `cargo valid inspect approval-model`.
-3. Review `valid.toml` and set:
+3. Run `cargo valid handoff approval-model`.
+4. Review `valid.toml` and set:
    - `suite_models`
    - `critical_properties`
    - `property_suites`
-4. Copy one of the MCP snippets from `.mcp/` into your client config.
+5. Copy one of the MCP snippets from `.mcp/` into your client config.
 
 Generated bootstrap files:
 
@@ -596,6 +730,20 @@ valid mcp --project .
 
 That avoids hard-coded local build paths and lets the MCP server discover
 `valid.toml` and the registry target from the current project.
+
+Where files go:
+
+- add new models under `valid/models/`
+- keep the registry entrypoint in `valid/registry.rs`
+- generated test specs go under `generated-tests/`
+- run history and reports go under `artifacts/`
+- RDD notes stay in `docs/rdd/`
+
+When the scaffold stops being enough:
+
+- keep the project-first layout
+- split real workflows into more model files under `valid/models/`
+- update `valid/registry.rs` to export only the models you want to review together
 "#
     .to_string()
 }
@@ -889,14 +1037,15 @@ fn parse_u32(input: &str, line: usize) -> Result<u32, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, fs};
 
     use super::{
-        parse_project_config, render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
-        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
-        render_project_config_template, render_registry_source_template, rerun_recommendations,
-        verification_policy, CoverageGates, ProjectConfig, PropertySuiteEntry,
-        RerunRecommendations, RerunSuggestion, VerificationPolicy,
+        check_project_init, parse_project_config, render_bootstrap_ai_readme,
+        render_bootstrap_claude_code_config, render_bootstrap_claude_desktop_config,
+        render_bootstrap_codex_config, render_project_config_template,
+        render_registry_source_template, rerun_recommendations, verification_policy, CoverageGates,
+        ProjectConfig, PropertySuiteEntry, RerunRecommendations, RerunSuggestion,
+        VerificationPolicy,
     };
 
     #[test]
@@ -1128,5 +1277,39 @@ default_graph_format = "mermaid"
                 },
             }
         );
+    }
+
+    #[test]
+    fn bootstrap_ai_readme_mentions_first_run_sequence() {
+        let guide = render_bootstrap_ai_readme();
+        assert!(guide.contains("cargo valid models"));
+        assert!(guide.contains("cargo valid inspect approval-model"));
+        assert!(guide.contains("cargo valid handoff approval-model"));
+        assert!(guide.contains("generated-tests/"));
+        assert!(guide.contains("artifacts/"));
+    }
+
+    #[test]
+    fn init_check_reports_missing_registry_as_warning() {
+        let root = std::env::temp_dir().join(format!("valid-init-check-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp dir");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("cargo toml");
+        fs::write(
+            root.join("valid.toml"),
+            "registry = \"valid/registry.rs\"\n",
+        )
+        .expect("valid toml");
+        let report = check_project_init(&root, "valid/registry.rs");
+        assert_eq!(report.status, "warn");
+        assert!(report
+            .missing_paths
+            .iter()
+            .any(|path| path.ends_with("valid/registry.rs")));
+        let _ = fs::remove_dir_all(&root);
     }
 }

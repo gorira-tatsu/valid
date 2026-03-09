@@ -257,6 +257,12 @@ fn target_from_file(manifest_path: Option<String>, file: &str) -> Result<Externa
         || normalized == format!("benchmarks/registries/{stem}.rs")
     {
         ExternalTargetKind::Example
+    } else if normalized.ends_with("/valid/registry.rs") || normalized == "valid/registry.rs" {
+        return Ok(ExternalTarget {
+            manifest_path: manifest_path.clone(),
+            kind: ExternalTargetKind::Bin,
+            name: bin_target_name_from_manifest(manifest_path.as_deref())?,
+        });
     } else if normalized.ends_with(&format!("/src/bin/{stem}.rs"))
         || normalized == format!("src/bin/{stem}.rs")
     {
@@ -272,6 +278,38 @@ fn target_from_file(manifest_path: Option<String>, file: &str) -> Result<Externa
         kind,
         name: stem.to_string(),
     })
+}
+
+fn bin_target_name_from_manifest(manifest_path: Option<&str>) -> Result<String, String> {
+    let manifest_path = manifest_path
+        .ok_or_else(|| "`valid/registry.rs` requires a Cargo manifest path".to_string())?;
+    let body = std::fs::read_to_string(manifest_path)
+        .map_err(|err| format!("failed to read manifest `{manifest_path}`: {err}"))?;
+    let mut in_package = false;
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "name" {
+            continue;
+        }
+        let value = value.trim().trim_matches('"');
+        if value.is_empty() {
+            break;
+        }
+        return Ok(value.to_string());
+    }
+    Err(format!(
+        "failed to determine package binary name from manifest `{manifest_path}`"
+    ))
 }
 
 #[cfg(test)]
@@ -292,6 +330,34 @@ mod tests {
         .unwrap();
         assert_eq!(target.kind, ExternalTargetKind::Example);
         assert_eq!(target.name, "valid_models");
+    }
+
+    #[test]
+    fn resolves_scaffold_registry_file_to_package_bin() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("valid-external-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("valid")).expect("temp dir");
+        let manifest = temp_dir.join("Cargo.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = \"scaffold-demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .expect("manifest");
+        let target = resolve_external_target(&ExternalTargetOptions {
+            manifest_path: Some(manifest.to_string_lossy().to_string()),
+            file: Some(
+                temp_dir
+                    .join("valid/registry.rs")
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            ..ExternalTargetOptions::default()
+        })
+        .unwrap();
+        assert_eq!(target.kind, ExternalTargetKind::Bin);
+        assert_eq!(target.name, "scaffold-demo");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

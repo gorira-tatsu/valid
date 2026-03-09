@@ -50,6 +50,12 @@ recommended generated vectors for the current model/property scope. Treat that
 summary as the shortlist for implementation-facing tests, and use
 `valid_testgen` when you need the full vector bodies or generated artifacts.
 
+The summary now also carries:
+
+- `artifact_paths`
+- `recommended_next_command`
+- `recommended_conformance_surface`
+
 Recommended order for implementation handoff:
 
 1. `valid_handoff`

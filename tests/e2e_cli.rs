@@ -25,6 +25,10 @@ fn binary_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_valid"))
 }
 
+fn cargo_valid_binary_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_cargo-valid"))
+}
+
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -37,6 +41,20 @@ fn cleanup_generated_files(paths: &[String]) {
     for path in paths {
         let _ = fs::remove_file(path);
     }
+}
+
+fn rewrite_valid_dependency_to_local_path(project_dir: &Path) {
+    let cargo_toml_path = project_dir.join("Cargo.toml");
+    let cargo_toml = fs::read_to_string(&cargo_toml_path).expect("Cargo.toml must exist");
+    let local = format!(
+        "valid = {{ path = {:?}, features = [\"verification-runtime\"] }}",
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    );
+    let rewritten = cargo_toml.replace(
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }",
+        &local,
+    );
+    fs::write(cargo_toml_path, rewritten).expect("Cargo.toml should be rewritten");
 }
 
 #[test]
@@ -1190,6 +1208,99 @@ fn cli_init_preserves_existing_main() {
     assert!(cargo_toml.contains(
         "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }"
     ));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_init_check_reports_ok_for_fresh_scaffold() {
+    let project_dir = unique_temp_dir("valid-cli-init-check");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    let check = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("valid init --check should run");
+    assert!(check.status.success());
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(stdout.contains("\"status\":\"ok\""));
+    assert!(stdout.contains("\"cargo_project_detected\":true"));
+    assert!(stdout.contains("\"valid_toml_detected\":true"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_init_check_reports_missing_scaffold_files() {
+    let project_dir = unique_temp_dir("valid-cli-init-check-missing");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+    fs::remove_file(project_dir.join("valid").join("registry.rs"))
+        .expect("registry should be removed");
+
+    let check = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--check")
+        .arg("--json")
+        .output()
+        .expect("valid init --check should run");
+    assert!(check.status.success());
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(stdout.contains("\"status\":\"warn\""));
+    assert!(stdout.contains("valid/registry.rs"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_init_generated_project_reaches_cargo_valid_models() {
+    let project_dir = unique_temp_dir("valid-cli-init-smoke");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    rewrite_valid_dependency_to_local_path(&project_dir);
+    let output = Command::new(cargo_valid_binary_path())
+        .current_dir(&project_dir)
+        .env("CARGO_NET_OFFLINE", "true")
+        .arg("models")
+        .output()
+        .expect("cargo-valid models should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

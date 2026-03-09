@@ -60,6 +60,13 @@ cargo valid testgen <model> --strategy=enablement --focus-action=<action-id>
 cargo valid testgen <model> --strategy=guard
 ```
 
+Canonical example registry:
+
+```sh
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
+cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
+```
+
 Use `--json` when you want the complete machine-readable vector contract.
 
 ## Which strategy should I use first?

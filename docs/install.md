@@ -113,8 +113,9 @@ Then use:
 
 ```sh
 cargo valid models
-cargo valid inspect counter
-cargo valid verify failing-counter
+cargo valid inspect approval-model
+cargo valid handoff approval-model
+valid init --check
 ```
 
 If you want embedded SAT, use it on a small boolean declarative model:

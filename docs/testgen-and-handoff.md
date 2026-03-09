@@ -68,10 +68,20 @@ Each recommended vector includes:
 - `oracle_targets`
 - `suggested_surface`
 - `state_visibility`
+- `artifact_paths`
+- `recommended_next_command`
+- `recommended_conformance_surface`
 - `why_this_vector_matters`
 
 Use `handoff` when you want a brief. Use `testgen` when you need the full JSON
 or generated artifacts.
+
+Canonical example:
+
+```sh
+cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
+cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
+```
 
 ## Recommended command flow
 

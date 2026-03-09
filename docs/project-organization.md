@@ -20,6 +20,9 @@ Related documents:
 Use these as the default unless you have a clear reason to deviate. `valid init`
 now scaffolds this project-first shape by default.
 
+Run `valid init --check` when you want a read-only validation pass over the
+scaffolded layout.
+
 - keep one model per file
 - keep registry files thin
 - keep shared enums, state helpers, and domain vocabulary in separate modules

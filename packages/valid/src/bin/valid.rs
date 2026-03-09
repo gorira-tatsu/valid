@@ -50,7 +50,9 @@ use valid::{
         HandoffInputs,
     },
     mcp::{serve_stdio, ServerConfig},
-    project::{load_project_config, rerun_recommendations, scaffold_project_init},
+    project::{
+        check_project_init, load_project_config, rerun_recommendations, scaffold_project_init,
+    },
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
@@ -74,7 +76,7 @@ struct ValidCli {
 
 #[derive(Subcommand, Debug)]
 enum ValidCommand {
-    Init(JsonProgressArgs),
+    Init(InitArgs),
     #[command(alias = "verify")]
     Check(CommonModelArgs),
     Inspect(ModelPathArgs),
@@ -124,6 +126,16 @@ struct JsonProgressArgs {
     json: bool,
     #[arg(long = "progress", default_value = None)]
     progress: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct InitArgs {
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+    #[arg(long = "progress", default_value = None)]
+    progress: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    check: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -620,7 +632,7 @@ fn cmd_commands_from_parsed(args: JsonOnlyArgs) {
         Vec::new()
     });
 }
-fn cmd_init_from_parsed(args: JsonProgressArgs) {
+fn cmd_init_from_parsed(args: InitArgs) {
     let progress = ProgressReporter::new("init", args.progress.as_deref() == Some("json"));
     progress.start(None);
     let root = env::current_dir().unwrap_or_else(|error| {
@@ -631,6 +643,42 @@ fn cmd_init_from_parsed(args: JsonProgressArgs) {
             None,
         )
     });
+    if args.check {
+        let report = check_project_init(&root, "valid/registry.rs");
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string(&report).expect("init check json should serialize")
+            );
+        } else {
+            println!("status: {}", report.status);
+            println!("root: {}", report.root);
+            println!("cargo_project_detected: {}", report.cargo_project_detected);
+            println!("valid_toml_detected: {}", report.valid_toml_detected);
+            println!(
+                "registry: {}",
+                report.registry.as_deref().unwrap_or("<missing>")
+            );
+            if !report.missing_paths.is_empty() {
+                println!("missing_paths: {}", report.missing_paths.join(", "));
+            }
+            if !report.mismatched_paths.is_empty() {
+                println!("mismatched_paths: {}", report.mismatched_paths.join(", "));
+            }
+            if !report.recommended_repairs.is_empty() {
+                println!(
+                    "recommended_repairs: {}",
+                    report.recommended_repairs.join(" | ")
+                );
+            }
+        }
+        let exit = match report.status.as_str() {
+            "error" => ExitCode::Error,
+            _ => ExitCode::Success,
+        };
+        progress.finish(exit);
+        process::exit(exit.code());
+    }
     let cargo_toml = root.join("Cargo.toml");
     let cargo_init_ran = if cargo_toml.exists() {
         false

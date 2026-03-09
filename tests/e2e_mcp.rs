@@ -440,6 +440,11 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
         .expect("examples should be present")
         .iter()
         .any(|item| item["example_id"] == "registry-counter-basics"));
+    assert!(examples["examples"]
+        .as_array()
+        .expect("examples should be present")
+        .iter()
+        .any(|item| item["example_id"] == "handoff-testgen-alignment"));
 
     let counter_example = structured_content(client.call_tool(
         "valid_example_get",
@@ -465,6 +470,12 @@ fn valid_mcp_lists_tools_and_executes_dsl_mode() {
     assert_eq!(handoff["testgen_summary"]["status"], "available");
     assert!(handoff["testgen_summary"]["vector_count"]
         .as_u64()
+        .is_some());
+    assert!(handoff["testgen_summary"]["recommended_next_step"]
+        .as_str()
+        .is_some());
+    assert!(handoff["testgen_summary"]["recommended_conformance_surface"]
+        .as_str()
         .is_some());
     assert!(handoff["markdown"]
         .as_str()

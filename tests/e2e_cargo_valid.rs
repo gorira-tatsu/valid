@@ -54,6 +54,18 @@ fn password_policy_registry_file() -> PathBuf {
         .join("password_policy.rs")
 }
 
+fn deadlock_enablement_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("deadlock_enablement_registry.rs")
+}
+
+fn handoff_testgen_registry_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("handoff_testgen_registry.rs")
+}
+
 fn cleanup_generated_files(stdout: &str) {
     for path in stdout
         .split('"')
@@ -915,6 +927,8 @@ fn cargo_valid_handoff_check_reports_drift() {
     let first_stdout = String::from_utf8_lossy(&first.stdout);
     assert!(first_stdout.contains("\"model_id\":\"CounterModel\""));
     assert!(first_stdout.contains("\"testgen_summary\""));
+    assert!(first_stdout.contains("\"recommended_next_step\""));
+    assert!(first_stdout.contains("\"recommended_conformance_surface\""));
     assert!(first_stdout.contains("Recommended Test Vectors"));
     assert!(first_stdout.contains("\"markdown\""));
 
@@ -952,6 +966,92 @@ fn cargo_valid_handoff_check_reports_drift() {
     assert!(stdout.contains("\"status\":\"changed\""));
     assert!(stdout.contains("\"drift_sections\""));
     let _ = fs::remove_file(output_path);
+}
+
+#[test]
+fn cargo_valid_testgen_supports_deadlock_and_enablement_example_registry() {
+    let _guard = cargo_guard();
+    let deadlock = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(deadlock_enablement_registry_file())
+        .arg("testgen")
+        .arg("deadlock-terminal")
+        .arg("--strategy=deadlock")
+        .arg("--json")
+        .output()
+        .expect("deadlock example should run");
+    assert!(deadlock.status.success());
+    let deadlock_stdout = String::from_utf8_lossy(&deadlock.stdout);
+    assert!(deadlock_stdout.contains("\"strategy\":\"deadlock\""));
+    assert!(deadlock_stdout.contains("\"risk_clusters\":[\"risk_path\"]"));
+
+    let enablement = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(deadlock_enablement_registry_file())
+        .arg("testgen")
+        .arg("blocked-recovery")
+        .arg("--strategy=enablement")
+        .arg("--focus-action=RECOVER")
+        .arg("--json")
+        .output()
+        .expect("enablement example should run");
+    assert!(enablement.status.success());
+    let enablement_stdout = String::from_utf8_lossy(&enablement.stdout);
+    assert!(enablement_stdout.contains("\"strategy\":\"enablement\""));
+    assert!(enablement_stdout.contains("\"focus_action_id\":\"RECOVER\""));
+}
+
+#[test]
+fn cargo_valid_handoff_example_aligns_with_testgen_summary() {
+    let _guard = cargo_guard();
+    let handoff = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(handoff_testgen_registry_file())
+        .arg("handoff")
+        .arg("review-gate-regression")
+        .arg("--json")
+        .output()
+        .expect("handoff example should run");
+    assert!(handoff.status.success());
+    let handoff_stdout = String::from_utf8_lossy(&handoff.stdout);
+    assert!(handoff_stdout.contains("\"property_id\":\"P_PUBLISH_REQUIRES_REVIEW\""));
+    assert!(handoff_stdout.contains("\"risk_path\""));
+    assert!(handoff_stdout.contains("\"artifact_paths\""));
+
+    let testgen = Command::new(cargo_valid_path())
+        .arg("--registry")
+        .arg(handoff_testgen_registry_file())
+        .arg("testgen")
+        .arg("review-gate-regression")
+        .arg("--strategy=counterexample")
+        .arg("--json")
+        .output()
+        .expect("testgen example should run");
+    assert!(testgen.status.success());
+    let testgen_stdout = String::from_utf8_lossy(&testgen.stdout);
+    assert!(testgen_stdout.contains("\"property_id\":\"P_PUBLISH_REQUIRES_REVIEW\""));
+    assert!(testgen_stdout.contains("\"risk_clusters\":[\"risk_path\"]"));
+}
+
+#[test]
+fn compose_helper_example_runs() {
+    let _guard = cargo_guard();
+    let output = Command::new("cargo")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("run")
+        .arg("--example")
+        .arg("compose_helper_registry")
+        .arg("--quiet")
+        .output()
+        .expect("compose helper example should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"model_id\":\"Approval+Fulfillment\""));
+    assert!(stdout.contains("Completed"));
 }
 
 #[test]
