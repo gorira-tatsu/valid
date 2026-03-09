@@ -7,7 +7,7 @@ stateful workflow rules. The main path is:
 
 1. Write a model in Rust
 2. Export it through a small registry file
-3. Run `cargo valid init` once for a new project
+3. Run `valid init` once for a new project
 4. Use `cargo valid` from the project root
 
 `.valid` files still work, but they are now the compatibility path rather than
@@ -79,17 +79,18 @@ Initialize a project once:
 
 ```sh
 cargo install --path . --features varisat-backend
-cargo valid init
+valid init
 ```
 
-`cargo valid init` creates a minimal `valid.toml`, scaffolds a starter
-registry file under `examples/valid_models.rs`, creates the default
-`generated-tests/`, `artifacts/`, and `benchmarks/baselines/` directories, and
-writes project-local AI/MCP bootstrap snippets under `.mcp/` plus
-`docs/ai/bootstrap.md`:
+`valid init` creates or bootstraps a Cargo binary project, writes a minimal
+`valid.toml`, scaffolds a starter registry under `valid/registry.rs`, creates
+`valid/models/`, `docs/rdd/`, `generated-tests/`, `artifacts/`, and
+`benchmarks/baselines/`, and writes project-local AI/MCP bootstrap snippets
+under `.mcp/` plus `docs/ai/bootstrap.md`. `cargo valid init` remains the
+compatibility path for an already-existing Cargo project:
 
 ```toml
-registry = "examples/valid_models.rs"
+registry = "valid/registry.rs"
 default_backend = "explicit"
 default_property = ""
 default_solver_executable = ""
@@ -336,7 +337,7 @@ valid mcp --project /absolute/path/to/project --locked --offline
 valid mcp --project /absolute/path/to/project --feature varisat-backend
 ```
 
-Fresh `cargo valid init` projects now also include local snippets at:
+Fresh `valid init` projects now also include local snippets at:
 
 - `.mcp/codex.toml`
 - `.mcp/claude-code.json`
@@ -486,7 +487,7 @@ The generated completions are dynamic:
 Examples:
 
 ```sh
-cargo valid init
+valid init
 cargo valid models
 cargo valid inspect counter
 cargo valid graph counter

@@ -44,12 +44,7 @@ use valid::{
         render_handoff_check_text, render_handoff_json, render_handoff_text, write_handoff,
         HandoffInputs,
     },
-    project::{
-        render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
-        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
-        render_project_config_template, render_registry_source_template, verification_policy,
-        ProjectConfig,
-    },
+    project::{scaffold_project_init, verification_policy, ProjectConfig},
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
@@ -2613,201 +2608,29 @@ fn cmd_init(parsed: &CliArgs) -> ! {
             None,
         );
     }
-    let config_path = root.join("valid.toml");
-    if config_path.exists() {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("`{}` already exists", config_path.display()),
-            None,
-        );
-    }
-    let registry = parsed.file.as_deref().unwrap_or("examples/valid_models.rs");
-    let body = render_project_config_template(registry);
-    let registry_path = root.join(registry);
-    if let Some(parent) = registry_path.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|err| {
-            message_exit(
-                "init",
-                parsed.json,
-                &format!("failed to create `{}`: {err}", parent.display()),
-                None,
-            )
-        });
-    }
-    if !registry_path.exists() {
-        fs::write(&registry_path, render_registry_source_template()).unwrap_or_else(|err| {
-            message_exit(
-                "init",
-                parsed.json,
-                &format!("failed to write `{}`: {err}", registry_path.display()),
-                None,
-            )
-        });
-    }
-    let generated_dir = root.join("generated-tests");
-    fs::create_dir_all(&generated_dir).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to create `{}`: {err}", generated_dir.display()),
-            None,
-        )
-    });
-    let gitkeep = generated_dir.join(".gitkeep");
-    if !gitkeep.exists() {
-        fs::write(&gitkeep, "").unwrap_or_else(|err| {
-            message_exit(
-                "init",
-                parsed.json,
-                &format!("failed to write `{}`: {err}", gitkeep.display()),
-                None,
-            )
-        });
-    }
-    let artifacts_dir = root.join("artifacts");
-    fs::create_dir_all(&artifacts_dir).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to create `{}`: {err}", artifacts_dir.display()),
-            None,
-        )
-    });
-    let artifacts_gitkeep = artifacts_dir.join(".gitkeep");
-    if !artifacts_gitkeep.exists() {
-        fs::write(&artifacts_gitkeep, "").unwrap_or_else(|err| {
-            message_exit(
-                "init",
-                parsed.json,
-                &format!("failed to write `{}`: {err}", artifacts_gitkeep.display()),
-                None,
-            )
-        });
-    }
-    let benchmark_baseline_dir = root.join("benchmarks").join("baselines");
-    fs::create_dir_all(&benchmark_baseline_dir).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!(
-                "failed to create `{}`: {err}",
-                benchmark_baseline_dir.display()
-            ),
-            None,
-        )
-    });
-    let baseline_gitkeep = benchmark_baseline_dir.join(".gitkeep");
-    if !baseline_gitkeep.exists() {
-        fs::write(&baseline_gitkeep, "").unwrap_or_else(|err| {
-            message_exit(
-                "init",
-                parsed.json,
-                &format!("failed to write `{}`: {err}", baseline_gitkeep.display()),
-                None,
-            )
-        });
-    }
-    let mcp_dir = root.join(".mcp");
-    fs::create_dir_all(&mcp_dir).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to create `{}`: {err}", mcp_dir.display()),
-            None,
-        )
-    });
-    let codex_config = mcp_dir.join("codex.toml");
-    fs::write(&codex_config, render_bootstrap_codex_config()).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to write `{}`: {err}", codex_config.display()),
-            None,
-        )
-    });
-    let claude_code_config = mcp_dir.join("claude-code.json");
-    fs::write(&claude_code_config, render_bootstrap_claude_code_config()).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to write `{}`: {err}", claude_code_config.display()),
-            None,
-        )
-    });
-    let claude_desktop_config = mcp_dir.join("claude-desktop.json");
-    fs::write(
-        &claude_desktop_config,
-        render_bootstrap_claude_desktop_config(),
-    )
-    .unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!(
-                "failed to write `{}`: {err}",
-                claude_desktop_config.display()
-            ),
-            None,
-        )
-    });
-    let docs_ai_dir = root.join("docs").join("ai");
-    fs::create_dir_all(&docs_ai_dir).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to create `{}`: {err}", docs_ai_dir.display()),
-            None,
-        )
-    });
-    let bootstrap_readme = docs_ai_dir.join("bootstrap.md");
-    fs::write(&bootstrap_readme, render_bootstrap_ai_readme()).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to write `{}`: {err}", bootstrap_readme.display()),
-            None,
-        )
-    });
-    fs::write(&config_path, body).unwrap_or_else(|err| {
-        message_exit(
-            "init",
-            parsed.json,
-            &format!("failed to write `{}`: {err}", config_path.display()),
-            None,
-        )
-    });
+    let registry = parsed.file.as_deref().unwrap_or("valid/registry.rs");
+    let result = scaffold_project_init(&root, registry, false)
+        .unwrap_or_else(|message| message_exit("init", parsed.json, &message, None));
     if parsed.json {
         println!(
-            "{{\"status\":\"ok\",\"created\":\"{}\",\"registry\":\"{}\",\"scaffolded_registry\":\"{}\",\"generated_tests_dir\":\"{}\",\"artifacts_dir\":\"{}\",\"benchmarks_baseline_dir\":\"{}\",\"mcp_configs\":[\"{}\",\"{}\",\"{}\"],\"ai_bootstrap_guide\":\"{}\"}}",
-            config_path.display(),
-            registry,
-            registry_path.display(),
-            generated_dir.display(),
-            artifacts_dir.display(),
-            benchmark_baseline_dir.display(),
-            codex_config.display(),
-            claude_code_config.display(),
-            claude_desktop_config.display(),
-            bootstrap_readme.display(),
+            "{}",
+            serde_json::to_string(&result).expect("init result json should serialize")
         );
     } else {
-        println!("created: {}", config_path.display());
-        println!("registry: {registry}");
-        println!("scaffolded_registry: {}", registry_path.display());
-        println!("generated_tests_dir: {}", generated_dir.display());
-        println!("artifacts_dir: {}", artifacts_dir.display());
+        println!("created: {}", result.created);
+        println!("registry: {}", result.scaffolded_registry);
+        println!("generated_tests_dir: {}", result.generated_tests_dir);
+        println!("artifacts_dir: {}", result.artifacts_dir);
         println!(
             "benchmarks_baseline_dir: {}",
-            benchmark_baseline_dir.display()
+            result.benchmarks_baseline_dir
         );
-        println!("mcp_config_codex: {}", codex_config.display());
-        println!("mcp_config_claude_code: {}", claude_code_config.display());
-        println!(
-            "mcp_config_claude_desktop: {}",
-            claude_desktop_config.display()
-        );
-        println!("ai_bootstrap_guide: {}", bootstrap_readme.display());
+        println!("docs_rdd: {}", result.rdd_guide);
+        println!("ai_bootstrap_guide: {}", result.ai_bootstrap_guide);
+        println!("mcp_configs: {}", result.mcp_configs.join(", "));
+        if !result.skipped_existing.is_empty() {
+            println!("skipped_existing: {}", result.skipped_existing.join(", "));
+        }
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());

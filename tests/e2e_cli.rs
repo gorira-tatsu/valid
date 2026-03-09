@@ -1104,6 +1104,97 @@ fn cli_can_install_shell_completions() {
 }
 
 #[test]
+fn cli_init_bootstraps_new_project() {
+    let project_dir = unique_temp_dir("valid-cli-init");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"ok\""));
+    assert!(stdout.contains("\"cargo_init_ran\":true"));
+    assert!(stdout.contains("\"registry\":\"valid/registry.rs\""));
+    assert!(project_dir.join("Cargo.toml").exists());
+    assert!(project_dir.join("src").join("main.rs").exists());
+    assert!(project_dir.join("valid").join("registry.rs").exists());
+    assert!(project_dir
+        .join("valid")
+        .join("models")
+        .join("mod.rs")
+        .exists());
+    assert!(project_dir
+        .join("valid")
+        .join("models")
+        .join("approval.rs")
+        .exists());
+    assert!(project_dir
+        .join("docs")
+        .join("rdd")
+        .join("README.md")
+        .exists());
+
+    let main_rs =
+        fs::read_to_string(project_dir.join("src").join("main.rs")).expect("main.rs must exist");
+    let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).expect("Cargo.toml");
+    assert!(main_rs.contains("#[path = \"../valid/registry.rs\"]"));
+    assert!(main_rs.contains("valid_registry::run()"));
+    assert!(cargo_toml.contains(
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }"
+    ));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_init_preserves_existing_main() {
+    let project_dir = unique_temp_dir("valid-cli-init-existing");
+    fs::create_dir_all(project_dir.join("src")).expect("src dir should exist");
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        "[package]\nname = \"valid-init-existing\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .expect("Cargo.toml");
+    fs::write(
+        project_dir.join("src").join("main.rs"),
+        "fn main() { println!(\"custom\"); }\n",
+    )
+    .expect("main.rs");
+
+    let output = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"cargo_init_ran\":false"));
+    assert!(stdout.contains("src/main.rs"));
+
+    let main_rs =
+        fs::read_to_string(project_dir.join("src").join("main.rs")).expect("main.rs must exist");
+    let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).expect("Cargo.toml");
+    assert_eq!(main_rs, "fn main() { println!(\"custom\"); }\n");
+    assert!(cargo_toml.contains(
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }"
+    ));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
 fn cli_json_errors_go_to_stderr() {
     let missing = repo_path("tests/fixtures/models/does-not-exist.valid");
     let output = Command::new(binary_path())

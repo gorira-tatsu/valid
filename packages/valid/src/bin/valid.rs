@@ -50,7 +50,7 @@ use valid::{
         HandoffInputs,
     },
     mcp::{serve_stdio, ServerConfig},
-    project::{load_project_config, rerun_recommendations},
+    project::{load_project_config, rerun_recommendations, scaffold_project_init},
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
@@ -74,6 +74,7 @@ struct ValidCli {
 
 #[derive(Subcommand, Debug)]
 enum ValidCommand {
+    Init(JsonProgressArgs),
     #[command(alias = "verify")]
     Check(CommonModelArgs),
     Inspect(ModelPathArgs),
@@ -354,6 +355,7 @@ fn main() {
         }
     };
     match cli.command {
+        Some(ValidCommand::Init(args)) => cmd_init_from_parsed(args),
         Some(ValidCommand::Check(args)) => cmd_check_from_parsed(common_to_parsed(args)),
         Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
@@ -389,7 +391,7 @@ fn main() {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
+                "usage: valid <init|inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
             );
         }
     }
@@ -617,6 +619,77 @@ fn cmd_commands_from_parsed(args: JsonOnlyArgs) {
     } else {
         Vec::new()
     });
+}
+fn cmd_init_from_parsed(args: JsonProgressArgs) {
+    let progress = ProgressReporter::new("init", args.progress.as_deref() == Some("json"));
+    progress.start(None);
+    let root = env::current_dir().unwrap_or_else(|error| {
+        message_exit(
+            "init",
+            args.json,
+            &format!("failed to resolve current directory: {error}"),
+            None,
+        )
+    });
+    let cargo_toml = root.join("Cargo.toml");
+    let cargo_init_ran = if cargo_toml.exists() {
+        false
+    } else {
+        let output = Command::new("cargo")
+            .arg("init")
+            .arg("--bin")
+            .arg(".")
+            .current_dir(&root)
+            .output()
+            .unwrap_or_else(|error| {
+                message_exit(
+                    "init",
+                    args.json,
+                    &format!("failed to run `cargo init --bin .`: {error}"),
+                    None,
+                )
+            });
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = stderr.trim();
+            let fallback = stdout.trim();
+            let message = if !detail.is_empty() { detail } else { fallback };
+            message_exit(
+                "init",
+                args.json,
+                &format!("`cargo init --bin .` failed: {message}"),
+                None,
+            );
+        }
+        true
+    };
+    let result = scaffold_project_init(&root, "valid/registry.rs", cargo_init_ran)
+        .unwrap_or_else(|message| message_exit("init", args.json, &message, None));
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string(&result).expect("init result json should serialize")
+        );
+    } else {
+        println!("root: {}", result.root);
+        println!("cargo_init_ran: {}", result.cargo_init_ran);
+        println!("created: {}", result.created);
+        println!("registry: {}", result.scaffolded_registry);
+        println!("generated_tests_dir: {}", result.generated_tests_dir);
+        println!("artifacts_dir: {}", result.artifacts_dir);
+        println!(
+            "benchmarks_baseline_dir: {}",
+            result.benchmarks_baseline_dir
+        );
+        println!("docs_rdd: {}", result.rdd_guide);
+        println!("ai_bootstrap_guide: {}", result.ai_bootstrap_guide);
+        if !result.skipped_existing.is_empty() {
+            println!("skipped_existing: {}", result.skipped_existing.join(", "));
+        }
+    }
+    progress.finish(ExitCode::Success);
+    process::exit(ExitCode::Success.code());
 }
 fn cmd_schema_from_parsed(args: SchemaArgs) {
     cmd_schema(vec![args.command]);

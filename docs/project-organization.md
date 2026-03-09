@@ -46,21 +46,26 @@ my-app/
 ├── examples/
 │   └── valid_models.rs
 ├── src/
-│   ├── models/
-│   │   ├── approval.rs
-│   │   └── tenant_access.rs
-│   └── domain/
-│       └── mod.rs
+│   └── main.rs
+├── valid/
+│   ├── registry.rs
+│   └── models/
+│       ├── mod.rs
+│       ├── approval.rs
+│       └── tenant_access.rs
+├── docs/
+│   └── rdd/
+│       └── README.md
 ├── generated-tests/
 └── artifacts/
 ```
 
 Recommended conventions:
 
-- `valid.toml` points at `examples/valid_models.rs`
-- `examples/valid_models.rs` only wires models into `valid_models![...]`
-- `src/models/*.rs` owns the actual `valid_model!` definitions
-- `src/domain/` holds shared enums and reusable helpers
+- `valid.toml` points at `valid/registry.rs`
+- `valid/registry.rs` only wires models into `valid_models![...]`
+- `valid/models/*.rs` owns the actual `valid_model!` definitions
+- `src/main.rs` stays thin and delegates to the registry runner
 
 ### Medium Project
 
@@ -271,8 +276,7 @@ Split into an integration model when:
 
 The current repo reflects this guidance in a few ways:
 
-- `cargo valid init` scaffolds a thin project-first registry at
-  `examples/valid_models.rs`
+- `valid init` scaffolds a thin project-first registry at `valid/registry.rs`
 - [`examples/README.md`](../examples/README.md) keeps the user-facing examples
   small and names where heavy fixtures belong instead
 - the AI authoring docs assume registry mode and project-level organization

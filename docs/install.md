@@ -106,7 +106,7 @@ Current practical backend choices:
 Create a project skeleton:
 
 ```sh
-cargo valid init
+valid init
 ```
 
 Then use:

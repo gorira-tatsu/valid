@@ -65,6 +65,26 @@ pub struct ProjectConfig {
     pub default_graph_format: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InitScaffoldResult {
+    pub status: String,
+    pub root: String,
+    pub cargo_init_ran: bool,
+    pub created: String,
+    pub registry: String,
+    pub scaffolded_registry: String,
+    pub generated_tests_dir: String,
+    pub artifacts_dir: String,
+    pub benchmarks_baseline_dir: String,
+    pub created_files: Vec<String>,
+    pub created_directories: Vec<String>,
+    pub skipped_existing: Vec<String>,
+    pub model_files: Vec<String>,
+    pub mcp_configs: Vec<String>,
+    pub ai_bootstrap_guide: String,
+    pub rdd_guide: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ConfigSection {
     TopLevel,
@@ -160,6 +180,155 @@ pub fn render_project_config_template(registry: &str) -> String {
         "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\npreferred_backends = [\"explicit\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 80\nminimum_business_coverage_percent = 75\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 70\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
         registry
     )
+}
+
+pub fn scaffold_project_init(
+    root: &Path,
+    registry: &str,
+    cargo_init_ran: bool,
+) -> Result<InitScaffoldResult, String> {
+    let config_path = root.join("valid.toml");
+    if config_path.exists() {
+        return Err(format!("`{}` already exists", config_path.display()));
+    }
+
+    let generated_dir = root.join("generated-tests");
+    let artifacts_dir = root.join("artifacts");
+    let benchmark_baseline_dir = root.join("benchmarks").join("baselines");
+    let mcp_dir = root.join(".mcp");
+    let docs_ai_dir = root.join("docs").join("ai");
+    let docs_rdd_dir = root.join("docs").join("rdd");
+    let valid_dir = root.join("valid");
+    let valid_models_dir = valid_dir.join("models");
+    let registry_path = root.join(registry);
+    let model_mod_path = valid_models_dir.join("mod.rs");
+    let model_path = valid_models_dir.join("approval.rs");
+    let main_path = root.join("src").join("main.rs");
+    let codex_config = mcp_dir.join("codex.toml");
+    let claude_code_config = mcp_dir.join("claude-code.json");
+    let claude_desktop_config = mcp_dir.join("claude-desktop.json");
+    let bootstrap_readme = docs_ai_dir.join("bootstrap.md");
+    let rdd_readme = docs_rdd_dir.join("README.md");
+
+    let mut created_files = Vec::new();
+    let mut created_directories = Vec::new();
+    let mut skipped_existing = Vec::new();
+
+    create_dir_if_missing(&generated_dir, &mut created_directories)?;
+    create_dir_if_missing(&artifacts_dir, &mut created_directories)?;
+    create_dir_if_missing(&benchmark_baseline_dir, &mut created_directories)?;
+    create_dir_if_missing(&mcp_dir, &mut created_directories)?;
+    create_dir_if_missing(&docs_ai_dir, &mut created_directories)?;
+    create_dir_if_missing(&docs_rdd_dir, &mut created_directories)?;
+    create_dir_if_missing(&valid_dir, &mut created_directories)?;
+    create_dir_if_missing(&valid_models_dir, &mut created_directories)?;
+    create_dir_if_missing(&root.join("src"), &mut created_directories)?;
+    ensure_valid_dependency(&root.join("Cargo.toml"), &mut created_files)?;
+
+    write_file_if_missing(
+        &config_path,
+        &render_project_config_template(registry),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &registry_path,
+        &render_registry_source_template(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &model_mod_path,
+        &render_registry_models_mod_template(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &model_path,
+        &render_registry_model_template(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_main_file(
+        &main_path,
+        cargo_init_ran,
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &generated_dir.join(".gitkeep"),
+        "",
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &artifacts_dir.join(".gitkeep"),
+        "",
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &benchmark_baseline_dir.join(".gitkeep"),
+        "",
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &codex_config,
+        &render_bootstrap_codex_config(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &claude_code_config,
+        &render_bootstrap_claude_code_config(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &claude_desktop_config,
+        &render_bootstrap_claude_desktop_config(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &bootstrap_readme,
+        &render_bootstrap_ai_readme(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+    write_file_if_missing(
+        &rdd_readme,
+        &render_rdd_readme(),
+        &mut created_files,
+        &mut skipped_existing,
+    )?;
+
+    Ok(InitScaffoldResult {
+        status: "ok".to_string(),
+        root: root.display().to_string(),
+        cargo_init_ran,
+        created: config_path.display().to_string(),
+        registry: registry.to_string(),
+        scaffolded_registry: registry_path.display().to_string(),
+        generated_tests_dir: generated_dir.display().to_string(),
+        artifacts_dir: artifacts_dir.display().to_string(),
+        benchmarks_baseline_dir: benchmark_baseline_dir.display().to_string(),
+        created_files,
+        created_directories,
+        skipped_existing,
+        model_files: vec![
+            model_mod_path.display().to_string(),
+            model_path.display().to_string(),
+        ],
+        mcp_configs: vec![
+            codex_config.display().to_string(),
+            claude_code_config.display().to_string(),
+            claude_desktop_config.display().to_string(),
+        ],
+        ai_bootstrap_guide: bootstrap_readme.display().to_string(),
+        rdd_guide: rdd_readme.display().to_string(),
+    })
 }
 
 pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRecommendations {
@@ -294,16 +463,34 @@ fn sanitize_model_id(model_id: &str) -> String {
 }
 
 pub fn render_registry_source_template() -> String {
-    r#"use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
+    r#"use valid::{registry::run_registry_cli, valid_models};
+
+include!("models/approval.rs");
+
+pub fn run() {
+    run_registry_cli(valid_models![
+        "approval-model" => ApprovalModel,
+    ]);
+}
+"#
+    .to_string()
+}
+
+pub fn render_registry_models_mod_template() -> String {
+    "// Add model modules in this directory and include them from ../registry.rs.\n".to_string()
+}
+
+pub fn render_registry_model_template() -> String {
+    r#"use valid::{valid_actions, valid_model, valid_state};
 
 valid_state! {
-    struct State {
+    pub struct State {
         approved: bool,
     }
 }
 
 valid_actions! {
-    enum Action {
+    pub enum Action {
         Approve => "APPROVE" [reads = ["approved"], writes = ["approved"]],
     }
 }
@@ -322,11 +509,16 @@ valid_model! {
         invariant P_APPROVAL_IS_BOOLEAN |state| state.approved == false || state.approved == true;
     }
 }
+"#
+    .to_string()
+}
+
+pub fn render_registry_main_template() -> String {
+    r#"#[path = "../valid/registry.rs"]
+mod valid_registry;
 
 fn main() {
-    run_registry_cli(valid_models![
-        "approval-model" => ApprovalModel,
-    ]);
+    valid_registry::run();
 }
 "#
     .to_string()
@@ -378,7 +570,7 @@ pub fn render_bootstrap_claude_desktop_config() -> String {
 pub fn render_bootstrap_ai_readme() -> String {
     r#"# AI Bootstrap
 
-This project was initialized with `cargo valid init`.
+This project was initialized with `valid init`.
 
 Recommended first steps:
 
@@ -406,6 +598,109 @@ That avoids hard-coded local build paths and lets the MCP server discover
 `valid.toml` and the registry target from the current project.
 "#
     .to_string()
+}
+
+pub fn render_rdd_readme() -> String {
+    r#"# RDD
+
+Use this directory for requirement, domain, and verification notes that should
+stay close to the `valid` models in this project.
+
+Recommended first files:
+
+- `00_scope.md`
+- `01_requirements.md`
+- `02_properties.md`
+- `03_open_questions.md`
+"#
+    .to_string()
+}
+
+fn create_dir_if_missing(path: &Path, created_directories: &mut Vec<String>) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(path)
+        .map_err(|err| format!("failed to create `{}`: {err}", path.display()))?;
+    created_directories.push(path.display().to_string());
+    Ok(())
+}
+
+fn write_file_if_missing(
+    path: &Path,
+    contents: &str,
+    created_files: &mut Vec<String>,
+    skipped_existing: &mut Vec<String>,
+) -> Result<(), String> {
+    if path.exists() {
+        skipped_existing.push(path.display().to_string());
+        return Ok(());
+    }
+    fs::write(path, contents)
+        .map_err(|err| format!("failed to write `{}`: {err}", path.display()))?;
+    created_files.push(path.display().to_string());
+    Ok(())
+}
+
+fn write_main_file(
+    path: &Path,
+    cargo_init_ran: bool,
+    created_files: &mut Vec<String>,
+    skipped_existing: &mut Vec<String>,
+) -> Result<(), String> {
+    let desired = render_registry_main_template();
+    if !path.exists() {
+        fs::write(path, desired)
+            .map_err(|err| format!("failed to write `{}`: {err}", path.display()))?;
+        created_files.push(path.display().to_string());
+        return Ok(());
+    }
+    if cargo_init_ran {
+        let existing = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read `{}`: {err}", path.display()))?;
+        let trimmed = existing.trim();
+        if trimmed == "fn main() {\n    println!(\"Hello, world!\");\n}"
+            || trimmed == "fn main(){println!(\"Hello, world!\");}"
+        {
+            fs::write(path, desired)
+                .map_err(|err| format!("failed to write `{}`: {err}", path.display()))?;
+            created_files.push(path.display().to_string());
+            return Ok(());
+        }
+    }
+    skipped_existing.push(path.display().to_string());
+    Ok(())
+}
+
+fn ensure_valid_dependency(
+    cargo_toml: &Path,
+    created_files: &mut Vec<String>,
+) -> Result<(), String> {
+    let body = fs::read_to_string(cargo_toml)
+        .map_err(|err| format!("failed to read `{}`: {err}", cargo_toml.display()))?;
+    if body
+        .lines()
+        .any(|line| line.trim_start().starts_with("valid ="))
+    {
+        return Ok(());
+    }
+    let dependency =
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }\n";
+    let next = if body.contains("[dependencies]") {
+        body.replacen(
+            "[dependencies]\n",
+            &format!("[dependencies]\n{dependency}"),
+            1,
+        )
+    } else if body.ends_with('\n') {
+        format!("{body}\n[dependencies]\n{dependency}")
+    } else {
+        format!("{body}\n\n[dependencies]\n{dependency}")
+    };
+    fs::write(cargo_toml, next)
+        .map_err(|err| format!("failed to write `{}`: {err}", cargo_toml.display()))?;
+    created_files.push(cargo_toml.display().to_string());
+    Ok(())
 }
 
 fn parse_section_header(input: &str, line: usize) -> Result<ConfigSection, String> {
@@ -696,7 +991,8 @@ default_graph_format = "mermaid"
     #[test]
     fn renders_registry_source_template() {
         let body = render_registry_source_template();
-        assert!(body.contains("valid_model!"));
+        assert!(body.contains("pub fn run()"));
+        assert!(body.contains("include!(\"models/approval.rs\")"));
         assert!(body.contains("\"approval-model\""));
     }
 
@@ -711,6 +1007,7 @@ default_graph_format = "mermaid"
         assert!(codex.contains("--project"));
         assert!(claude_code.contains("\"valid-registry\""));
         assert!(claude_desktop.contains("\"env\": {}"));
+        assert!(guide.contains("valid init"));
         assert!(guide.contains(".mcp/codex.toml"));
         assert!(guide.contains("critical_properties"));
     }

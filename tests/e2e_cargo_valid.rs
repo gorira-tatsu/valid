@@ -1266,16 +1266,31 @@ fn cargo_valid_init_writes_valid_toml() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let cargo_toml = fs::read_to_string(project_dir.join("Cargo.toml")).expect("Cargo.toml");
     let body = fs::read_to_string(project_dir.join("valid.toml")).expect("valid.toml must exist");
-    assert!(body.contains("registry = \"examples/valid_models.rs\""));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"ok\""));
+    assert!(stdout.contains("\"cargo_init_ran\":false"));
+    assert!(stdout.contains("\"registry\":\"valid/registry.rs\""));
+    assert!(cargo_toml.contains(
+        "valid = { git = \"https://github.com/gorira-tatsu/valid\", branch = \"main\" }"
+    ));
+    assert!(body.contains("registry = \"valid/registry.rs\""));
     assert!(body.contains("default_backend = \"explicit\""));
     assert!(body.contains("default_solver_args = []"));
     assert!(body.contains("benchmark_repeats = 3"));
     assert!(body.contains("benchmarks_dir = \"artifacts/benchmarks\""));
     assert!(body.contains("generated_tests_dir = \"generated-tests\""));
+    assert!(project_dir.join("valid").join("registry.rs").exists());
     assert!(project_dir
-        .join("examples")
-        .join("valid_models.rs")
+        .join("valid")
+        .join("models")
+        .join("mod.rs")
+        .exists());
+    assert!(project_dir
+        .join("valid")
+        .join("models")
+        .join("approval.rs")
         .exists());
     assert!(project_dir
         .join("generated-tests")
@@ -1299,8 +1314,12 @@ fn cargo_valid_init_writes_valid_toml() {
     let bootstrap_guide =
         fs::read_to_string(project_dir.join("docs").join("ai").join("bootstrap.md"))
             .expect("bootstrap guide");
+    let rdd_guide = fs::read_to_string(project_dir.join("docs").join("rdd").join("README.md"))
+        .expect("rdd guide");
     assert!(bootstrap_guide.contains(".mcp/codex.toml"));
     assert!(bootstrap_guide.contains("critical_properties"));
+    assert!(bootstrap_guide.contains("valid init"));
+    assert!(rdd_guide.contains("# RDD"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

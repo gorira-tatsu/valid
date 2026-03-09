@@ -798,6 +798,18 @@ const BENCHMARK_OPTIONS: &[ArgSpec] = &[
 const MIGRATE_OPTIONS: &[ArgSpec] = &[JSON_ARG, PROGRESS_ARG, WRITE_ARG, CHECK_ARG];
 const VALID_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
+        name: "init",
+        aliases: &[],
+        description: "Create a Cargo project scaffold plus valid project layout.",
+        usage: "valid init [--json] [--progress=json]",
+        positional: &[],
+        options: &[JSON_ARG, PROGRESS_ARG],
+        request_schema: None,
+        response_schema: Some(SchemaRef { id: "schema.cli.init_response", builder: init_response_schema }),
+        supports_json: true,
+        supports_progress: true,
+    },
+    CommandSpec {
         name: "check",
         aliases: &["verify"],
         description: "Run model verification.",
@@ -3068,20 +3080,39 @@ fn init_response_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "schema.cli.init_response",
         "type": "object",
-        "required": ["status", "created", "registry", "scaffolded_registry", "generated_tests_dir"],
+        "required": ["status", "created", "registry", "scaffolded_registry", "generated_tests_dir", "root", "cargo_init_ran", "created_files", "created_directories", "skipped_existing", "model_files", "mcp_configs", "ai_bootstrap_guide", "rdd_guide"],
         "properties": {
             "status": { "type": "string", "enum": ["ok"] },
+            "root": { "type": "string" },
+            "cargo_init_ran": { "type": "boolean" },
             "created": { "type": "string" },
             "registry": { "type": "string" },
             "scaffolded_registry": { "type": "string" },
             "generated_tests_dir": { "type": "string" },
             "artifacts_dir": { "type": "string" },
             "benchmarks_baseline_dir": { "type": "string" },
+            "created_files": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "created_directories": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "skipped_existing": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "model_files": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
             "mcp_configs": {
                 "type": "array",
                 "items": { "type": "string" }
             },
-            "ai_bootstrap_guide": { "type": "string" }
+            "ai_bootstrap_guide": { "type": "string" },
+            "rdd_guide": { "type": "string" }
         }
     })
 }
