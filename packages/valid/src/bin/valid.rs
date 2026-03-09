@@ -24,8 +24,8 @@ use valid::{
     cli::{
         child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
         parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
-        render_commands_text, render_schema_json, usage_diagnostic, BatchResult, ExitCode,
-        ProgressReporter, Surface,
+        render_commands_text, render_completion, render_schema_json, usage_diagnostic, BatchResult,
+        ExitCode, ProgressReporter, Surface,
     },
     conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
@@ -100,8 +100,14 @@ enum ValidCommand {
     Selfcheck(JsonProgressArgs),
     Mcp(McpArgs),
     Commands(JsonOnlyArgs),
+    Completion(CompletionArgs),
     Schema(SchemaArgs),
     Batch(JsonProgressArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+struct CompletionArgs {
+    shell: String,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -369,13 +375,14 @@ fn main() {
         Some(ValidCommand::Selfcheck(args)) => cmd_selfcheck_from_parsed(args),
         Some(ValidCommand::Mcp(args)) => cmd_mcp_from_parsed(args),
         Some(ValidCommand::Commands(args)) => cmd_commands_from_parsed(args),
+        Some(ValidCommand::Completion(args)) => cmd_completion(args),
         Some(ValidCommand::Schema(args)) => cmd_schema_from_parsed(args),
         Some(ValidCommand::Batch(args)) => cmd_batch_from_parsed(args),
         None => {
             usage_exit(
                 "valid",
                 json,
-                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|schema|batch> ...",
+                "usage: valid <inspect|graph|doc|readiness|verify|capabilities|explain|minimize|contract|trace|orchestrate|generate-tests|distinguish|replay|coverage|conformance|artifacts|clean|selfcheck|mcp|commands|completion|schema|batch> ...",
             );
         }
     }
@@ -2642,6 +2649,13 @@ fn cmd_commands(args: Vec<String>) {
         println!("{}", render_commands_json(Surface::Valid));
     } else {
         println!("{}", render_commands_text(Surface::Valid));
+    }
+}
+
+fn cmd_completion(args: CompletionArgs) {
+    match render_completion(Surface::Valid, &args.shell) {
+        Ok(script) => print!("{script}"),
+        Err(message) => message_exit("completion", false, &message, None),
     }
 }
 

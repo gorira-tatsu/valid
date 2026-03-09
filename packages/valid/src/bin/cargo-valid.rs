@@ -24,8 +24,8 @@ use valid::{
     cli::{
         child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
         parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
-        render_commands_text, render_schema_json, usage_diagnostic, BatchResult, ExitCode,
-        ProgressReporter, Surface,
+        render_commands_text, render_completion, render_schema_json, usage_diagnostic, BatchResult,
+        ExitCode, ProgressReporter, Surface,
     },
     coverage::{render_coverage_json, render_coverage_text},
     doc::{
@@ -95,6 +95,7 @@ fn main() {
     let parsed = parse_cli(raw_args);
     match parsed.command.as_str() {
         "commands" => cmd_commands(parsed.json),
+        "completion" => cmd_completion(&parsed),
         "schema" => cmd_schema(&parsed),
         "batch" => cmd_batch(&parsed),
         _ => {}
@@ -180,7 +181,20 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|completion|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+}
+
+fn cmd_completion(parsed: &CliArgs) {
+    let shell = parsed
+        .model
+        .as_deref()
+        .or_else(|| parsed.extra_positionals.first().map(String::as_str))
+        .unwrap_or_else(|| usage_exit("usage: cargo valid completion <bash|fish|zsh>"));
+    match render_completion(Surface::CargoValid, shell) {
+        Ok(script) => print!("{script}"),
+        Err(message) => message_exit("completion", false, &message, None),
+    }
+    process::exit(ExitCode::Success.code());
 }
 
 fn internal_bundled_mode_enabled() -> bool {

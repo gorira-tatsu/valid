@@ -1004,6 +1004,7 @@ fn cli_commands_and_schema_are_machine_readable() {
     let commands_stdout = String::from_utf8_lossy(&commands.stdout);
     assert!(commands_stdout.contains("\"surface\":\"valid\""));
     assert!(commands_stdout.contains("\"name\":\"check\""));
+    assert!(commands_stdout.contains("\"name\":\"completion\""));
     assert!(commands_stdout.contains("\"name\":\"mcp\""));
     assert!(commands_stdout.contains("\"response\":\"schema.cli.completed\""));
 
@@ -1018,6 +1019,27 @@ fn cli_commands_and_schema_are_machine_readable() {
     assert!(schema_stdout.contains("\"parameter_schema_id\":\"schema.cli.valid.check.parameters\""));
     assert!(schema_stdout.contains("\"response_schema_id\":\"schema.cli.completed\""));
     assert!(schema_stdout.contains("\"error_schema_id\":\"schema.cli.error\""));
+}
+
+#[test]
+fn cli_can_generate_shell_completions() {
+    for (shell, marker) in [
+        ("fish", "complete -c valid"),
+        ("bash", "_valid()"),
+        ("zsh", "#compdef valid"),
+    ] {
+        let output = Command::new(binary_path())
+            .arg("completion")
+            .arg(shell)
+            .output()
+            .expect("completion should run");
+        assert!(output.status.success(), "{shell} completion should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(marker),
+            "{shell} completion should contain {marker}"
+        );
+    }
 }
 
 #[test]

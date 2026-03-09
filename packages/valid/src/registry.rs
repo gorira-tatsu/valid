@@ -16,8 +16,8 @@ use crate::{
     cli::{
         child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
         parse_batch_request, render_batch_response, render_cli_error_json, render_cli_warning_json,
-        render_commands_json, render_commands_text, render_schema_json, usage_diagnostic,
-        BatchResult, ExitCode, ProgressReporter, Surface,
+        render_commands_json, render_commands_text, render_completion, render_schema_json,
+        usage_diagnostic, BatchResult, ExitCode, ProgressReporter, Surface,
     },
     contract::{
         build_lock_file, compare_snapshot, parse_lock_file, render_drift_json, render_drift_text,
@@ -75,7 +75,7 @@ use crate::api::{
 };
 
 const REGISTRY_USAGE: &str =
-    "usage: <registry-bin> <models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
+    "usage: <registry-bin> <models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|explain|coverage|orchestrate|generate-tests|replay|contract|commands|completion|schema|batch> [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]";
 const LIST_USAGE: &str = "usage: <registry-bin> list [--json]";
 const INSPECT_USAGE: &str = "usage: <registry-bin> inspect <model> [--json] [--progress=json]";
 const GRAPH_USAGE: &str = "usage: <registry-bin> graph <model> [--format=mermaid|dot|svg|text|json] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--json] [--progress=json]";
@@ -97,6 +97,7 @@ const CONTRACT_USAGE: &str =
     "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json] [--progress=json]";
 const SCHEMA_USAGE: &str = "usage: <registry-bin> schema <command>";
 const BATCH_USAGE: &str = "usage: <registry-bin> batch [--json] [--progress=json] < batch.json";
+const COMPLETION_USAGE: &str = "usage: <registry-bin> completion <bash|fish|zsh>";
 
 pub struct RegisteredModel {
     pub name: &'static str,
@@ -173,6 +174,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "replay" => cmd_replay(&models, remaining),
         "contract" => cmd_contract(&models, remaining),
         "commands" => cmd_commands(remaining),
+        "completion" => cmd_completion(remaining),
         "schema" => cmd_schema(remaining),
         "batch" => cmd_batch(remaining),
         "help" => usage_exit("registry", json, REGISTRY_USAGE),
@@ -1786,6 +1788,19 @@ fn cmd_commands(args: Vec<String>) {
     } else {
         println!("{}", render_commands_text(Surface::Registry));
     }
+}
+
+fn cmd_completion(args: Vec<String>) {
+    let shell = args
+        .iter()
+        .find(|arg| !arg.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or_else(|| usage_exit("completion", false, COMPLETION_USAGE));
+    match render_completion(Surface::Registry, shell) {
+        Ok(script) => print!("{script}"),
+        Err(message) => message_exit("completion", false, &message, Some(COMPLETION_USAGE)),
+    }
+    process::exit(ExitCode::Success.code());
 }
 
 fn cmd_schema(args: Vec<String>) {

@@ -1,3 +1,8 @@
+use clap::{Arg, ArgAction, Command};
+use clap_complete::{
+    generate,
+    shells::{Bash, Fish, Zsh},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -661,6 +666,16 @@ const COMMAND_NAME_ARG: ArgSpec = ArgSpec {
     description: "Command name to describe.",
     values: &[],
 };
+const COMPLETION_SHELL_ARG: ArgSpec = ArgSpec {
+    name: "shell",
+    syntax: "<bash|fish|zsh>",
+    value_type: "string",
+    required: true,
+    multiple: false,
+    positional: true,
+    description: "Target shell to generate completions for.",
+    values: &["bash", "fish", "zsh"],
+};
 
 const CHECK_OPTIONS: &[ArgSpec] = &[
     JSON_ARG,
@@ -1030,6 +1045,18 @@ const VALID_COMMANDS: &[CommandSpec] = &[
         supports_progress: false,
     },
     CommandSpec {
+        name: "completion",
+        aliases: &["completions"],
+        description: "Generate shell completion scripts.",
+        usage: "valid completion <bash|fish|zsh>",
+        positional: &[COMPLETION_SHELL_ARG],
+        options: &[],
+        request_schema: None,
+        response_schema: None,
+        supports_json: false,
+        supports_progress: false,
+    },
+    CommandSpec {
         name: "schema",
         aliases: &[],
         description: "Return machine-readable schemas for a command.",
@@ -1246,6 +1273,18 @@ const REGISTRY_COMMANDS: &[CommandSpec] = &[
         request_schema: None,
         response_schema: Some(SchemaRef { id: "schema.cli.commands_response", builder: commands_response_schema }),
         supports_json: true,
+        supports_progress: false,
+    },
+    CommandSpec {
+        name: "completion",
+        aliases: &["completions"],
+        description: "Generate shell completion scripts.",
+        usage: "<registry-bin> completion <bash|fish|zsh>",
+        positional: &[COMPLETION_SHELL_ARG],
+        options: &[],
+        request_schema: None,
+        response_schema: None,
+        supports_json: false,
         supports_progress: false,
     },
     CommandSpec {
@@ -1504,6 +1543,18 @@ const CARGO_VALID_COMMANDS: &[CommandSpec] = &[
         supports_progress: false,
     },
     CommandSpec {
+        name: "completion",
+        aliases: &["completions"],
+        description: "Generate shell completion scripts.",
+        usage: "cargo valid completion <bash|fish|zsh>",
+        positional: &[COMPLETION_SHELL_ARG],
+        options: &[],
+        request_schema: None,
+        response_schema: None,
+        supports_json: false,
+        supports_progress: false,
+    },
+    CommandSpec {
         name: "schema",
         aliases: &[],
         description: "Return machine-readable schemas for a command.",
@@ -1541,6 +1592,127 @@ pub fn find_command_spec(surface: Surface, command: &str) -> Option<&'static Com
     command_specs(surface)
         .iter()
         .find(|spec| spec.name == command || spec.aliases.iter().any(|alias| *alias == command))
+}
+
+pub fn render_completion(surface: Surface, shell: &str) -> Result<String, String> {
+    let mut command = completion_command(surface);
+    let mut buffer = Vec::new();
+    match shell {
+        "bash" => generate(
+            Bash,
+            &mut command,
+            completion_bin_name(surface),
+            &mut buffer,
+        ),
+        "fish" => generate(
+            Fish,
+            &mut command,
+            completion_bin_name(surface),
+            &mut buffer,
+        ),
+        "zsh" => generate(Zsh, &mut command, completion_bin_name(surface), &mut buffer),
+        other => {
+            return Err(format!(
+                "unsupported shell `{other}`; expected bash, fish, or zsh"
+            ))
+        }
+    }
+    String::from_utf8(buffer).map_err(|error| format!("completion output was not utf-8: {error}"))
+}
+
+fn completion_bin_name(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Valid => "valid",
+        Surface::CargoValid => "cargo",
+        Surface::Registry => "registry",
+    }
+}
+
+fn completion_command(surface: Surface) -> Command {
+    let mut root = match surface {
+        Surface::Valid => Command::new("valid"),
+        Surface::CargoValid => {
+            let mut cargo = Command::new("cargo");
+            cargo = cargo.subcommand(build_surface_command("valid", surface));
+            return cargo;
+        }
+        Surface::Registry => Command::new("registry"),
+    };
+
+    root = root.subcommand_required(true).arg_required_else_help(true);
+    for spec in command_specs(surface) {
+        root = root.subcommand(build_command_spec(spec));
+    }
+    root
+}
+
+fn build_surface_command(name: &'static str, surface: Surface) -> Command {
+    let mut command = Command::new(name)
+        .subcommand_required(true)
+        .arg_required_else_help(true);
+    if matches!(surface, Surface::CargoValid) {
+        command = command
+            .arg(Arg::new("manifest-path").long("manifest-path").num_args(1))
+            .arg(Arg::new("registry").long("registry").num_args(1))
+            .arg(Arg::new("file").long("file").num_args(1))
+            .arg(Arg::new("example").long("example").num_args(1))
+            .arg(Arg::new("bin").long("bin").num_args(1));
+    }
+    for spec in command_specs(surface) {
+        command = command.subcommand(build_command_spec(spec));
+    }
+    command
+}
+
+fn build_command_spec(spec: &CommandSpec) -> Command {
+    let mut command = Command::new(spec.name).about(spec.description);
+    for alias in spec.aliases {
+        command = command.visible_alias(alias);
+    }
+    for (index, positional) in spec.positional.iter().enumerate() {
+        command = command.arg(build_arg_spec(positional, Some(index + 1)));
+    }
+    for option in spec.options {
+        command = command.arg(build_arg_spec(option, None));
+    }
+    command
+}
+
+fn build_arg_spec(spec: &ArgSpec, index: Option<usize>) -> Arg {
+    let mut arg = Arg::new(spec.name).help(spec.description);
+    if let Some(index) = index {
+        arg = arg.index(index);
+    } else if let Some(long_name) = long_name_from_syntax(spec.syntax) {
+        arg = arg.long(long_name);
+    }
+
+    if spec.positional {
+        if spec.multiple {
+            arg = arg.num_args(1..);
+        }
+    } else if spec.value_type == "bool" {
+        arg = arg.action(ArgAction::SetTrue);
+    } else if spec.syntax.contains("[=<") {
+        arg = arg.num_args(0..=1);
+    } else if spec.multiple {
+        arg = arg.action(ArgAction::Append).num_args(1);
+    } else {
+        arg = arg.num_args(1);
+    }
+
+    if !spec.values.is_empty() {
+        arg = arg.value_parser(spec.values.to_vec());
+    }
+    arg
+}
+
+fn long_name_from_syntax(syntax: &str) -> Option<&str> {
+    let trimmed = syntax.trim();
+    let stripped = trimmed.strip_prefix("--")?;
+    let end = stripped
+        .find(|ch: char| ch == '[' || ch == '<' || ch == ' ' || ch == '=')
+        .unwrap_or(stripped.len());
+    Some(&stripped[..end])
 }
 
 pub fn render_commands_json(surface: Surface) -> String {

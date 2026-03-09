@@ -1736,6 +1736,7 @@ fn cargo_valid_commands_and_schema_are_machine_readable() {
     let commands_stdout = String::from_utf8_lossy(&commands.stdout);
     assert!(commands_stdout.contains("\"surface\":\"cargo-valid\""));
     assert!(commands_stdout.contains("\"name\":\"batch\""));
+    assert!(commands_stdout.contains("\"name\":\"completion\""));
     assert!(commands_stdout.contains("\"response\":\"schema.cli.batch_response\""));
     assert!(commands_stdout.contains("\"response\":\"schema.cli.completed\""));
 
@@ -1751,6 +1752,29 @@ fn cargo_valid_commands_and_schema_are_machine_readable() {
         .contains("\"parameter_schema_id\":\"schema.cli.cargo-valid.check.parameters\""));
     assert!(schema_stdout.contains("\"response_schema_id\":\"schema.cli.completed\""));
     assert!(schema_stdout.contains("\"error_schema_id\":\"schema.cli.error\""));
+}
+
+#[test]
+fn cargo_valid_can_generate_shell_completions() {
+    let _guard = cargo_guard();
+    for (shell, marker) in [
+        ("fish", "complete -c cargo"),
+        ("bash", "cargo__valid"),
+        ("zsh", "#compdef cargo"),
+    ] {
+        let output = Command::new(cargo_valid_path())
+            .arg("completion")
+            .arg(shell)
+            .output()
+            .expect("completion should run");
+        assert!(output.status.success(), "{shell} completion should succeed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(marker),
+            "{shell} completion should contain {marker}"
+        );
+        assert!(stdout.contains("valid"));
+    }
 }
 
 #[test]

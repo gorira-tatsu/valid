@@ -451,6 +451,18 @@ Legacy aliases still work:
 
 - `list`, `lint`, `check`, `testgen`, `all`, `--file`
 
+Shell completions are built in:
+
+```sh
+valid completion bash > ~/.local/share/bash-completion/completions/valid
+valid completion fish > ~/.config/fish/completions/valid.fish
+valid completion zsh > "${fpath[1]}/_valid"
+
+cargo valid completion bash > ~/.local/share/bash-completion/completions/cargo-valid
+cargo valid completion fish > ~/.config/fish/completions/cargo-valid.fish
+cargo valid completion zsh > "${fpath[1]}/_cargo-valid"
+```
+
 Examples:
 
 ```sh
