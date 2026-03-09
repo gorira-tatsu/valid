@@ -760,6 +760,38 @@ pub(crate) const DOCS: &[DocEntry] = &[
         body_markdown: include_str!("../../../../docs/install.md"),
     },
     DocEntry {
+        id: "quickstart-guide",
+        title: "Quickstart Guide",
+        kind: "guide",
+        audience: "humans-and-agents",
+        recommended_for: &["first-run", "bootstrap", "non-rust-onboarding"],
+        canonical_entry: false,
+        summary: "Shortest path from binary install to valid init, scaffold verification, inspect, and handoff.",
+        key_points: &[
+            "Optimized for non-Rust users evaluating valid for the first time",
+            "Centers the first successful run around valid init, inspect, and handoff",
+        ],
+        canonical_rules: &[
+            "Treat valid init plus valid init --check as the first onboarding checkpoint",
+        ],
+        supported_features: &[
+            "Shortest first-run sequence",
+            "Review-first onboarding path",
+            "Cross-links to install, project organization, and handoff guidance",
+        ],
+        unsupported_features: &[
+            "Deep DSL syntax reference",
+        ],
+        related_docs: &[
+            "install-guide",
+            "project-organization-guide",
+            "testgen-and-handoff-guide",
+            "ai-authoring-guide",
+        ],
+        source_path: "docs/quickstart.md",
+        body_markdown: include_str!("../../../../docs/quickstart.md"),
+    },
+    DocEntry {
         id: "project-organization-guide",
         title: "Project Organization Guide",
         kind: "guide",

@@ -13,14 +13,17 @@
 
 ### 1. Prebuilt binary
 
-This is the easiest distribution path for non-Rust users.
+This is the recommended distribution path for non-Rust users and reviewers.
 
 - download the GitHub Release asset for your platform:
   `valid-linux-x86_64.tar.gz` or `valid-macos-aarch64.tar.gz`
 - extract the archive, for example `tar -xzf valid-linux-x86_64.tar.gz`
 - put `valid` and `cargo-valid` on your `PATH`
-- run `valid` for `.valid` files
-- run `cargo-valid` only if the target project already has a Rust toolchain
+- run `valid --version`
+- run `valid init`
+- run `valid init --check`
+- run `cargo valid inspect approval-model`
+- run `cargo valid handoff approval-model`
 
 Tagged `v*` pushes publish these tarballs automatically on GitHub Releases.
 
@@ -85,6 +88,7 @@ That means:
 So today:
 
 - `.valid` compatibility mode is usable by binary-only users
+- review, inspect, graph, handoff, and MCP setup are usable by binary-first users
 - Rust DSL authoring is still a Rust-user workflow
 
 ## Backends
@@ -100,6 +104,22 @@ Current practical backend choices:
   external solver path for the bounded SMT subset
 - `command`
   generic external adapter for experiments and integration
+
+## First Successful Run
+
+If you want the shortest path to a working project:
+
+```sh
+valid init
+valid init --check
+cargo valid models
+cargo valid inspect approval-model
+cargo valid handoff approval-model
+```
+
+This path is intentionally review-first. It lets you confirm the scaffold,
+inspect the starter model, and get a handoff summary before you write your own
+models.
 
 ## Project Setup
 

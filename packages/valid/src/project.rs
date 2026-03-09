@@ -707,14 +707,15 @@ This project was initialized with `valid init`.
 
 Recommended first steps:
 
-1. Run `cargo valid models` to confirm the registry loads.
-2. Run `cargo valid inspect approval-model`.
-3. Run `cargo valid handoff approval-model`.
-4. Review `valid.toml` and set:
+1. Run `valid init --check` to confirm the scaffold is still healthy.
+2. Run `cargo valid models` to confirm the registry loads.
+3. Run `cargo valid inspect approval-model`.
+4. Run `cargo valid handoff approval-model`.
+5. Review `valid.toml` and set:
    - `suite_models`
    - `critical_properties`
    - `property_suites`
-5. Copy one of the MCP snippets from `.mcp/` into your client config.
+6. Copy one of the MCP snippets from `.mcp/` into your client config.
 
 Generated bootstrap files:
 

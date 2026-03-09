@@ -1,6 +1,7 @@
 # valid
 
-Rust-first finite-state verification for business-rule models.
+Finite-state verification for business-rule models, with a Rust-first core and
+an onboarding path that does not require you to start as a Rust model author.
 
 `valid` is aimed at models such as authorization, pricing, entitlements, and
 stateful workflow rules. The main path is:
@@ -74,16 +75,37 @@ The product story is now:
 - `testgen` is useful, but still closer to regression asset generation than
   fully intelligent scenario design
 
+## 3-Minute Quickstart
+
+If you are evaluating `valid`, start here.
+
+1. Install a prebuilt `valid` binary for your platform.
+2. Create or enter a project directory.
+3. Run:
+
+```sh
+valid init
+valid init --check
+cargo valid models
+cargo valid inspect approval-model
+cargo valid handoff approval-model
+```
+
+That is enough to bootstrap a project, confirm the scaffold is healthy, inspect
+the starter model, and produce an implementation-facing handoff summary.
+
+If you want the longer walkthrough, read [docs/quickstart.md](./docs/quickstart.md).
+If you want installation details, read [docs/install.md](./docs/install.md).
+
 ## Quick Start
 
 There are two user stories:
 
 - `binary user`
-  install a prebuilt binary and use `valid` for `.valid` compatibility flows
+  install a prebuilt binary, use `valid init`, and review models through
+  inspect/graph/handoff flows
 - `Rust model author`
   install with Cargo and use `cargo valid` against Rust registries
-
-If you want details, read [docs/install.md](./docs/install.md).
 
 Run the full test suite:
 
@@ -94,7 +116,6 @@ cargo test -q --features verification-runtime
 Initialize a project once:
 
 ```sh
-cargo install --path . --features varisat-backend
 valid init
 ```
 
@@ -155,8 +176,10 @@ selected.
 After init, the shortest AI-assisted setup path is:
 
 ```sh
+valid init --check
 cargo valid models
 cargo valid inspect approval-model
+cargo valid handoff approval-model
 cat .mcp/codex.toml
 ```
 

@@ -735,6 +735,11 @@ fn cmd_init_from_parsed(args: InitArgs) {
         if !result.skipped_existing.is_empty() {
             println!("skipped_existing: {}", result.skipped_existing.join(", "));
         }
+        println!("next_steps:");
+        println!("  valid init --check");
+        println!("  cargo valid models");
+        println!("  cargo valid inspect approval-model");
+        println!("  cargo valid handoff approval-model");
     }
     progress.finish(ExitCode::Success);
     process::exit(ExitCode::Success.code());

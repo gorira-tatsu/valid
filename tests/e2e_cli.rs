@@ -1274,6 +1274,28 @@ fn cli_init_check_reports_missing_scaffold_files() {
 }
 
 #[test]
+fn cli_init_text_output_recommends_next_commands() {
+    let project_dir = unique_temp_dir("valid-cli-init-next-steps");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .current_dir(&project_dir)
+        .arg("init")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+    let stdout = String::from_utf8_lossy(&init.stdout);
+    assert!(stdout.contains("next_steps:"));
+    assert!(stdout.contains("valid init --check"));
+    assert!(stdout.contains("cargo valid models"));
+    assert!(stdout.contains("cargo valid inspect approval-model"));
+    assert!(stdout.contains("cargo valid handoff approval-model"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
 fn cli_init_generated_project_reaches_cargo_valid_models() {
     let project_dir = unique_temp_dir("valid-cli-init-smoke");
     fs::create_dir_all(&project_dir).expect("project dir should exist");

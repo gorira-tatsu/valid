@@ -2,6 +2,8 @@
 
 - [Task Guide](#task-guide)
   Recommended starting points by workflow.
+- [Quickstart Guide](./quickstart.md)
+  Shortest path from install to `valid init`, `inspect`, and `handoff`.
 - [Install Guide](./install.md)
   Installation modes, binary vs Cargo usage, Docker, and backend selection.
 - [CI Workflow Templates](./ci/README.md)
@@ -55,7 +57,9 @@
   Requirements, architecture, planning, and delivery documents for the project
   itself.
 
-If you want to install or distribute the tool, start with the install guide.
+If you want the shortest first-run walkthrough, start with the quickstart guide.
+If you want to install or distribute the tool in more detail, move to the
+install guide next.
 If you want to wire an LLM or MCP client into `valid`, start with the AI
 authoring guide, then move through the AI docs curriculum. If the requirement
 is still moving, read the requirement refinement workflow before editing the
@@ -73,7 +77,7 @@ architecture note and the RDD.
 
 | Task | Start Here | Then Read |
 | --- | --- | --- |
-| Bootstrap a new project | [Install Guide](./install.md) | [Project Organization Guide](./project-organization.md) |
+| Bootstrap a new project | [Quickstart Guide](./quickstart.md) | [Install Guide](./install.md) |
 | Learn the current public surface | [Rust DSL Guide](./dsl/README.md) | [DSL Language Spec](./dsl/language-spec.md) |
 | Author or review with AI | [AI Authoring Guide](./ai/authoring-guide.md) | [AI Docs Curriculum](./ai/curriculum.md) |
 | Refine an ambiguous requirement | [Requirement Refinement Workflow](./ai/requirement-refinement-workflow.md) | [Candidate Comparison Workflow](./ai/candidate-comparison-workflow.md) |
