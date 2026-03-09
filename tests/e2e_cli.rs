@@ -1434,6 +1434,37 @@ fn cli_doctor_reports_repair_hint_for_missing_scaffold_files() {
 }
 
 #[test]
+fn cli_doctor_text_output_groups_non_ok_hints() {
+    let project_dir = unique_temp_dir("valid-cli-doctor-hints");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+    fs::remove_file(project_dir.join(".mcp").join("codex.toml"))
+        .expect("codex config should be removed");
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .arg("doctor")
+        .output()
+        .expect("valid doctor should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Hints"));
+    assert!(stdout.contains("project_scaffold:"));
+    assert!(stdout.contains("valid init --repair"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
 fn cli_init_repair_restores_missing_scaffold_files_without_rewriting_registry() {
     let project_dir = unique_temp_dir("valid-cli-init-repair");
     fs::create_dir_all(&project_dir).expect("project dir should exist");
@@ -1553,6 +1584,45 @@ fn cli_onboarding_text_output_recaps_first_value() {
     assert!(stdout.contains("cargo valid models"));
     assert!(stdout.contains("cargo valid inspect approval-model"));
     assert!(stdout.contains("cargo valid handoff approval-model"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_onboarding_interactive_shows_command_output_before_next_prompt() {
+    let project_dir = unique_temp_dir("valid-cli-onboarding-interactive");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let mut child = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("onboarding")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("valid onboarding should spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be available")
+        .write_all(b"\n\n\n\n\n\n\n\n")
+        .expect("interactive prompts should accept newlines");
+
+    let output = child
+        .wait_with_output()
+        .expect("valid onboarding should complete");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("stdout:"));
+    assert!(stdout.contains("exit_code: 0"));
+    assert!(stdout.contains("Press Enter for the next step"));
+    assert!(stdout.contains("command: cargo valid inspect approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

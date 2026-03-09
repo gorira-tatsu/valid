@@ -1140,10 +1140,19 @@ fn cmd_doctor_from_parsed(args: JsonProgressArgs) {
                     println!("  {}", text_kv("details", details));
                 }
             }
-            if let Some(repair_hint) = &check.repair_hint {
-                if !repair_hint.trim().is_empty() {
-                    println!("  {}", text_hint(repair_hint));
-                }
+            if let Some(repair_hint) = doctor_hint(check) {
+                println!("  {}", text_hint(repair_hint));
+            }
+        }
+        let hinted_checks = report
+            .checks
+            .iter()
+            .filter_map(|check| doctor_hint(check).map(|hint| (check.check_id.as_str(), hint)))
+            .collect::<Vec<_>>();
+        if !hinted_checks.is_empty() {
+            print!("{}", text_section("Hints"));
+            for (check_id, hint) in hinted_checks {
+                println!("{}", text_bullet(&format!("{check_id}: {hint}")));
             }
         }
         if report.status != "ok" {
@@ -1576,12 +1585,9 @@ fn run_onboarding_stage(
     repair_hint: Option<String>,
 ) -> Option<OnboardingStageReport> {
     if interactive {
-        println!("\n[{stage_id}] {summary}");
-        println!("command: {command_label}");
-        print!("Press Enter to continue...");
-        let _ = io::stdout().flush();
-        let mut line = String::new();
-        let _ = io::stdin().read_line(&mut line);
+        print!("{}", text_section(stage_id));
+        println!("{}", text_bullet(summary));
+        println!("  {}", text_kv("command", command_label));
     }
     let output = Command::new(program)
         .current_dir(root)
@@ -1598,6 +1604,10 @@ fn run_onboarding_stage(
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let excerpt = onboarding_excerpt(if stdout.is_empty() { &stderr } else { &stdout });
+    let exit_code = output.status.code().map_or_else(
+        || "terminated by signal".to_string(),
+        |code| code.to_string(),
+    );
     let stage_success = if stage_id == "check_scaffold" && output.status.success() {
         serde_json::from_str::<Value>(&stdout)
             .ok()
@@ -1612,15 +1622,41 @@ fn run_onboarding_stage(
         output.status.success()
     };
     let status = if stage_success { "success" } else { "error" };
-    if !interactive && !json {
+    if interactive {
+        println!(
+            "{} {}",
+            text_status_badge(status),
+            text_kv("command", command_label)
+        );
+        println!("  {}", text_kv("exit_code", &exit_code));
+        print_onboarding_command_output("stdout", &stdout, None);
+        print_onboarding_command_output("stderr", &stderr, None);
+        if !stage_success {
+            if let Some(repair_hint) = &repair_hint {
+                println!("  {}", text_hint(repair_hint));
+            }
+        }
+        if stage_success {
+            print!("{}", onboarding_continue_prompt());
+            let _ = io::stdout().flush();
+            let mut line = String::new();
+            let _ = io::stdin().read_line(&mut line);
+        }
+    } else if !json {
         println!(
             "{} {}",
             text_status_badge(status),
             text_kv(stage_id, summary)
         );
         println!("  {}", text_kv("command", command_label));
+        println!("  {}", text_kv("exit_code", &exit_code));
         if let Some(excerpt) = &excerpt {
             println!("  {}", text_kv("output", excerpt));
+        }
+        if !stage_success {
+            if let Some(repair_hint) = &repair_hint {
+                println!("  {}", text_hint(repair_hint));
+            }
         }
     }
     Some(OnboardingStageReport {
@@ -1640,6 +1676,45 @@ fn onboarding_excerpt(output: &str) -> Option<String> {
     }
     let excerpt = trimmed.lines().take(8).collect::<Vec<_>>().join(" | ");
     Some(excerpt)
+}
+
+fn print_onboarding_command_output(label: &str, output: &str, line_limit: Option<usize>) {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    println!("  {}", text_kv(label, ""));
+    let lines = trimmed.lines().collect::<Vec<_>>();
+    let limit = line_limit.unwrap_or(lines.len());
+    for line in lines.iter().take(limit) {
+        println!("    {line}");
+    }
+    if lines.len() > limit {
+        println!(
+            "    {}",
+            text_hint(&format!(
+                "output truncated after {limit} lines; rerun the command directly for the full result."
+            ))
+        );
+    }
+}
+
+fn onboarding_continue_prompt() -> String {
+    format!(
+        "{}\n",
+        text_hint("Press Enter for the next step, or use Ctrl-C to stop.")
+    )
+}
+
+fn doctor_hint(check: &DoctorCheckReport) -> Option<&str> {
+    if matches!(check.status.as_str(), "ok" | "success" | "skipped") {
+        return None;
+    }
+    check
+        .repair_hint
+        .as_deref()
+        .filter(|hint| !hint.trim().is_empty())
+        .or(Some("Resolve this check and rerun `valid doctor`."))
 }
 
 fn finish_onboarding(
