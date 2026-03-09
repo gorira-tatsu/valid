@@ -3283,10 +3283,12 @@ fn doctor_response_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "schema.cli.doctor_response",
         "type": "object",
-        "required": ["status", "root", "checks"],
+        "required": ["status", "root", "active_shell", "active_shell_source", "checks"],
         "properties": {
             "status": { "type": "string", "enum": ["ok", "warn", "error"] },
             "root": { "type": "string" },
+            "active_shell": { "type": ["string", "null"] },
+            "active_shell_source": { "type": "string", "enum": ["override", "parent_process", "env_shell", "unknown"] },
             "checks": {
                 "type": "array",
                 "items": {

@@ -1357,6 +1357,7 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
         .expect("valid doctor should run");
     assert!(output.status.success());
     let report: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    assert!(report["active_shell_source"].is_string());
     let check_ids = report["checks"]
         .as_array()
         .unwrap()
@@ -1383,6 +1384,64 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
     assert_eq!(publish["status"], "ok");
 
     let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_doctor_uses_detected_shell_for_completion_hints() {
+    let project_dir = unique_temp_dir("valid-cli-doctor-shell-override");
+    let temp_home = unique_temp_dir("valid-cli-doctor-shell-home");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+    fs::create_dir_all(&temp_home).expect("temp home should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    let output = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .env("HOME", &temp_home)
+        .env("SHELL", "/bin/zsh")
+        .env("VALID_ACTIVE_SHELL", "fish")
+        .arg("doctor")
+        .arg("--json")
+        .output()
+        .expect("valid doctor should run");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("doctor json");
+    assert_eq!(report["active_shell"], "fish");
+    assert_eq!(report["active_shell_source"], "override");
+    let completion = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "shell_completion")
+        .expect("shell completion check");
+    assert_eq!(completion["status"], "warn");
+    assert!(completion["details"]
+        .as_str()
+        .unwrap()
+        .contains("source=override"));
+    assert!(completion["details"]
+        .as_str()
+        .unwrap()
+        .contains("login_shell=zsh"));
+    assert!(completion["details"]
+        .as_str()
+        .unwrap()
+        .contains(".config/fish/completions/valid.fish"));
+    assert!(completion["repair_hint"]
+        .as_str()
+        .unwrap()
+        .contains("valid completion install fish"));
+
+    let _ = fs::remove_dir_all(project_dir);
+    let _ = fs::remove_dir_all(temp_home);
 }
 
 #[test]
@@ -1436,7 +1495,9 @@ fn cli_doctor_reports_repair_hint_for_missing_scaffold_files() {
 #[test]
 fn cli_doctor_text_output_groups_non_ok_hints() {
     let project_dir = unique_temp_dir("valid-cli-doctor-hints");
+    let temp_home = unique_temp_dir("valid-cli-doctor-hints-home");
     fs::create_dir_all(&project_dir).expect("project dir should exist");
+    fs::create_dir_all(&temp_home).expect("temp home should exist");
 
     let init = Command::new(binary_path())
         .env("CARGO_NET_OFFLINE", "true")
@@ -1452,16 +1513,23 @@ fn cli_doctor_text_output_groups_non_ok_hints() {
 
     let output = Command::new(binary_path())
         .current_dir(&project_dir)
+        .env("HOME", &temp_home)
+        .env("SHELL", "/bin/zsh")
+        .env("VALID_ACTIVE_SHELL", "fish")
         .arg("doctor")
         .output()
         .expect("valid doctor should run");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("active_shell: fish (override)"));
+    assert!(stdout.contains("source=override"));
     assert!(stdout.contains("Hints"));
     assert!(stdout.contains("project_scaffold:"));
     assert!(stdout.contains("valid init --repair"));
+    assert!(stdout.contains("valid completion install fish"));
 
     let _ = fs::remove_dir_all(project_dir);
+    let _ = fs::remove_dir_all(temp_home);
 }
 
 #[test]

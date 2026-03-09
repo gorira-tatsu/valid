@@ -219,7 +219,16 @@ struct DoctorCheckReport {
 struct DoctorReport {
     status: String,
     root: String,
+    active_shell: Option<String>,
+    active_shell_source: String,
     checks: Vec<DoctorCheckReport>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveShellResolution {
+    active_shell: Option<String>,
+    source: String,
+    login_shell: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -900,12 +909,124 @@ fn current_exe_dir() -> Option<PathBuf> {
         .and_then(|exe| exe.parent().map(PathBuf::from))
 }
 
-fn active_shell_name() -> Option<String> {
+fn env_shell_name() -> Option<String> {
     env::var("SHELL").ok().and_then(|shell| {
         PathBuf::from(shell)
             .file_name()
-            .map(|name| name.to_string_lossy().to_string())
+            .and_then(|name| normalize_shell_name(name.to_string_lossy().as_ref()))
     })
+}
+
+fn normalize_shell_name(name: &str) -> Option<String> {
+    match name.trim_start_matches('-') {
+        "bash" | "fish" | "zsh" => Some(name.trim_start_matches('-').to_string()),
+        _ => None,
+    }
+}
+
+fn resolve_active_shell() -> ActiveShellResolution {
+    let login_shell = env_shell_name();
+    if let Some(shell) = env::var("VALID_ACTIVE_SHELL")
+        .ok()
+        .and_then(|value| normalize_shell_name(value.as_str()))
+    {
+        return ActiveShellResolution {
+            active_shell: Some(shell),
+            source: env::var("VALID_ACTIVE_SHELL_SOURCE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "override".to_string()),
+            login_shell,
+        };
+    }
+    if let Some(shell) = parent_process_shell_name() {
+        return ActiveShellResolution {
+            active_shell: Some(shell),
+            source: "parent_process".to_string(),
+            login_shell,
+        };
+    }
+    if login_shell.is_some() {
+        return ActiveShellResolution {
+            active_shell: login_shell.clone(),
+            source: "env_shell".to_string(),
+            login_shell,
+        };
+    }
+    ActiveShellResolution {
+        active_shell: None,
+        source: "unknown".to_string(),
+        login_shell: None,
+    }
+}
+
+fn parent_process_shell_name() -> Option<String> {
+    let mut pid = process::id();
+    for _ in 0..8 {
+        let parent = parent_process_id(pid)?;
+        if parent <= 1 || parent == pid {
+            break;
+        }
+        if let Some(shell) = process_command_name(parent)
+            .as_deref()
+            .and_then(normalize_shell_name)
+        {
+            return Some(shell);
+        }
+        pid = parent;
+    }
+    None
+}
+
+fn parent_process_id(pid: u32) -> Option<u32> {
+    let output = Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+fn process_command_name(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if command.is_empty() {
+        return None;
+    }
+    let basename = PathBuf::from(command)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if basename.is_empty() {
+        None
+    } else {
+        Some(basename)
+    }
+}
+
+fn shell_resolution_details(resolution: &ActiveShellResolution) -> String {
+    let mut details = vec![
+        format!(
+            "active_shell={}",
+            resolution.active_shell.as_deref().unwrap_or("unknown")
+        ),
+        format!("source={}", resolution.source),
+    ];
+    if let Some(login_shell) = &resolution.login_shell {
+        details.push(format!("login_shell={login_shell}"));
+    }
+    details.join(", ")
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -985,7 +1106,7 @@ fn cargo_package_name(manifest: &str) -> Option<String> {
 
 fn build_doctor_report(root: &PathBuf) -> DoctorReport {
     let mut checks = Vec::new();
-    let active_shell = active_shell_name();
+    let active_shell = resolve_active_shell();
     let exe_dir = current_exe_dir();
     let exe_on_path = current_exe_dir_on_path();
     checks.push(DoctorCheckReport {
@@ -998,19 +1119,19 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
         },
         details: env::current_exe().ok().map(|path| {
             format!(
-                "current_executable={}, active_shell={}",
+                "current_executable={}, {}",
                 path.display(),
-                active_shell.as_deref().unwrap_or("unknown")
+                shell_resolution_details(&active_shell)
             )
         }),
         repair_hint: if exe_on_path {
             None
         } else {
-            shell_path_repair_hint(active_shell.as_deref(), exe_dir.as_ref())
+            shell_path_repair_hint(active_shell.active_shell.as_deref(), exe_dir.as_ref())
         },
     });
 
-    let completion_path = completion_path_for_shell(active_shell.as_deref());
+    let completion_path = completion_path_for_shell(active_shell.active_shell.as_deref());
     let completion_installed = completion_path.as_ref().is_some_and(|path| path.exists());
     checks.push(DoctorCheckReport {
         check_id: "shell_completion".to_string(),
@@ -1033,20 +1154,16 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
             .as_ref()
             .map(|path| {
                 format!(
-                    "active_shell={}, expected_completion_path={}",
-                    active_shell.as_deref().unwrap_or("unknown"),
+                    "{}, expected_completion_path={}",
+                    shell_resolution_details(&active_shell),
                     path.display()
                 )
             })
-            .or_else(|| {
-                active_shell
-                    .as_ref()
-                    .map(|shell| format!("active_shell={shell}"))
-            }),
+            .or_else(|| Some(shell_resolution_details(&active_shell))),
         repair_hint: if completion_installed {
             None
         } else {
-            shell_completion_repair_hint(active_shell.as_deref())
+            shell_completion_repair_hint(active_shell.active_shell.as_deref())
         },
     });
 
@@ -1273,6 +1390,8 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
     DoctorReport {
         status: status.to_string(),
         root: root.display().to_string(),
+        active_shell: active_shell.active_shell,
+        active_shell_source: active_shell.source,
         checks,
     }
 }
@@ -1300,6 +1419,17 @@ fn cmd_doctor_from_parsed(args: JsonProgressArgs) {
             "{} {}",
             text_status_badge(report.status.as_str()),
             text_kv("root", report.root.as_str())
+        );
+        println!(
+            "{}",
+            text_kv(
+                "active_shell",
+                &format!(
+                    "{} ({})",
+                    report.active_shell.as_deref().unwrap_or("unknown"),
+                    report.active_shell_source
+                )
+            )
         );
         print!("{}", text_section("Checks"));
         for check in &report.checks {
