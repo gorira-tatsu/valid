@@ -1496,6 +1496,12 @@ fn cmd_onboarding_from_parsed(args: OnboardingArgs) {
             Some("Run `valid doctor` to inspect the scaffold state, then use `valid init --repair` for any safe missing files.".to_string()),
         ),
         (
+            "warm_project_build",
+            vec!["build", "--quiet"],
+            "Warm the local Cargo build so the first review commands focus on model output instead of compile logs.",
+            Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo build` once the project toolchain is healthy.".to_string()),
+        ),
+        (
             "list_models",
             vec!["valid", "models"],
             "Confirm that the starter registry loads and exposes the scaffolded model.",
@@ -1789,6 +1795,10 @@ fn finish_onboarding(
         println!("{}", text_bullet("a scaffolded Cargo-first valid project"));
         println!(
             "{}",
+            text_bullet("a warmed local Cargo build for fast starter-model review")
+        );
+        println!(
+            "{}",
             text_bullet("an inspectable starter model named approval-model")
         );
         println!("{}", text_bullet("a first overview graph you can review"));
@@ -1798,6 +1808,7 @@ fn finish_onboarding(
         );
         println!("{}", text_bullet("artifact directories at `artifacts/`, `generated-tests/`, and `benchmarks/baselines/`"));
         print!("{}", text_section("Recap Commands"));
+        println!("{}", text_bullet(&text_command("cargo build --quiet")));
         println!("{}", text_bullet(&text_command("cargo valid models")));
         println!(
             "{}",

@@ -1548,8 +1548,10 @@ fn cli_onboarding_bootstraps_empty_project_non_interactively() {
     assert_eq!(report["valid_project_detected"], false);
     assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
     assert_eq!(report["stages"][1]["status"], "success");
-    assert_eq!(report["stages"][6]["stage_id"], "handoff_starter_model");
-    assert_eq!(report["stages"][6]["status"], "success");
+    assert_eq!(report["stages"][3]["stage_id"], "warm_project_build");
+    assert_eq!(report["stages"][3]["status"], "success");
+    assert_eq!(report["stages"][7]["stage_id"], "handoff_starter_model");
+    assert_eq!(report["stages"][7]["status"], "success");
     assert!(report["next_path_summaries"]
         .as_array()
         .unwrap()
@@ -1581,6 +1583,7 @@ fn cli_onboarding_text_output_recaps_first_value() {
     assert!(stdout.contains("You Now Have"));
     assert!(stdout.contains("approval-model"));
     assert!(stdout.contains("Recap Commands"));
+    assert!(stdout.contains("cargo build --quiet"));
     assert!(stdout.contains("cargo valid models"));
     assert!(stdout.contains("cargo valid inspect approval-model"));
     assert!(stdout.contains("cargo valid handoff approval-model"));
@@ -1622,6 +1625,7 @@ fn cli_onboarding_interactive_shows_command_output_before_next_prompt() {
     assert!(stdout.contains("stdout:"));
     assert!(stdout.contains("exit_code: 0"));
     assert!(stdout.contains("Press Enter for the next step"));
+    assert!(stdout.contains("command: cargo build --quiet"));
     assert!(stdout.contains("command: cargo valid inspect approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
@@ -1662,6 +1666,8 @@ fn cli_onboarding_skips_init_for_existing_scaffold() {
     assert_eq!(report["valid_project_detected"], true);
     assert_eq!(report["stages"][1]["stage_id"], "bootstrap_project");
     assert_eq!(report["stages"][1]["status"], "skipped");
+    assert_eq!(report["stages"][3]["stage_id"], "warm_project_build");
+    assert_eq!(report["stages"][3]["status"], "success");
 
     let _ = fs::remove_dir_all(project_dir);
 }

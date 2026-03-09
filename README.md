@@ -96,6 +96,8 @@ above.
 That is enough to bootstrap a project, confirm the scaffold is healthy, inspect
 the starter model, render the first overview graph, and produce an
 implementation-facing handoff summary.
+Onboarding also warms the local Cargo build before the first `cargo valid ...`
+review step so later output stays centered on model results.
 
 If the walkthrough or local shell setup fails, run:
 
@@ -146,6 +148,18 @@ want to restore the missing files without overwriting existing work. Use
 `valid doctor` first when you need environment, PATH, completion, or
 project-readiness diagnostics. `cargo valid init` remains the
 compatibility path for an already-existing Cargo project:
+
+The onboarding walkthrough is effectively:
+
+```sh
+valid init
+valid init --check
+cargo build --quiet
+cargo valid models
+cargo valid inspect approval-model
+cargo valid graph approval-model --view=overview
+cargo valid handoff approval-model
+```
 
 ```toml
 registry = "valid/registry.rs"

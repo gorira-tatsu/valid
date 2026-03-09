@@ -19,6 +19,8 @@ being finalized.
 This gives you a working scaffold, confirms that the scaffold is healthy, shows
 the starter model, renders the first overview graph, and produces an
 implementation-facing handoff summary.
+Before the first model review command, onboarding also warms the local Cargo
+build so later steps stay focused on model output instead of compile logs.
 
 If this flow fails, run `valid doctor` first. If `doctor` reports missing
 scaffold files, use `valid init --repair` and rerun onboarding.
@@ -30,6 +32,7 @@ scaffold files, use `valid init --repair` and rerun onboarding.
 ```sh
 valid init
 valid init --check
+cargo build --quiet
 cargo valid models
 cargo valid inspect approval-model
 cargo valid graph approval-model --view=overview
