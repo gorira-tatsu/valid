@@ -1775,6 +1775,33 @@ fn cargo_valid_can_generate_shell_completions() {
         );
         assert!(stdout.contains("valid"));
     }
+
+    let fish = Command::new(cargo_valid_path())
+        .arg("completion")
+        .arg("fish")
+        .output()
+        .expect("fish completion should run");
+    let fish_stdout = String::from_utf8_lossy(&fish.stdout);
+    assert!(fish_stdout.contains("__fish_cargo_valid_model_names"));
+    assert!(fish_stdout.contains("cargo valid models 2>/dev/null"));
+
+    let bash = Command::new(cargo_valid_path())
+        .arg("completion")
+        .arg("bash")
+        .output()
+        .expect("bash completion should run");
+    let bash_stdout = String::from_utf8_lossy(&bash.stdout);
+    assert!(bash_stdout.contains("__valid_cargo_models()"));
+    assert!(bash_stdout.contains("cargo valid models 2>/dev/null"));
+
+    let zsh = Command::new(cargo_valid_path())
+        .arg("completion")
+        .arg("zsh")
+        .output()
+        .expect("zsh completion should run");
+    let zsh_stdout = String::from_utf8_lossy(&zsh.stdout);
+    assert!(zsh_stdout.contains("__valid_cargo_models()"));
+    assert!(zsh_stdout.contains("cargo valid models 2>/dev/null"));
 }
 
 #[test]

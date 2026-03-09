@@ -1617,7 +1617,169 @@ pub fn render_completion(surface: Surface, shell: &str) -> Result<String, String
             ))
         }
     }
-    String::from_utf8(buffer).map_err(|error| format!("completion output was not utf-8: {error}"))
+    let script = String::from_utf8(buffer)
+        .map_err(|error| format!("completion output was not utf-8: {error}"))?;
+    Ok(augment_completion(script, surface, shell))
+}
+
+fn augment_completion(script: String, surface: Surface, shell: &str) -> String {
+    match (surface, shell) {
+        (Surface::CargoValid, "fish") => {
+            format!("{script}\n{}", cargo_valid_fish_model_completion())
+        }
+        (Surface::CargoValid, "bash") => cargo_valid_bash_model_completion(script),
+        (Surface::CargoValid, "zsh") => cargo_valid_zsh_model_completion(script),
+        _ => script,
+    }
+}
+
+fn cargo_valid_model_commands() -> &'static [&'static str] {
+    &[
+        "inspect",
+        "graph",
+        "diagram",
+        "doc",
+        "handoff",
+        "lint",
+        "readiness",
+        "benchmark",
+        "bench",
+        "migrate",
+        "check",
+        "verify",
+        "explain",
+        "coverage",
+        "orchestrate",
+        "testgen",
+        "generate-tests",
+        "replay",
+    ]
+}
+
+fn cargo_valid_fish_model_completion() -> String {
+    let commands = cargo_valid_model_commands().join(" ");
+    format!(
+        r#"
+function __fish_cargo_valid_model_names
+    cargo valid models 2>/dev/null
+end
+
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from {commands}" -f -a "(__fish_cargo_valid_model_names)"
+"#
+    )
+}
+
+fn cargo_valid_bash_model_completion(script: String) -> String {
+    let commands = cargo_valid_model_commands()
+        .iter()
+        .map(|command| format!(r#""{command}""#))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let base = script.replacen("_cargo() {", "__valid_base_cargo_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_cargo_models() {{
+    cargo valid models 2>/dev/null
+}}
+
+__valid_cargo_model_command() {{
+    local i token expecting_value=0 saw_valid=0
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        if [[ $expecting_value -eq 1 ]]; then
+            expecting_value=0
+            continue
+        fi
+        if [[ "$token" == "valid" && $saw_valid -eq 0 ]]; then
+            saw_valid=1
+            continue
+        fi
+        if [[ $saw_valid -eq 0 ]]; then
+            continue
+        fi
+        case "$token" in
+            --manifest-path|--registry|--file|--example|--bin)
+                expecting_value=1
+                ;;
+            --*)
+                ;;
+            {commands})
+                printf '%s\n' "$token"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_cargo() {{
+    local cur
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    if [[ "${{COMP_WORDS[1]}}" == "valid" && "$cur" != -* ]]; then
+        local model_command
+        model_command="$(__valid_cargo_model_command)" || true
+        if [[ -n "$model_command" ]]; then
+            COMPREPLY=( $(compgen -W "$(__valid_cargo_models)" -- "$cur") )
+            if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
+                return 0
+            fi
+        fi
+    fi
+    __valid_base_cargo_completion "$@"
+}}
+"#
+    )
+}
+
+fn cargo_valid_zsh_model_completion(script: String) -> String {
+    let commands = cargo_valid_model_commands().join("|");
+    let base = script.replacen("_cargo() {", "__valid_base_cargo_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_cargo_models() {{
+    local -a models
+    models=("${{(@f)$(cargo valid models 2>/dev/null)}}")
+    (( ${{#models[@]}} )) || return 1
+    _describe -t models 'cargo valid models' models "$@"
+}}
+
+__valid_cargo_model_context() {{
+    local i token expecting_value=0 saw_valid=0
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        if (( expecting_value )); then
+            expecting_value=0
+            continue
+        fi
+        if [[ "$token" == "valid" && $saw_valid -eq 0 ]]; then
+            saw_valid=1
+            continue
+        fi
+        (( saw_valid )) || continue
+        case "$token" in
+            --manifest-path|--registry|--file|--example|--bin)
+                expecting_value=1
+                ;;
+            --*)
+                ;;
+            ({commands}))
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_cargo() {{
+    if __valid_cargo_model_context; then
+        __valid_cargo_models && return 0
+    fi
+    __valid_base_cargo_completion "$@"
+}}
+"#
+    )
 }
 
 fn completion_bin_name(surface: Surface) -> &'static str {
