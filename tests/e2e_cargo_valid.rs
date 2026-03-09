@@ -1304,7 +1304,9 @@ fn cargo_valid_external_registry_can_use_command_backend() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
     assert!(stdout.contains("\"status\":\"FAIL\""));
-    assert!(stdout.contains("ATTACH_BOUNDARY,ASSUME_SESSION,EVAL_BILLING_READ"));
+    assert!(stdout.contains("\"action_id\":\"ATTACH_BOUNDARY\""));
+    assert!(stdout.contains("\"action_id\":\"ASSUME_SESSION\""));
+    assert!(stdout.contains("\"action_id\":\"EVAL_BILLING_READ\""));
 }
 
 #[test]
@@ -1810,7 +1812,9 @@ fn cargo_valid_bundled_declarative_model_can_use_command_backend() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"property_id\":\"P_BILLING_READ_REQUIRES_SESSION\""));
     assert!(stdout.contains("\"status\":\"FAIL\""));
-    assert!(stdout.contains("ATTACH_BOUNDARY,ASSUME_SESSION,EVAL_BILLING_READ"));
+    assert!(stdout.contains("\"action_id\":\"ATTACH_BOUNDARY\""));
+    assert!(stdout.contains("\"action_id\":\"ASSUME_SESSION\""));
+    assert!(stdout.contains("\"action_id\":\"EVAL_BILLING_READ\""));
 }
 
 #[test]

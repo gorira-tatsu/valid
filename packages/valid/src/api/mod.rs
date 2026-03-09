@@ -5732,6 +5732,14 @@ pub fn validate_capabilities_response(response: &CapabilitiesResponse) -> Result
         &response.capabilities.backend_name,
         "capabilities.backend_name",
     )?;
+    require_non_empty(
+        &response.capabilities.selfcheck_status,
+        "capabilities.selfcheck_status",
+    )?;
+    require_non_empty(
+        &response.capabilities.parity_status,
+        "capabilities.parity_status",
+    )?;
     if let Some(reason) = &response.capabilities.availability_reason {
         require_non_empty(reason, "capabilities.availability_reason")?;
     }
@@ -6849,12 +6857,20 @@ property P_RECOVERY_VISIBLE:
             response.capabilities.available,
             crate::solver::sat_varisat_compiled_in()
         );
+        assert!(response.capabilities.preferred);
+        #[cfg(feature = "varisat-backend")]
+        {
+            assert_eq!(response.capabilities.selfcheck_status, "verifiable");
+            assert_eq!(response.capabilities.parity_status, "ready");
+        }
         #[cfg(not(feature = "varisat-backend"))]
         {
             assert_eq!(
                 response.capabilities.availability_reason.as_deref(),
                 Some("this binary was built without the varisat-backend feature")
             );
+            assert_eq!(response.capabilities.selfcheck_status, "unavailable");
+            assert_eq!(response.capabilities.parity_status, "unavailable");
             assert!(response
                 .capabilities
                 .remediation

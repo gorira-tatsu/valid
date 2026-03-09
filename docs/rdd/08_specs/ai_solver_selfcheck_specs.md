@@ -447,12 +447,21 @@ function assignment_to_trace(assignment):
 ### 11.1 項目
 
 - `backend_name`
+- `preferred`
+- `builtin`
+- `compiled_in`
+- `available`
+- `availability_reason`
+- `remediation`
 - `supports_explicit`
 - `supports_bmc`
 - `supports_certificate`
 - `supports_trace`
 - `supports_witness`
 - `selfcheck_compatible`
+- `selfcheck_status`
+- `parity_status`
+- `temporal`
 
 ### 11.2 JSON例
 
@@ -460,20 +469,40 @@ function assignment_to_trace(assignment):
 {
   "schema_version": "1.0.0",
   "request_id": "req-cap-0001",
-  "backend": "explicit",
+  "backend": "sat-varisat",
   "capabilities": {
-    "backend_name": "explicit",
-    "supports_explicit": true,
-    "supports_bmc": false,
+    "backend_name": "sat-varisat",
+    "preferred": true,
+    "builtin": true,
+    "compiled_in": true,
+    "available": true,
+    "availability_reason": null,
+    "remediation": null,
+    "supports_explicit": false,
+    "supports_bmc": true,
     "supports_certificate": false,
     "supports_trace": true,
-    "supports_witness": false,
-    "selfcheck_compatible": true
+    "supports_witness": true,
+    "selfcheck_compatible": true,
+    "selfcheck_status": "verifiable",
+    "parity_status": "ready",
+    "temporal": {
+      "status": "unavailable",
+      "semantics": "temporal lowering is not available in this backend",
+      "assurance_levels": [],
+      "supported_operators": [],
+      "unsupported_operators": ["G", "F", "X", "U"],
+      "notes": [
+        "use backend=explicit for reachable-graph temporal checks",
+        "use backend=mock-bmc only for bounded bug-finding"
+      ]
+    }
   }
 }
 ```
 
 `supports_trace = false` の backend は `FAIL` の本番ゲートに使わない。`command` backend は `ACTIONS` を返す限り `supports_trace = true` とみなす。
+`preferred = true` は default backend ではなく「この種別の問題に対して推奨される path」である。現時点では `sat-varisat` を main SAT path とし、`explicit` は broadest fallback と parity reference を担う。
 
 ## 11.4 Orchestrate aggregate coverage
 
@@ -504,6 +533,7 @@ Phase 2 対象:
 - predecessor 復元
 - coverage 集計
 - contract hash 正規化
+- preferred SAT backend の parity/selfcheck 監査
 
 ### 12.1 spec 例
 
@@ -531,7 +561,7 @@ selfcheck replay_matches_terminal_state
 ### 13.3 CLI例
 
 ```text
-valid selfcheck run --suite kernel-core --json
+valid selfcheck --json
 ```
 
 ## 14. J-3 Selfcheck artifact形式
@@ -541,19 +571,47 @@ valid selfcheck run --suite kernel-core --json
 ```json
 {
   "schema_version": "1.0.0",
-  "suite_id": "kernel-core",
-  "run_id": "selfcheck-20260306-0001",
+  "suite_id": "selfcheck-smoke",
+  "run_id": "selfcheck-local-0001",
   "status": "PASS",
-  "cases": [
+  "backends": [
     {
-      "case_id": "expr_addition_preserves_bounds",
+      "backend": "explicit",
+      "preferred": false,
+      "compiled_in": true,
+      "available": true,
       "status": "PASS",
-      "evidence_id": null
+      "selfcheck_status": "verified",
+      "parity_status": "reference",
+      "availability_reason": null,
+      "remediation": null
     },
     {
-      "case_id": "replay_matches_terminal_state",
+      "backend": "sat-varisat",
+      "preferred": true,
+      "compiled_in": true,
+      "available": true,
       "status": "PASS",
-      "evidence_id": null
+      "selfcheck_status": "verifiable",
+      "parity_status": "ready",
+      "availability_reason": null,
+      "remediation": null
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "expr-eval",
+      "status": "PASS",
+      "backend": null,
+      "summary": null,
+      "details": null
+    },
+    {
+      "case_id": "varisat-explicit-parity",
+      "status": "PASS",
+      "backend": "sat-varisat",
+      "summary": "sat-varisat should agree with explicit on the shortest bounded-choice counterexample.",
+      "details": "nirvash-style checker parity: identical normalized action sequence and terminal state."
     }
   ]
 }
@@ -564,6 +622,14 @@ valid selfcheck run --suite kernel-core --json
 - 通常 run artifact と別ディレクトリに保存する。
 - `artifacts/selfcheck/<suite-id>/<run-id>/report.json`
 - evidence がある場合も同一配下に置く。
+- backend summary は suite-level readiness として扱い、case-level verdict とは分ける。
+
+### 14.3 Nirvash-core から採る方針
+
+- `ModelCheckConfig` / `ModelCase` の discipline を selfcheck と parity fixture の組み立てに採る
+- `CounterexampleKind` の考え方を internal normalization に採る
+- `ProtocolConformanceSpec` 的な witness 指向は `handoff` / `testgen` の replayability 要件に反映する
+- fairness / LTL 汎化、doc graph、symmetry reduction までは本 spec の対象外とする
 
 ## 15. API失敗例
 

@@ -55,6 +55,8 @@ The product story is now:
 - handoff summaries that point at prioritized recommended generated vectors
 - dynamic shell completion plus `completion install`
 - failure, deadlock, and SCC-oriented graph views
+- backend-aware selfcheck reports with explicit reference checks and sat-varisat
+  parity when the SAT backend is compiled in
 - artifact indexing and run-history surfaces
 
 ## What It Can Do
@@ -67,6 +69,8 @@ The product story is now:
 - Rank and dedupe generated vectors for implementation handoff
 - Run Rust-defined models through `cargo-valid`
 - Run the preferred embedded SAT path through `sat-varisat`
+- Report backend preference, selfcheck readiness, and parity readiness before a
+  solver-backed run
 - Run a bounded `smt-cvc5` path for the current MVP subset
 - Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
 

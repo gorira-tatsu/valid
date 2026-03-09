@@ -64,6 +64,7 @@ use valid::{
         render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
+    solver::{capabilities_for_config, AdapterConfig},
     support::artifact_index::{
         load_artifact_index, load_run_history, render_artifact_inventory_json,
         render_artifact_inventory_text,
@@ -1253,6 +1254,31 @@ fn build_doctor_report(root: &PathBuf) -> DoctorReport {
             None
         } else {
             Some("Reinstall `valid` so the Cargo subcommand is available, or add the install directory to PATH.".to_string())
+        },
+    });
+
+    let sat_varisat = capabilities_for_config(&AdapterConfig::SatVarisat);
+    checks.push(DoctorCheckReport {
+        check_id: "sat_varisat_backend".to_string(),
+        status: if sat_varisat.available { "ok" } else { "warn" }.to_string(),
+        summary: if sat_varisat.available {
+            "`sat-varisat` is available as the preferred SAT backend.".to_string()
+        } else {
+            "`sat-varisat` is not available in this binary, so SAT-backed checks are not currently ready.".to_string()
+        },
+        details: Some(format!(
+            "backend={}, preferred={}, compiled_in={}, available={}, selfcheck_status={}, parity_status={}",
+            sat_varisat.backend_name,
+            sat_varisat.preferred,
+            sat_varisat.compiled_in,
+            sat_varisat.available,
+            sat_varisat.selfcheck_status,
+            sat_varisat.parity_status
+        )),
+        repair_hint: if sat_varisat.available {
+            Some("Run `valid selfcheck --json` to confirm solver parity and replayability for the preferred SAT path.".to_string())
+        } else {
+            sat_varisat.remediation.clone()
         },
     });
 
@@ -3121,6 +3147,7 @@ fn cmd_capabilities(args: Vec<String>) {
                 print_capabilities_json(&response);
             } else {
                 println!("backend: {}", response.backend);
+                println!("preferred: {}", response.capabilities.preferred);
                 println!("builtin: {}", response.capabilities.builtin);
                 println!("compiled_in: {}", response.capabilities.compiled_in);
                 println!("available: {}", response.capabilities.available);
@@ -3148,6 +3175,11 @@ fn cmd_capabilities(args: Vec<String>) {
                     "selfcheck_compatible: {}",
                     response.capabilities.selfcheck_compatible
                 );
+                println!(
+                    "selfcheck_status: {}",
+                    response.capabilities.selfcheck_status
+                );
+                println!("parity_status: {}", response.capabilities.parity_status);
                 println!("temporal.status: {}", response.capabilities.temporal.status);
                 println!(
                     "temporal.semantics: {}",
@@ -4055,8 +4087,24 @@ fn cmd_selfcheck(args: Vec<String>) {
         println!("suite_id: {}", report.suite_id);
         println!("run_id: {}", report.run_id);
         println!("status: {}", report.status);
+        for backend in &report.backends {
+            println!(
+                "backend {}: {} (preferred={}, compiled_in={}, available={}, selfcheck_status={}, parity_status={})",
+                backend.backend,
+                backend.status,
+                backend.preferred,
+                backend.compiled_in,
+                backend.available,
+                backend.selfcheck_status,
+                backend.parity_status
+            );
+        }
         for case in report.cases {
-            println!("case {}: {}", case.case_id, case.status);
+            if let Some(backend) = case.backend.as_deref() {
+                println!("case {} [{}]: {}", case.case_id, backend, case.status);
+            } else {
+                println!("case {}: {}", case.case_id, case.status);
+            }
         }
     }
 }
@@ -4221,11 +4269,12 @@ fn resolve_project_dir(
 
 fn print_capabilities_json(response: &CapabilitiesResponse) {
     println!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"preferred\":{},\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"selfcheck_status\":\"{}\",\"parity_status\":\"{}\",\"temporal\":{{\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}}}}}",
         response.schema_version,
         response.request_id,
         response.backend,
         response.capabilities.backend_name,
+        response.capabilities.preferred,
         response.capabilities.builtin,
         response.capabilities.compiled_in,
         response.capabilities.available,
@@ -4237,6 +4286,8 @@ fn print_capabilities_json(response: &CapabilitiesResponse) {
         response.capabilities.supports_trace,
         response.capabilities.supports_witness,
         response.capabilities.selfcheck_compatible,
+        response.capabilities.selfcheck_status,
+        response.capabilities.parity_status,
         response.capabilities.temporal.status,
         response.capabilities.temporal.semantics,
         render_string_array(&response.capabilities.temporal.assurance_levels),

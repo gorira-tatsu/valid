@@ -9,8 +9,8 @@ use crate::{
     evidence::{validate_trace, EvidenceKind, EvidenceTrace, TraceStep},
     frontend::compile_model,
     ir::{
-        ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr, PropertyKind,
-        SourceSpan, StateField, UpdateIr, Value,
+        parse_action_identity, ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr,
+        PropertyIr, PropertyKind, SourceSpan, StateField, UpdateIr, Value,
     },
     kernel::{
         eval::eval_expr,
@@ -18,6 +18,7 @@ use crate::{
         replay::replay_actions,
         transition::{apply_action, build_initial_state},
     },
+    solver::{capabilities_for_config, run_with_adapter, AdapterConfig},
     support::{
         artifact::selfcheck_report_path,
         artifact_index::{record_artifact, ArtifactRecord},
@@ -31,6 +32,22 @@ use crate::{
 pub struct SelfcheckCase {
     pub case_id: String,
     pub status: String,
+    pub backend: Option<String>,
+    pub summary: Option<String>,
+    pub details: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfcheckBackendSummary {
+    pub backend: String,
+    pub preferred: bool,
+    pub compiled_in: bool,
+    pub available: bool,
+    pub status: String,
+    pub selfcheck_status: String,
+    pub parity_status: String,
+    pub availability_reason: Option<String>,
+    pub remediation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +56,7 @@ pub struct SelfcheckReport {
     pub suite_id: String,
     pub run_id: String,
     pub status: String,
+    pub backends: Vec<SelfcheckBackendSummary>,
     pub cases: Vec<SelfcheckCase>,
 }
 
@@ -53,17 +71,28 @@ pub fn run_smoke_selfcheck() -> SelfcheckReport {
     cases.push(run_coverage_case());
     cases.push(run_contract_hash_case());
 
-    let status = if cases.iter().all(|case| case.status == "PASS") {
-        "PASS"
-    } else {
-        "FAIL"
-    };
+    let explicit_caps = capabilities_for_config(&AdapterConfig::Explicit);
+    let mut backends = vec![SelfcheckBackendSummary {
+        backend: explicit_caps.backend_name,
+        preferred: explicit_caps.preferred,
+        compiled_in: explicit_caps.compiled_in,
+        available: explicit_caps.available,
+        status: summarize_case_status(&cases).to_string(),
+        selfcheck_status: explicit_caps.selfcheck_status,
+        parity_status: explicit_caps.parity_status,
+        availability_reason: explicit_caps.availability_reason,
+        remediation: explicit_caps.remediation,
+    }];
+    let (varisat_backend, varisat_cases) = run_varisat_backend_suite();
+    backends.push(varisat_backend);
+    cases.extend(varisat_cases);
 
     SelfcheckReport {
         schema_version: "1.0.0".to_string(),
         suite_id: "selfcheck-smoke".to_string(),
         run_id: "selfcheck-local-0001".to_string(),
-        status: status.to_string(),
+        status: summarize_case_status(&cases).to_string(),
+        backends,
         cases,
     }
 }
@@ -75,18 +104,48 @@ pub fn render_selfcheck_json(report: &SelfcheckReport) -> String {
     out.push_str(&format!(",\"suite_id\":\"{}\"", report.suite_id));
     out.push_str(&format!(",\"run_id\":\"{}\"", report.run_id));
     out.push_str(&format!(",\"status\":\"{}\"", report.status));
+    out.push_str(",\"backends\":[");
+    for (index, backend) in report.backends.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"backend\":\"{}\",\"preferred\":{},\"compiled_in\":{},\"available\":{},\"status\":\"{}\",\"selfcheck_status\":\"{}\",\"parity_status\":\"{}\",\"availability_reason\":{},\"remediation\":{}}}",
+            backend.backend,
+            backend.preferred,
+            backend.compiled_in,
+            backend.available,
+            backend.status,
+            backend.selfcheck_status,
+            backend.parity_status,
+            render_optional_json_string(backend.availability_reason.as_deref()),
+            render_optional_json_string(backend.remediation.as_deref()),
+        ));
+    }
+    out.push(']');
     out.push_str(",\"cases\":[");
     for (index, case) in report.cases.iter().enumerate() {
         if index > 0 {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"case_id\":\"{}\",\"status\":\"{}\"}}",
-            case.case_id, case.status
+            "{{\"case_id\":\"{}\",\"status\":\"{}\",\"backend\":{},\"summary\":{},\"details\":{}}}",
+            case.case_id,
+            case.status,
+            render_optional_json_string(case.backend.as_deref()),
+            render_optional_json_string(case.summary.as_deref()),
+            render_optional_json_string(case.details.as_deref()),
         ));
     }
     out.push_str("]}");
     out
+}
+
+fn render_optional_json_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
+    }
 }
 
 pub fn write_selfcheck_artifact(report: &SelfcheckReport) -> Result<String, String> {
@@ -112,6 +171,15 @@ pub fn validate_selfcheck_report(report: &SelfcheckReport) -> Result<(), String>
     if !matches!(report.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
         return Err("status must be PASS, FAIL, or UNKNOWN".to_string());
     }
+    if report.backends.is_empty() {
+        return Err("selfcheck report must contain at least one backend".to_string());
+    }
+    for backend in &report.backends {
+        require_non_empty(&backend.backend, "backends[].backend")?;
+        require_non_empty(&backend.status, "backends[].status")?;
+        require_non_empty(&backend.selfcheck_status, "backends[].selfcheck_status")?;
+        require_non_empty(&backend.parity_status, "backends[].parity_status")?;
+    }
     if report.cases.is_empty() {
         return Err("selfcheck report must contain at least one case".to_string());
     }
@@ -119,6 +187,9 @@ pub fn validate_selfcheck_report(report: &SelfcheckReport) -> Result<(), String>
         require_non_empty(&case.case_id, "cases[].case_id")?;
         if !matches!(case.status.as_str(), "PASS" | "FAIL" | "UNKNOWN") {
             return Err("case status must be PASS, FAIL, or UNKNOWN".to_string());
+        }
+        if let Some(backend) = &case.backend {
+            require_non_empty(backend, "cases[].backend")?;
         }
     }
     Ok(())
@@ -131,12 +202,205 @@ pub fn validate_rendered_selfcheck_json(body: &str) -> Result<(), String> {
     require_string_field(object, "suite_id")?;
     require_string_field(object, "run_id")?;
     require_string_field(object, "status")?;
+    for backend in require_array_field(object, "backends")? {
+        let backend_object = require_object(backend, "backends[]")?;
+        require_string_field(backend_object, "backend")?;
+        require_string_field(backend_object, "status")?;
+        require_string_field(backend_object, "selfcheck_status")?;
+        require_string_field(backend_object, "parity_status")?;
+    }
     for case in require_array_field(object, "cases")? {
         let case_object = require_object(case, "cases[]")?;
         require_string_field(case_object, "case_id")?;
         require_string_field(case_object, "status")?;
     }
     Ok(())
+}
+
+fn summarize_case_status(cases: &[SelfcheckCase]) -> &'static str {
+    if cases.iter().any(|case| case.status == "FAIL") {
+        "FAIL"
+    } else if cases.iter().any(|case| case.status == "PASS") {
+        "PASS"
+    } else {
+        "UNKNOWN"
+    }
+}
+
+fn run_varisat_backend_suite() -> (SelfcheckBackendSummary, Vec<SelfcheckCase>) {
+    let caps = capabilities_for_config(&AdapterConfig::SatVarisat);
+    if !caps.available {
+        let cases = vec![SelfcheckCase {
+            case_id: "varisat-backend-availability".to_string(),
+            status: "UNKNOWN".to_string(),
+            backend: Some("sat-varisat".to_string()),
+            summary: caps.availability_reason.clone(),
+            details: caps.remediation.clone(),
+        }];
+        return (
+            SelfcheckBackendSummary {
+                backend: caps.backend_name,
+                preferred: caps.preferred,
+                compiled_in: caps.compiled_in,
+                available: caps.available,
+                status: "UNKNOWN".to_string(),
+                selfcheck_status: caps.selfcheck_status,
+                parity_status: caps.parity_status,
+                availability_reason: caps.availability_reason,
+                remediation: caps.remediation,
+            },
+            cases,
+        );
+    }
+
+    let cases = vec![
+        run_varisat_pass_case(),
+        run_varisat_counterexample_case(),
+        run_varisat_parity_case(),
+    ];
+    (
+        SelfcheckBackendSummary {
+            backend: caps.backend_name,
+            preferred: caps.preferred,
+            compiled_in: caps.compiled_in,
+            available: caps.available,
+            status: summarize_case_status(&cases).to_string(),
+            selfcheck_status: caps.selfcheck_status,
+            parity_status: caps.parity_status,
+            availability_reason: caps.availability_reason,
+            remediation: caps.remediation,
+        },
+        cases,
+    )
+}
+
+fn run_varisat_pass_case() -> SelfcheckCase {
+    let status = match run_selfcheck_backend_case(
+        "model VarisatPass\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Add:\n  choose delta: 1, 2\n  pre: x + {{delta}} <= 2\n  post:\n    x = x + {{delta}}\nproperty P_SAFE:\n  invariant: x <= 2\n",
+        "P_SAFE",
+        AdapterConfig::SatVarisat,
+    ) {
+        Ok(outcome) if matches!(outcome_status(&outcome), Some(RunStatus::Pass)) => "PASS",
+        _ => "FAIL",
+    };
+    SelfcheckCase {
+        case_id: "varisat-pass-bounded-invariant".to_string(),
+        status: status.to_string(),
+        backend: Some("sat-varisat".to_string()),
+        summary: Some(
+            "sat-varisat should prove the bounded invariant within the finite horizon.".to_string(),
+        ),
+        details: None,
+    }
+}
+
+fn run_varisat_counterexample_case() -> SelfcheckCase {
+    let status = match run_selfcheck_backend_case(
+        "model VarisatFail\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Add:\n  choose delta: 1, 2\n  pre: x + {{delta}} <= 2\n  post:\n    x = x + {{delta}}\nproperty P_SAFE:\n  invariant: x <= 1\n",
+        "P_SAFE",
+        AdapterConfig::SatVarisat,
+    ) {
+        Ok(CheckOutcome::Completed(result))
+            if result.status == RunStatus::Fail
+                && result.trace.as_ref().is_some_and(|trace| {
+                    validate_trace(trace).is_ok()
+                        && trace.steps.len() == 1
+                        && trace.steps[0].action_id.as_deref() == Some("Add[delta=2]")
+                        && parse_action_identity(
+                            trace.steps[0].action_id.as_deref().unwrap_or_default()
+                        )
+                        .parameter_bindings
+                        .iter()
+                        .any(|binding| binding.name == "delta" && binding.value == "2")
+                }) =>
+        {
+            "PASS"
+        }
+        _ => "FAIL",
+    };
+    SelfcheckCase {
+        case_id: "varisat-counterexample-replay".to_string(),
+        status: status.to_string(),
+        backend: Some("sat-varisat".to_string()),
+        summary: Some("sat-varisat should emit a replayable counterexample trace with bounded-choice metadata.".to_string()),
+        details: None,
+    }
+}
+
+fn run_varisat_parity_case() -> SelfcheckCase {
+    let source = "model VarisatParity\nstate:\n  x: u8[0..2]\ninit:\n  x = 0\naction Add:\n  choose delta: 1, 2\n  pre: x + {{delta}} <= 2\n  post:\n    x = x + {{delta}}\nproperty P_SAFE:\n  invariant: x <= 1\n";
+    let explicit = run_selfcheck_backend_case(source, "P_SAFE", AdapterConfig::Explicit);
+    let varisat = run_selfcheck_backend_case(source, "P_SAFE", AdapterConfig::SatVarisat);
+    let status = match (explicit, varisat) {
+        (Ok(CheckOutcome::Completed(explicit)), Ok(CheckOutcome::Completed(varisat)))
+            if explicit.status == RunStatus::Fail && varisat.status == RunStatus::Fail =>
+        {
+            let explicit_actions = trace_action_ids(explicit.trace.as_ref());
+            let varisat_actions = trace_action_ids(varisat.trace.as_ref());
+            let explicit_terminal = explicit
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.steps.last())
+                .map(|step| step.state_after.clone());
+            let varisat_terminal = varisat
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.steps.last())
+                .map(|step| step.state_after.clone());
+            if explicit_actions == vec!["Add[delta=2]".to_string()]
+                && explicit_actions == varisat_actions
+                && explicit_terminal == varisat_terminal
+            {
+                "PASS"
+            } else {
+                "FAIL"
+            }
+        }
+        _ => "FAIL",
+    };
+    SelfcheckCase {
+        case_id: "varisat-explicit-parity".to_string(),
+        status: status.to_string(),
+        backend: Some("sat-varisat".to_string()),
+        summary: Some("sat-varisat should agree with explicit on the shortest bounded-choice counterexample.".to_string()),
+        details: Some("nirvash-style checker parity: identical normalized action sequence and terminal state.".to_string()),
+    }
+}
+
+fn run_selfcheck_backend_case(
+    source: &str,
+    property_id: &str,
+    backend: AdapterConfig,
+) -> Result<CheckOutcome, String> {
+    let model = compile_model(source).map_err(|diagnostics| {
+        diagnostics
+            .first()
+            .map(|diagnostic| diagnostic.message.clone())
+            .unwrap_or_else(|| "selfcheck model failed to compile".to_string())
+    })?;
+    let mut plan = RunPlan::default();
+    plan.property_selection = PropertySelection::ExactlyOne(property_id.to_string());
+    plan.search_bounds.max_depth = Some(4);
+    Ok(run_with_adapter(&model, &plan, &backend)?.outcome)
+}
+
+fn outcome_status(outcome: &CheckOutcome) -> Option<RunStatus> {
+    match outcome {
+        CheckOutcome::Completed(result) => Some(result.status),
+        CheckOutcome::Errored(_) => None,
+    }
+}
+
+fn trace_action_ids(trace: Option<&EvidenceTrace>) -> Vec<String> {
+    trace
+        .map(|trace| {
+            trace
+                .steps
+                .iter()
+                .filter_map(|step| step.action_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn run_expr_case() -> SelfcheckCase {
@@ -154,6 +418,9 @@ fn run_expr_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "expr-eval".to_string(),
         status: status.to_string(),
+        backend: None,
+        summary: None,
+        details: None,
     }
 }
 
@@ -172,6 +439,9 @@ fn run_guard_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "guard-eval".to_string(),
         status: status.to_string(),
+        backend: None,
+        summary: None,
+        details: None,
     }
 }
 
@@ -185,6 +455,9 @@ fn run_transition_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "transition-apply".to_string(),
         status: status.to_string(),
+        backend: None,
+        summary: None,
+        details: None,
     }
 }
 
@@ -197,6 +470,9 @@ fn run_replay_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "trace-replay".to_string(),
         status: status.to_string(),
+        backend: None,
+        summary: None,
+        details: None,
     }
 }
 
@@ -214,6 +490,11 @@ fn run_engine_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "explicit-counterexample".to_string(),
         status: status.to_string(),
+        backend: Some("explicit".to_string()),
+        summary: Some(
+            "explicit remains the reference backend for kernel-level selfcheck.".to_string(),
+        ),
+        details: None,
     }
 }
 
@@ -241,6 +522,9 @@ fn run_predecessor_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "predecessor-trace".to_string(),
         status: status.to_string(),
+        backend: Some("explicit".to_string()),
+        summary: None,
+        details: None,
     }
 }
 
@@ -278,6 +562,9 @@ fn run_coverage_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "coverage-aggregate".to_string(),
         status: status.to_string(),
+        backend: Some("explicit".to_string()),
+        summary: None,
+        details: None,
     }
 }
 
@@ -295,6 +582,9 @@ fn run_contract_hash_case() -> SelfcheckCase {
     SelfcheckCase {
         case_id: "contract-hash-deterministic".to_string(),
         status: status.to_string(),
+        backend: None,
+        summary: None,
+        details: None,
     }
 }
 
@@ -596,6 +886,14 @@ mod tests {
         let report = run_smoke_selfcheck();
         assert_eq!(report.status, "PASS");
         assert!(report.cases.len() >= 8);
+        assert!(report
+            .backends
+            .iter()
+            .any(|backend| backend.backend == "explicit"));
+        assert!(report
+            .backends
+            .iter()
+            .any(|backend| backend.backend == "sat-varisat"));
         let case_ids = report
             .cases
             .iter()
@@ -604,6 +902,10 @@ mod tests {
         assert!(case_ids.contains(&"predecessor-trace"));
         assert!(case_ids.contains(&"coverage-aggregate"));
         assert!(case_ids.contains(&"contract-hash-deterministic"));
+        assert!(
+            case_ids.contains(&"varisat-backend-availability")
+                || case_ids.contains(&"varisat-explicit-parity")
+        );
         validate_selfcheck_report(&report).unwrap();
     }
 
@@ -619,6 +921,7 @@ mod tests {
         let report = run_smoke_selfcheck();
         let json = render_selfcheck_json(&report);
         assert!(json.contains("\"suite_id\":\"selfcheck-smoke\""));
+        assert!(json.contains("\"backends\":["));
         validate_rendered_selfcheck_json(&json).unwrap();
         let path = write_selfcheck_artifact(&report).unwrap();
         assert!(path.ends_with("/report.json"));

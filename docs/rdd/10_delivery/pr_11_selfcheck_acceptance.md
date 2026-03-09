@@ -17,8 +17,11 @@
 2. guard evaluation selfcheck がある。
 3. transition selfcheck がある。
 4. trace replay selfcheck がある。
-5. selfcheck CI job が通常 CI と分離される。
+5. `SelfcheckReport` が backend summary を持ち、`explicit` と `sat-varisat` の readiness を分けて返す。
+6. `sat-varisat` が利用可能な build では parity case があり、正規化済み action sequence と terminal state が `explicit` と一致する。
+7. selfcheck CI job が通常 CI と分離される。
 
 ## 3. DoD
 
 - `SelfcheckReport` JSON golden を持つ。
+- preferred SAT backend が unavailable の場合も selfcheck runner は crash せず、structured `UNKNOWN` と remediation を返す。

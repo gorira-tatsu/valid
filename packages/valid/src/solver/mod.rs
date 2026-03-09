@@ -12,6 +12,7 @@ use crate::{
     evidence::{EvidenceKind, EvidenceTrace, TraceStep},
     ir::ModelIr,
     kernel::replay::replay_actions,
+    kernel::transition::{apply_action, build_initial_state},
     support::{
         diagnostics::{Diagnostic, DiagnosticSegment, ErrorCode},
         hash::stable_hash_hex,
@@ -28,6 +29,7 @@ use self::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityMatrix {
     pub backend_name: String,
+    pub preferred: bool,
     pub builtin: bool,
     pub compiled_in: bool,
     pub available: bool,
@@ -39,6 +41,8 @@ pub struct CapabilityMatrix {
     pub supports_trace: bool,
     pub supports_witness: bool,
     pub selfcheck_compatible: bool,
+    pub selfcheck_status: String,
+    pub parity_status: String,
     pub temporal: TemporalCapabilityMatrix,
 }
 
@@ -157,8 +161,10 @@ pub fn mcp_backend_names() -> Vec<&'static str> {
 
 pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
     format!(
-        "{{\"backend\":\"{}\",\"capabilities\":{{\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"temporal\":{}}}}}",
+        "{{\"backend\":\"{}\",\"capabilities\":{{\"backend_name\":\"{}\",\"preferred\":{},\"builtin\":{},\"compiled_in\":{},\"available\":{},\"availability_reason\":{},\"remediation\":{},\"supports_explicit\":{},\"supports_bmc\":{},\"supports_certificate\":{},\"supports_trace\":{},\"supports_witness\":{},\"selfcheck_compatible\":{},\"selfcheck_status\":\"{}\",\"parity_status\":\"{}\",\"temporal\":{}}}}}",
         matrix.backend_name,
+        matrix.backend_name,
+        matrix.preferred,
         matrix.builtin,
         matrix.compiled_in,
         matrix.available,
@@ -170,6 +176,8 @@ pub fn render_capability_matrix_json(matrix: &CapabilityMatrix) -> String {
         matrix.supports_trace,
         matrix.supports_witness,
         matrix.selfcheck_compatible,
+        matrix.selfcheck_status,
+        matrix.parity_status,
         render_temporal_capability_json(&matrix.temporal),
     )
 }
@@ -182,6 +190,8 @@ pub fn validate_capability_matrix(matrix: &CapabilityMatrix) -> Result<(), Strin
     if let Some(remediation) = &matrix.remediation {
         require_non_empty(remediation, "remediation")?;
     }
+    require_non_empty(&matrix.selfcheck_status, "selfcheck_status")?;
+    require_non_empty(&matrix.parity_status, "parity_status")?;
     require_non_empty(&matrix.temporal.status, "temporal.status")?;
     require_non_empty(&matrix.temporal.semantics, "temporal.semantics")?;
     Ok(())
@@ -378,6 +388,7 @@ impl SolverAdapter for ExplicitAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "explicit".to_string(),
+            preferred: false,
             builtin: true,
             compiled_in: true,
             available: true,
@@ -389,6 +400,8 @@ impl SolverAdapter for ExplicitAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: true,
+            selfcheck_status: "verified".to_string(),
+            parity_status: "reference".to_string(),
             temporal: complete_temporal_support(vec![
                 "evaluated over the explored reachable graph with fixpoint semantics".to_string(),
                 "when max_depth is configured, the same operators remain available but the assurance level becomes bounded".to_string(),
@@ -477,6 +490,7 @@ impl SolverAdapter for MockBmcAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "mock-bmc".to_string(),
+            preferred: false,
             builtin: true,
             compiled_in: true,
             available: true,
@@ -488,6 +502,8 @@ impl SolverAdapter for MockBmcAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            selfcheck_status: "unsupported".to_string(),
+            parity_status: "unsupported".to_string(),
             temporal: bounded_temporal_support(vec![
                 "temporal properties are checked only within the configured depth bound"
                     .to_string(),
@@ -580,6 +596,7 @@ impl SolverAdapter for Cvc5Adapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "smt-cvc5".to_string(),
+            preferred: false,
             builtin: false,
             compiled_in: false,
             available: true,
@@ -591,6 +608,8 @@ impl SolverAdapter for Cvc5Adapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            selfcheck_status: "unsupported".to_string(),
+            parity_status: "experimental".to_string(),
             temporal: unavailable_temporal_support(
                 "SMT adapter does not yet lower temporal expressions; use backend=explicit or mock-bmc for bounded temporal checks",
             ),
@@ -697,6 +716,7 @@ impl SolverAdapter for VarisatAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: "sat-varisat".to_string(),
+            preferred: true,
             builtin: true,
             compiled_in: cfg!(feature = "varisat-backend"),
             available: cfg!(feature = "varisat-backend"),
@@ -718,6 +738,16 @@ impl SolverAdapter for VarisatAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: true,
+            selfcheck_status: if cfg!(feature = "varisat-backend") {
+                "verifiable".to_string()
+            } else {
+                "unavailable".to_string()
+            },
+            parity_status: if cfg!(feature = "varisat-backend") {
+                "ready".to_string()
+            } else {
+                "unavailable".to_string()
+            },
             temporal: unavailable_temporal_support(
                 "SAT adapter does not yet lower temporal expressions; use backend=explicit or mock-bmc for bounded temporal checks",
             ),
@@ -818,6 +848,7 @@ impl SolverAdapter for CommandSolverAdapter {
     fn capabilities(&self) -> CapabilityMatrix {
         CapabilityMatrix {
             backend_name: self.backend_name.clone(),
+            preferred: false,
             builtin: false,
             compiled_in: false,
             available: true,
@@ -829,6 +860,8 @@ impl SolverAdapter for CommandSolverAdapter {
             supports_trace: true,
             supports_witness: true,
             selfcheck_compatible: false,
+            selfcheck_status: "unsupported".to_string(),
+            parity_status: "unsupported".to_string(),
             temporal: unavailable_temporal_support(
                 "command backends do not declare temporal semantics in the normalized protocol; advertise temporal support explicitly before relying on them",
             ),
@@ -971,35 +1004,14 @@ fn normalize_protocol_result(
                 AssuranceLevel::Incomplete
             }
         });
-    let trace = if protocol.actions.is_empty() {
-        None
-    } else {
-        let terminal =
-            replay_actions(model, &protocol.actions).map_err(|diagnostic| diagnostic.message)?;
-        let initial = crate::kernel::transition::build_initial_state(model)
-            .map_err(|diagnostic| diagnostic.message)?;
-        Some(EvidenceTrace {
-            schema_version: "1.0.0".to_string(),
-            evidence_id: format!("ev-{}", run_plan.manifest.run_id),
-            run_id: run_plan.manifest.run_id.clone(),
-            property_id: property_id.clone(),
-            evidence_kind: protocol_trace_kind(property_kind, protocol.status.as_str()),
-            assurance_level,
-            trace_hash: stable_hash_hex(&protocol.actions.join("\u{1f}")),
-            steps: vec![TraceStep {
-                index: 0,
-                from_state_id: "s-000000".to_string(),
-                action_id: Some(protocol.actions.join(",")),
-                action_label: Some("external-sequence".to_string()),
-                to_state_id: "s-000001".to_string(),
-                depth: protocol.actions.len() as u32,
-                state_before: initial.as_named_map(model),
-                state_after: terminal.as_named_map(model),
-                path: None,
-                note: Some("normalized from command adapter".to_string()),
-            }],
-        })
-    };
+    let trace = build_protocol_trace(
+        model,
+        run_plan,
+        &property_id,
+        protocol_trace_kind(property_kind.clone(), protocol.status.as_str()),
+        assurance_level,
+        &protocol.actions,
+    )?;
 
     let outcome = match protocol.status.as_str() {
         "PASS" => CheckOutcome::Completed(ExplicitRunResult {
@@ -1131,6 +1143,61 @@ fn normalize_protocol_result(
     };
 
     Ok(NormalizedRunResult { outcome, trace })
+}
+
+fn build_protocol_trace(
+    model: &ModelIr,
+    run_plan: &RunPlan,
+    property_id: &str,
+    evidence_kind: EvidenceKind,
+    assurance_level: AssuranceLevel,
+    actions: &[String],
+) -> Result<Option<EvidenceTrace>, String> {
+    if actions.is_empty() {
+        return Ok(None);
+    }
+
+    let mut state = build_initial_state(model).map_err(|diagnostic| diagnostic.message)?;
+    let mut steps = Vec::with_capacity(actions.len());
+    for (index, action_id) in actions.iter().enumerate() {
+        let next = apply_action(model, &state, action_id)
+            .map_err(|diagnostic| diagnostic.message)?
+            .ok_or_else(|| format!("action `{action_id}` was not enabled during solver replay"))?;
+        let action = model
+            .actions
+            .iter()
+            .find(|candidate| candidate.action_id == *action_id);
+        steps.push(TraceStep {
+            index,
+            from_state_id: format!("s-{index:06}"),
+            action_id: Some(action_id.clone()),
+            action_label: action
+                .map(|candidate| candidate.label.clone())
+                .or_else(|| Some(action_id.clone())),
+            to_state_id: format!("s-{:06}", index + 1),
+            depth: (index + 1) as u32,
+            state_before: state.as_named_map(model),
+            state_after: next.as_named_map(model),
+            path: action.map(|candidate| candidate.decision_path()),
+            note: if index + 1 == actions.len() {
+                Some("normalized from solver adapter".to_string())
+            } else {
+                None
+            },
+        });
+        state = next;
+    }
+
+    Ok(Some(EvidenceTrace {
+        schema_version: "1.0.0".to_string(),
+        evidence_id: format!("ev-{}", run_plan.manifest.run_id),
+        run_id: run_plan.manifest.run_id.clone(),
+        property_id: property_id.to_string(),
+        evidence_kind,
+        assurance_level,
+        trace_hash: stable_hash_hex(&actions.join("\u{1f}")),
+        steps,
+    }))
 }
 
 fn protocol_trace_kind(property_kind: crate::ir::PropertyKind, status: &str) -> EvidenceKind {
@@ -1265,6 +1332,8 @@ mod tests {
         let caps = adapter.capabilities();
         assert!(caps.supports_bmc);
         assert!(caps.supports_witness);
+        assert!(!caps.preferred);
+        assert_eq!(caps.selfcheck_status, "unsupported");
         assert_eq!(caps.temporal.status, "bounded");
         validate_capability_matrix(&caps).unwrap();
         assert!(render_capability_matrix_json(&caps).contains("\"backend\":\"mock-bmc\""));
@@ -1309,6 +1378,38 @@ mod tests {
             Some(UnknownReason::TimeLimitReached)
         );
         assert!(result.property_result.summary.contains("command"));
+        let trace = normalized.trace.expect("normalized trace");
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].action_id.as_deref(), Some("Jump"));
+    }
+
+    #[test]
+    fn protocol_normalization_preserves_stepwise_actions() {
+        let adapter = CommandSolverAdapter {
+            backend_name: "cmd".to_string(),
+            executable: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "printf 'STATUS=FAIL\\nACTIONS=Step,Jump\\nASSURANCE_LEVEL=BOUNDED\\nREASON_CODE=SOLVER_REPORTED_FAIL\\nSUMMARY=command%20backend'".to_string(),
+            ],
+        };
+        let model = compile_model(
+            "model A\nstate:\n  x: u8[0..3]\ninit:\n  x = 0\naction Step:\n  pre: x == 0\n  post:\n    x = 1\naction Jump:\n  pre: x == 1\n  post:\n    x = 3\nproperty P_SAFE:\n  invariant: x <= 2\n",
+        )
+        .unwrap();
+        let mut run_plan = RunPlan::default();
+        run_plan.property_selection = PropertySelection::ExactlyOne("P_SAFE".to_string());
+        let plan = adapter.build_plan(&model, &run_plan).unwrap();
+        let raw = adapter.run(&model, &plan).unwrap();
+        let normalized = adapter.normalize(&model, &run_plan, raw).unwrap();
+        let trace = normalized.trace.expect("normalized trace");
+        assert_eq!(trace.steps.len(), 2);
+        assert_eq!(trace.steps[0].action_id.as_deref(), Some("Step"));
+        assert_eq!(trace.steps[1].action_id.as_deref(), Some("Jump"));
+        assert_eq!(
+            trace.steps[1].state_after.get("x"),
+            Some(&crate::ir::Value::UInt(3))
+        );
     }
 
     #[test]

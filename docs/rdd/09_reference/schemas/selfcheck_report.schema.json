@@ -2,12 +2,43 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema.selfcheck_report",
   "type": "object",
-  "required": ["schema_version", "suite_id", "run_id", "status", "cases"],
+  "required": ["schema_version", "suite_id", "run_id", "status", "backends", "cases"],
   "properties": {
     "schema_version": { "type": "string" },
     "suite_id": { "type": "string" },
     "run_id": { "type": "string" },
     "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
-    "cases": { "type": "array", "items": { "type": "object" } }
+    "backends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["backend", "preferred", "compiled_in", "available", "status", "selfcheck_status", "parity_status"],
+        "properties": {
+          "backend": { "type": "string" },
+          "preferred": { "type": "boolean" },
+          "compiled_in": { "type": "boolean" },
+          "available": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+          "selfcheck_status": { "type": "string" },
+          "parity_status": { "type": "string" },
+          "availability_reason": { "type": ["string", "null"] },
+          "remediation": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "status"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+          "backend": { "type": ["string", "null"] },
+          "summary": { "type": ["string", "null"] },
+          "details": { "type": ["string", "null"] }
+        }
+      }
+    }
   }
 }

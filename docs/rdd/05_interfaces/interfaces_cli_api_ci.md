@@ -199,6 +199,7 @@ MVP の `strategy` は次を受け付ける。
 - backend ごとの capability matrix を取得する
 - AI と CI が backend 選択前に機能差分を確認できるようにする
 - `command` backend では `solver_executable` と `solver_args[]` の整合を事前に検証する
+- `sat-varisat` が現在の preferred SAT backend かどうか、selfcheck readiness、explicit parity readiness を機械可読に返す
 
 Temporal reporting:
 
@@ -209,6 +210,13 @@ Temporal reporting:
   - `unavailable`: その backend は temporal lowering を提供しない
 - `capabilities.temporal.assurance_levels[]` はその backend が返しうる assurance を明示する
 - inspect/readiness でも temporal property が存在する場合は backend-by-backend の temporal matrix を含め、`explicit` の complete semantics と `mock-bmc` の bounded-only semantics を混同しない
+
+Backend readiness reporting:
+
+- `capabilities.preferred` は現在の推奨 backend かどうかを返す
+- `capabilities.selfcheck_status` は `verified | verifiable | unavailable | unsupported` などの短い状態語で selfcheck readiness を返す
+- `capabilities.parity_status` は `reference | ready | experimental | unavailable | unsupported` などの短い状態語で parity の期待レベルを返す
+- `sat-varisat` は finite declarative subset での main SAT path とし、`explicit` は broadest fallback かつ parity reference として扱う
 
 ## 5. API設計
 

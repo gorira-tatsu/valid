@@ -37,6 +37,8 @@ That smaller build does not compile in `sat-varisat`.
 `valid capabilities --backend=sat-varisat` will report `available=false`, and
 `valid mcp` will omit `sat-varisat` from advertised backend enums unless the
 binary was built with `--features varisat-backend`.
+`valid selfcheck --json` will also mark the preferred SAT backend as unavailable
+instead of pretending parity is ready.
 
 ## Important Limitation
 
@@ -88,6 +90,18 @@ valid doctor
 
 Use `valid doctor` for shell/PATH/Cargo/project diagnostics first. If it reports
 safe scaffold drift, continue with `valid init --repair`.
+
+After install, these two commands tell you whether the preferred SAT path is
+really usable in this binary:
+
+```sh
+valid capabilities --backend=sat-varisat
+valid selfcheck --json
+```
+
+`valid capabilities` reports `preferred`, `selfcheck_status`, and
+`parity_status`. `valid selfcheck --json` reports backend-level readiness plus
+the varisat parity cases when that backend is compiled in.
 
 ## Project Setup
 

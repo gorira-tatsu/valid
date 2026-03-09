@@ -318,15 +318,20 @@ fn cli_capabilities_reports_sat_backend_availability() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"backend\":\"sat-varisat\""));
+    assert!(stdout.contains("\"preferred\":true"));
     #[cfg(feature = "varisat-backend")]
     {
         assert!(stdout.contains("\"compiled_in\":true"));
         assert!(stdout.contains("\"available\":true"));
+        assert!(stdout.contains("\"selfcheck_status\":\"verifiable\""));
+        assert!(stdout.contains("\"parity_status\":\"ready\""));
     }
     #[cfg(not(feature = "varisat-backend"))]
     {
         assert!(stdout.contains("\"compiled_in\":false"));
         assert!(stdout.contains("\"available\":false"));
+        assert!(stdout.contains("\"selfcheck_status\":\"unavailable\""));
+        assert!(stdout.contains("\"parity_status\":\"unavailable\""));
         assert!(stdout.contains(
             "\"availability_reason\":\"this binary was built without the varisat-backend feature\""
         ));
@@ -1414,6 +1419,7 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
         .collect::<Vec<_>>();
     assert!(check_ids.contains(&"shell_path"));
     assert!(check_ids.contains(&"shell_completion"));
+    assert!(check_ids.contains(&"sat_varisat_backend"));
     assert!(check_ids.contains(&"mcp_project_readiness"));
     assert!(check_ids.contains(&"publish_readiness"));
     let scaffold = report["checks"]
@@ -1430,6 +1436,16 @@ fn cli_doctor_reports_ok_for_fresh_scaffold() {
         .find(|check| check["check_id"] == "publish_readiness")
         .expect("publish readiness check");
     assert_eq!(publish["status"], "ok");
+    let sat_varisat = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["check_id"] == "sat_varisat_backend")
+        .expect("sat-varisat check");
+    #[cfg(feature = "varisat-backend")]
+    assert_eq!(sat_varisat["status"], "ok");
+    #[cfg(not(feature = "varisat-backend"))]
+    assert_eq!(sat_varisat["status"], "warn");
 
     let _ = fs::remove_dir_all(project_dir);
 }
