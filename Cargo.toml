@@ -2,6 +2,11 @@
 name = "valid"
 version = "0.1.0"
 edition = "2021"
+description = "Finite-state verification for business-rule models with a Rust DSL and cargo-valid workflows."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/gorira-tatsu/valid"
+homepage = "https://github.com/gorira-tatsu/valid"
 
 [features]
 default = ["verification-runtime"]

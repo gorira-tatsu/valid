@@ -19,6 +19,8 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Request payload for comparing a generated test vector with an implementation
+/// surface.
 pub struct ConformanceRequest {
     pub schema_version: String,
     pub vector: TestVector,
@@ -27,6 +29,7 @@ pub struct ConformanceRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Raw implementation response consumed by the conformance comparer.
 pub struct ConformanceResponse {
     pub schema_version: String,
     pub status: String,
@@ -41,6 +44,7 @@ pub struct ConformanceResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One observation-level mismatch between a generated vector and the SUT.
 pub struct ObservationMismatch {
     pub index: usize,
     pub expected: BTreeMap<String, Value>,
@@ -49,6 +53,7 @@ pub struct ObservationMismatch {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Normalized mismatch categories returned by conformance flows.
 pub enum ConformanceMismatchKind {
     State,
     Property,
@@ -68,6 +73,7 @@ impl ConformanceMismatchKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Structured mismatch item with fix-surface guidance.
 pub struct ConformanceMismatch {
     pub kind: ConformanceMismatchKind,
     pub likely_fix_surface: String,
@@ -85,6 +91,7 @@ pub struct ConformanceMismatch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Reviewer-oriented summary of the conformance run.
 pub struct ConformanceReviewSummary {
     pub headline: String,
     pub trace_steps: usize,
@@ -94,6 +101,8 @@ pub struct ConformanceReviewSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Top-level structured conformance report returned by CLI, MCP, and library
+/// helpers.
 pub struct ConformanceReport {
     pub schema_version: String,
     pub vector_id: String,
@@ -120,6 +129,8 @@ pub struct ConformanceReport {
     pub review_summary: ConformanceReviewSummary,
 }
 
+/// Trait-based integration point for Rust implementations that can be driven
+/// directly from generated test vectors.
 pub trait RustConformanceHarness {
     fn harness_name(&self) -> &'static str {
         std::any::type_name::<Self>()
@@ -132,6 +143,8 @@ pub trait RustConformanceHarness {
     }
 }
 
+/// Build a conformance-oriented test vector from a model and an explicit action
+/// sequence.
 pub fn build_vector_from_actions(
     model: &ModelIr,
     property_id: Option<&str>,
@@ -223,6 +236,7 @@ pub fn build_vector_from_actions(
     Ok(vector)
 }
 
+/// Run conformance against an external JSON-speaking runner process.
 pub fn run_conformance(
     vector: &TestVector,
     runner: &str,
@@ -275,6 +289,7 @@ pub fn run_conformance(
     Ok(compare_conformance(vector, runner, &response))
 }
 
+/// Run conformance directly against an in-process Rust harness.
 pub fn run_rust_conformance<H: RustConformanceHarness>(
     vector: &TestVector,
     harness: &mut H,
@@ -326,6 +341,8 @@ pub fn run_rust_conformance<H: RustConformanceHarness>(
     )
 }
 
+/// Compare a generated vector with an implementation response and classify the
+/// resulting mismatches.
 pub fn compare_conformance(
     vector: &TestVector,
     runner: &str,
@@ -684,6 +701,7 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
+/// Render a [`ConformanceReport`] to JSON for CLI or artifact output.
 pub fn render_conformance_report_json(report: &ConformanceReport) -> Result<String, String> {
     serde_json::to_string(report)
         .map_err(|err| format!("failed to serialize conformance report: {err}"))

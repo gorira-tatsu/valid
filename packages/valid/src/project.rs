@@ -3,12 +3,14 @@ use std::{collections::BTreeMap, env, fs, path::Path};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// One model-to-property entry inside a named property suite.
 pub struct PropertySuiteEntry {
     pub model: String,
     pub properties: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+/// Rerun hints derived from contract drift or document drift.
 pub struct RerunRecommendations {
     pub affected_critical_properties: Vec<String>,
     pub affected_property_suites: Vec<String>,
@@ -18,6 +20,7 @@ pub struct RerunRecommendations {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// One concrete rerun or repair suggestion produced from project policy.
 pub struct RerunSuggestion {
     pub action: String,
     pub target: String,
@@ -25,6 +28,7 @@ pub struct RerunSuggestion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+/// Project-level coverage thresholds for suite and CI workflows.
 pub struct CoverageGates {
     pub minimum_overall_coverage_percent: Option<u32>,
     pub minimum_business_coverage_percent: Option<u32>,
@@ -33,6 +37,7 @@ pub struct CoverageGates {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+/// Project-level verification policy derived from `valid.toml`.
 pub struct VerificationPolicy {
     pub suite_models: Vec<String>,
     pub critical_properties: BTreeMap<String, Vec<String>>,
@@ -43,6 +48,7 @@ pub struct VerificationPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+/// Parsed `valid.toml` project configuration.
 pub struct ProjectConfig {
     pub registry: Option<String>,
     pub default_backend: Option<String>,
@@ -66,6 +72,7 @@ pub struct ProjectConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Result returned after scaffolding a new `valid` project layout.
 pub struct InitScaffoldResult {
     pub status: String,
     pub root: String,
@@ -86,6 +93,7 @@ pub struct InitScaffoldResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Read-only scaffold health check report for `valid init --check`.
 pub struct InitCheckResult {
     pub status: String,
     pub root: String,
@@ -99,6 +107,7 @@ pub struct InitCheckResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// Non-destructive repair report for `valid init --repair`.
 pub struct InitRepairResult {
     pub status: String,
     pub root: String,
@@ -115,6 +124,7 @@ enum ConfigSection {
     PropertySuite(String),
 }
 
+/// Load `valid.toml` from a project root if it exists.
 pub fn load_project_config(root: &Path) -> Result<Option<ProjectConfig>, String> {
     let path = root.join("valid.toml");
     if !path.exists() {
@@ -126,6 +136,7 @@ pub fn load_project_config(root: &Path) -> Result<Option<ProjectConfig>, String>
     Ok(Some(config))
 }
 
+/// Parse a `valid.toml` body into a [`ProjectConfig`].
 pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
     let mut config = ProjectConfig::default();
     let mut section = ConfigSection::TopLevel;
@@ -187,6 +198,8 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
     Ok(config)
 }
 
+/// Project the user-facing verification policy view from a parsed
+/// [`ProjectConfig`].
 pub fn verification_policy(config: &ProjectConfig) -> VerificationPolicy {
     VerificationPolicy {
         suite_models: config.suite_models.clone(),
@@ -198,6 +211,7 @@ pub fn verification_policy(config: &ProjectConfig) -> VerificationPolicy {
     }
 }
 
+/// Render the starter `valid.toml` template used by `valid init`.
 pub fn render_project_config_template(registry: &str) -> String {
     format!(
         "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\npreferred_backends = [\"explicit\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 80\nminimum_business_coverage_percent = 75\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 70\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
@@ -205,6 +219,7 @@ pub fn render_project_config_template(registry: &str) -> String {
     )
 }
 
+/// Create the standard `valid` project scaffold in a target directory.
 pub fn scaffold_project_init(
     root: &Path,
     registry: &str,
@@ -354,6 +369,7 @@ pub fn scaffold_project_init(
     })
 }
 
+/// Validate the current project against the supported `valid init` scaffold.
 pub fn check_project_init(root: &Path, expected_registry: &str) -> InitCheckResult {
     let cargo_toml = root.join("Cargo.toml");
     let valid_toml = root.join("valid.toml");
@@ -474,6 +490,7 @@ pub fn check_project_init(root: &Path, expected_registry: &str) -> InitCheckResu
     }
 }
 
+/// Repair missing safe scaffold assets without overwriting existing files.
 pub fn repair_project_init(
     root: &Path,
     expected_registry: &str,
@@ -612,6 +629,7 @@ pub fn repair_project_init(
     })
 }
 
+/// Map a changed model id to rerun guidance using the current project policy.
 pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRecommendations {
     let affected_critical_properties = config
         .critical_properties
@@ -693,6 +711,7 @@ pub fn rerun_recommendations(config: &ProjectConfig, model_id: &str) -> RerunRec
     }
 }
 
+/// Map documentation drift sections to repair surfaces.
 pub fn doc_repair_surfaces(drift_sections: &[String]) -> Vec<String> {
     let mut repair_surfaces = vec!["generated_doc".to_string()];
     if drift_sections
@@ -707,6 +726,7 @@ pub fn doc_repair_surfaces(drift_sections: &[String]) -> Vec<String> {
     repair_surfaces
 }
 
+/// Build rerun suggestions for documentation drift outputs.
 pub fn doc_suggested_reruns(output_path: &str, drift_sections: &[String]) -> Vec<RerunSuggestion> {
     let mut suggested_reruns = vec![RerunSuggestion {
         action: "regenerate_doc".to_string(),
@@ -743,11 +763,13 @@ fn sanitize_model_id(model_id: &str) -> String {
         .collect()
 }
 
+/// Render the starter registry source used by `valid init`.
 pub fn render_registry_source_template() -> String {
     r#"use valid::{registry::run_registry_cli, valid_models};
 
 include!("models/approval.rs");
 
+/// Starter runtime entrypoint used by scaffolded generated projects.
 pub fn run() {
     run_registry_cli(valid_models![
         "approval-model" => ApprovalModel,
@@ -757,10 +779,12 @@ pub fn run() {
     .to_string()
 }
 
+/// Render the starter `valid/models/mod.rs` file.
 pub fn render_registry_models_mod_template() -> String {
     "// Add model modules in this directory and include them from ../registry.rs.\n".to_string()
 }
 
+/// Render the starter approval model file used by `valid init`.
 pub fn render_registry_model_template() -> String {
     r#"use valid::{valid_actions, valid_model, valid_state};
 
@@ -794,6 +818,7 @@ valid_model! {
     .to_string()
 }
 
+/// Render the starter `src/main.rs` registry binary.
 pub fn render_registry_main_template() -> String {
     r#"#[path = "../valid/registry.rs"]
 mod valid_registry;
@@ -805,6 +830,7 @@ fn main() {
     .to_string()
 }
 
+/// Render the scaffolded Codex MCP config snippet.
 pub fn render_bootstrap_codex_config() -> String {
     r#"[mcp_servers.valid_registry]
 command = "valid"
@@ -813,6 +839,7 @@ args = ["mcp", "--project", "."]
     .to_string()
 }
 
+/// Render the scaffolded Claude Code MCP config snippet.
 pub fn render_bootstrap_claude_code_config() -> String {
     r#"{
   "mcpServers": {
@@ -830,6 +857,7 @@ pub fn render_bootstrap_claude_code_config() -> String {
     .to_string()
 }
 
+/// Render the scaffolded Claude Desktop MCP config snippet.
 pub fn render_bootstrap_claude_desktop_config() -> String {
     r#"{
   "mcpServers": {
@@ -848,6 +876,7 @@ pub fn render_bootstrap_claude_desktop_config() -> String {
     .to_string()
 }
 
+/// Render the scaffolded onboarding and AI bootstrap guide.
 pub fn render_bootstrap_ai_readme() -> String {
     r#"# AI Bootstrap
 
@@ -903,6 +932,7 @@ When the scaffold stops being enough:
     .to_string()
 }
 
+/// Render the scaffolded `docs/rdd/README.md`.
 pub fn render_rdd_readme() -> String {
     r#"# RDD
 

@@ -3,6 +3,7 @@
 use crate::{api::InspectResponse, evidence::EvidenceTrace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Public graph-view selector used by CLI and report renderers.
 pub enum GraphView {
     Overview,
     Logic,
@@ -24,6 +25,7 @@ impl GraphView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Property-focused slice of the inspect graph around a failing trace.
 pub struct FailureGraphSlice {
     pub property_id: String,
     pub failing_action_id: Option<String>,
@@ -59,6 +61,8 @@ struct ActionGraphSummary {
     sccs: Vec<ActionGraphScc>,
 }
 
+/// Build a focused graph slice around the last failing step of an evidence
+/// trace.
 pub fn build_failure_graph_slice(
     response: &InspectResponse,
     trace: &EvidenceTrace,
@@ -160,6 +164,7 @@ fn capability_mode_label(response: &InspectResponse) -> String {
     }
 }
 
+/// Render an evidence trace as a Mermaid state diagram.
 pub fn render_trace_mermaid(trace: &EvidenceTrace) -> String {
     let mut out = String::from("stateDiagram-v2\n");
     if trace.steps.is_empty() {
@@ -183,6 +188,7 @@ pub fn render_trace_mermaid(trace: &EvidenceTrace) -> String {
     out
 }
 
+/// Render an evidence trace as a Mermaid sequence diagram.
 pub fn render_trace_sequence_mermaid(trace: &EvidenceTrace) -> String {
     let mut out = String::from("sequenceDiagram\n");
     out.push_str("  participant Engine\n");
@@ -206,10 +212,12 @@ pub fn render_trace_sequence_mermaid(trace: &EvidenceTrace) -> String {
     out
 }
 
+/// Render an inspect response as the default Mermaid graph view.
 pub fn render_model_mermaid(response: &InspectResponse) -> String {
     render_model_mermaid_with_view(response, GraphView::Overview)
 }
 
+/// Render an inspect response as Mermaid using the selected [`GraphView`].
 pub fn render_model_mermaid_with_view(response: &InspectResponse, view: GraphView) -> String {
     match view {
         GraphView::Overview => render_model_mermaid_overview(response),
