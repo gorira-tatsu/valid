@@ -97,8 +97,6 @@ const CONTRACT_USAGE: &str =
     "usage: <registry-bin> contract <snapshot|lock|drift|check> [lock-file] [--json] [--progress=json]";
 const SCHEMA_USAGE: &str = "usage: <registry-bin> schema <command>";
 const BATCH_USAGE: &str = "usage: <registry-bin> batch [--json] [--progress=json] < batch.json";
-const COMPLETION_USAGE: &str = "usage: <registry-bin> completion <bash|fish|zsh>";
-
 pub struct RegisteredModel {
     pub name: &'static str,
     pub inspect: fn(&str) -> InspectResponse,
@@ -174,7 +172,7 @@ pub fn run_registry_cli(models: Vec<RegisteredModel>) {
         "replay" => cmd_replay(&models, remaining),
         "contract" => cmd_contract(&models, remaining),
         "commands" => cmd_commands(remaining),
-        "completion" => cmd_completion(remaining),
+        "completion" => cmd_completion(&models, remaining),
         "schema" => cmd_schema(remaining),
         "batch" => cmd_batch(remaining),
         "help" => usage_exit("registry", json, REGISTRY_USAGE),
@@ -1790,17 +1788,55 @@ fn cmd_commands(args: Vec<String>) {
     }
 }
 
-fn cmd_completion(args: Vec<String>) {
-    let shell = args
-        .iter()
-        .find(|arg| !arg.starts_with("--"))
-        .map(String::as_str)
-        .unwrap_or_else(|| usage_exit("completion", false, COMPLETION_USAGE));
-    match render_completion(Surface::Registry, shell) {
-        Ok(script) => print!("{script}"),
-        Err(message) => message_exit("completion", false, &message, Some(COMPLETION_USAGE)),
+fn cmd_completion(models: &[RegisteredModel], args: Vec<String>) {
+    let usage = "usage: <registry-bin> completion <bash|fish|zsh>\n       <registry-bin> completion candidates <models|properties|actions|views> [target]";
+    let args = args
+        .into_iter()
+        .filter(|arg| arg != "--json")
+        .collect::<Vec<_>>();
+    let Some(first) = args.first().map(String::as_str) else {
+        usage_exit("completion", false, usage);
+    };
+    match first {
+        "candidates" => {
+            let kind = args
+                .get(1)
+                .map(String::as_str)
+                .unwrap_or_else(|| usage_exit("completion", false, usage));
+            let target = args.get(2).map(String::as_str);
+            for value in completion_candidates_registry(models, kind, target) {
+                println!("{value}");
+            }
+        }
+        shell => match render_completion(Surface::Registry, shell) {
+            Ok(script) => print!("{script}"),
+            Err(message) => message_exit("completion", false, &message, Some(usage)),
+        },
     }
     process::exit(ExitCode::Success.code());
+}
+
+fn completion_candidates_registry(
+    models: &[RegisteredModel],
+    kind: &str,
+    target: Option<&str>,
+) -> Vec<String> {
+    match kind {
+        "models" => models.iter().map(|model| model.name.to_string()).collect(),
+        "properties" => target
+            .and_then(|name| models.iter().find(|model| model.name == name))
+            .map(|model| (model.inspect)("registry-completion").properties)
+            .unwrap_or_default(),
+        "actions" => target
+            .and_then(|name| models.iter().find(|model| model.name == name))
+            .map(|model| (model.inspect)("registry-completion").actions)
+            .unwrap_or_default(),
+        "views" => ["overview", "logic", "failure", "deadlock", "scc"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn cmd_schema(args: Vec<String>) {

@@ -20,12 +20,12 @@ use valid::{
         validate_testgen_response, CapabilitiesRequest, CapabilitiesResponse, CheckRequest,
         DistinguishRequest, InspectRequest, MinimizeRequest, OrchestrateRequest, TestgenRequest,
     },
-    bundled_models::{coverage_bundled_model, is_bundled_model_ref},
+    bundled_models::{coverage_bundled_model, is_bundled_model_ref, list_bundled_models},
     cli::{
-        child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
-        parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
-        render_commands_text, render_completion, render_schema_json, usage_diagnostic, BatchResult,
-        ExitCode, ProgressReporter, Surface,
+        child_stream_to_json, detect_json_flag, detect_progress_json_flag, install_completion,
+        message_diagnostic, parse_batch_request, render_batch_response, render_cli_error_json,
+        render_commands_json, render_commands_text, render_completion, render_schema_json,
+        usage_diagnostic, BatchResult, ExitCode, ProgressReporter, Surface,
     },
     conformance::{build_vector_from_actions, render_conformance_report_json, run_conformance},
     contract::{
@@ -107,7 +107,14 @@ enum ValidCommand {
 
 #[derive(Args, Debug, Clone)]
 struct CompletionArgs {
-    shell: String,
+    #[arg(allow_hyphen_values = true)]
+    args: Vec<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    shell_config: bool,
+    #[arg(long, action = ArgAction::SetTrue)]
+    stdout: bool,
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -2653,10 +2660,99 @@ fn cmd_commands(args: Vec<String>) {
 }
 
 fn cmd_completion(args: CompletionArgs) {
-    match render_completion(Surface::Valid, &args.shell) {
-        Ok(script) => print!("{script}"),
-        Err(message) => message_exit("completion", false, &message, None),
+    let usage = "usage: valid completion <bash|fish|zsh>\n       valid completion install <bash|fish|zsh> [--shell-config] [--stdout] [--json]\n       valid completion candidates <models|properties|actions|views> [target]";
+    let json = args.json || args.args.iter().any(|arg| arg == "--json");
+    let shell_config = args.shell_config || args.args.iter().any(|arg| arg == "--shell-config");
+    let stdout = args.stdout || args.args.iter().any(|arg| arg == "--stdout");
+    let positional = args
+        .args
+        .iter()
+        .filter(|arg| !matches!(arg.as_str(), "--json" | "--shell-config" | "--stdout"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let Some(first) = positional.first().map(String::as_str) else {
+        usage_exit("completion", json, usage);
+    };
+    match first {
+        "install" => {
+            let shell = positional
+                .get(1)
+                .map(String::as_str)
+                .unwrap_or_else(|| usage_exit("completion", json, usage));
+            match install_completion(Surface::Valid, shell, shell_config, stdout) {
+                Ok(result) => {
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&result)
+                                .expect("completion install json should serialize")
+                        );
+                    } else {
+                        println!("status: {}", result.status);
+                        println!("command: {}", result.command);
+                        println!("shell: {}", result.shell);
+                        println!("written_files: {}", result.written_files.join(", "));
+                        if !result.updated_shell_configs.is_empty() {
+                            println!(
+                                "updated_shell_configs: {}",
+                                result.updated_shell_configs.join(", ")
+                            );
+                        }
+                    }
+                }
+                Err(message) => message_exit("completion", json, &message, Some(usage)),
+            }
+        }
+        "candidates" => {
+            let kind = positional
+                .get(1)
+                .map(String::as_str)
+                .unwrap_or_else(|| usage_exit("completion", json, usage));
+            let target = positional.get(2).map(String::as_str);
+            for value in completion_candidates_valid(kind, target) {
+                println!("{value}");
+            }
+        }
+        shell => match render_completion(Surface::Valid, shell) {
+            Ok(script) => print!("{script}"),
+            Err(message) => message_exit("completion", json, &message, Some(usage)),
+        },
     }
+}
+
+fn completion_candidates_valid(kind: &str, target: Option<&str>) -> Vec<String> {
+    match kind {
+        "models" => list_bundled_models()
+            .into_iter()
+            .map(|model| format!("rust:{model}"))
+            .collect(),
+        "properties" => inspect_for_completion(target)
+            .map(|inspect| inspect.properties)
+            .unwrap_or_default(),
+        "actions" => inspect_for_completion(target)
+            .map(|inspect| inspect.actions)
+            .unwrap_or_default(),
+        "views" => ["overview", "logic", "failure", "deadlock", "scc"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn inspect_for_completion(target: Option<&str>) -> Option<valid::api::InspectResponse> {
+    let target = target?;
+    let source = if is_bundled_model_ref(target) {
+        String::new()
+    } else {
+        fs::read_to_string(target).ok()?
+    };
+    inspect_source(&InspectRequest {
+        request_id: "req-completion-candidates".to_string(),
+        source_name: target.to_string(),
+        source,
+    })
+    .ok()
 }
 
 fn cmd_schema(args: Vec<String>) {

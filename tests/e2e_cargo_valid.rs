@@ -1783,7 +1783,10 @@ fn cargo_valid_can_generate_shell_completions() {
         .expect("fish completion should run");
     let fish_stdout = String::from_utf8_lossy(&fish.stdout);
     assert!(fish_stdout.contains("__fish_cargo_valid_model_names"));
-    assert!(fish_stdout.contains("cargo valid models 2>/dev/null"));
+    assert!(fish_stdout.contains("cargo valid completion candidates models 2>/dev/null"));
+    assert!(fish_stdout.contains("cargo valid completion candidates properties $model 2>/dev/null"));
+    assert!(fish_stdout.contains("cargo valid completion candidates actions $model 2>/dev/null"));
+    assert!(fish_stdout.contains("cargo valid completion candidates views 2>/dev/null"));
 
     let bash = Command::new(cargo_valid_path())
         .arg("completion")
@@ -1792,7 +1795,14 @@ fn cargo_valid_can_generate_shell_completions() {
         .expect("bash completion should run");
     let bash_stdout = String::from_utf8_lossy(&bash.stdout);
     assert!(bash_stdout.contains("__valid_cargo_models()"));
-    assert!(bash_stdout.contains("cargo valid models 2>/dev/null"));
+    assert!(bash_stdout.contains("cargo valid completion candidates models 2>/dev/null"));
+    assert!(
+        bash_stdout.contains("cargo valid completion candidates properties \"$model\" 2>/dev/null")
+    );
+    assert!(
+        bash_stdout.contains("cargo valid completion candidates actions \"$model\" 2>/dev/null")
+    );
+    assert!(bash_stdout.contains("cargo valid completion candidates views 2>/dev/null"));
 
     let zsh = Command::new(cargo_valid_path())
         .arg("completion")
@@ -1801,7 +1811,30 @@ fn cargo_valid_can_generate_shell_completions() {
         .expect("zsh completion should run");
     let zsh_stdout = String::from_utf8_lossy(&zsh.stdout);
     assert!(zsh_stdout.contains("__valid_cargo_models()"));
-    assert!(zsh_stdout.contains("cargo valid models 2>/dev/null"));
+    assert!(zsh_stdout.contains("cargo valid completion candidates models 2>/dev/null"));
+    assert!(
+        zsh_stdout.contains("cargo valid completion candidates properties \"$model\" 2>/dev/null")
+    );
+    assert!(zsh_stdout.contains("cargo valid completion candidates actions \"$model\" 2>/dev/null"));
+    assert!(zsh_stdout.contains("cargo valid completion candidates views 2>/dev/null"));
+}
+
+#[test]
+fn cargo_valid_can_preview_completion_install() {
+    let _guard = cargo_guard();
+    let output = Command::new(cargo_valid_path())
+        .arg("completion")
+        .arg("install")
+        .arg("bash")
+        .arg("--stdout")
+        .arg("--json")
+        .output()
+        .expect("completion install should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"planned\""));
+    assert!(stdout.contains("\"shell\":\"bash\""));
+    assert!(stdout.contains("\"command\":\"cargo valid\""));
 }
 
 #[test]

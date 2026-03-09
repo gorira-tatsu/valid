@@ -1040,6 +1040,67 @@ fn cli_can_generate_shell_completions() {
             "{shell} completion should contain {marker}"
         );
     }
+
+    let fish = Command::new(binary_path())
+        .arg("completion")
+        .arg("fish")
+        .output()
+        .expect("fish completion should run");
+    let fish_stdout = String::from_utf8_lossy(&fish.stdout);
+    assert!(fish_stdout.contains("valid completion candidates models 2>/dev/null"));
+    assert!(fish_stdout.contains("valid completion candidates properties $model 2>/dev/null"));
+    assert!(fish_stdout.contains("valid completion candidates actions $model 2>/dev/null"));
+    assert!(fish_stdout.contains("valid completion candidates views 2>/dev/null"));
+
+    let bash = Command::new(binary_path())
+        .arg("completion")
+        .arg("bash")
+        .output()
+        .expect("bash completion should run");
+    let bash_stdout = String::from_utf8_lossy(&bash.stdout);
+    assert!(bash_stdout.contains("__valid_completion_model()"));
+    assert!(bash_stdout.contains("valid completion candidates properties \"$model\" 2>/dev/null"));
+    assert!(bash_stdout.contains("valid completion candidates actions \"$model\" 2>/dev/null"));
+    assert!(bash_stdout.contains("valid completion candidates views 2>/dev/null"));
+
+    let zsh = Command::new(binary_path())
+        .arg("completion")
+        .arg("zsh")
+        .output()
+        .expect("zsh completion should run");
+    let zsh_stdout = String::from_utf8_lossy(&zsh.stdout);
+    assert!(zsh_stdout.contains("__valid_completion_model()"));
+    assert!(zsh_stdout.contains("valid completion candidates properties \"$model\" 2>/dev/null"));
+    assert!(zsh_stdout.contains("valid completion candidates actions \"$model\" 2>/dev/null"));
+    assert!(zsh_stdout.contains("valid completion candidates views 2>/dev/null"));
+}
+
+#[test]
+fn cli_can_install_shell_completions() {
+    let temp_home = unique_temp_dir("valid-completion-install");
+    fs::create_dir_all(&temp_home).expect("temp home should exist");
+    let output = Command::new(binary_path())
+        .arg("completion")
+        .arg("install")
+        .arg("zsh")
+        .arg("--shell-config")
+        .arg("--json")
+        .env("HOME", &temp_home)
+        .output()
+        .expect("completion install should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"status\":\"installed\""));
+    assert!(stdout.contains("\"shell\":\"zsh\""));
+    let completion_path = temp_home.join(".zsh/completions/_valid");
+    let rc_path = temp_home.join(".zshrc");
+    assert!(completion_path.exists());
+    assert!(rc_path.exists());
+    let completion = fs::read_to_string(completion_path).expect("completion file must exist");
+    assert!(completion.contains("#compdef valid"));
+    let rc = fs::read_to_string(rc_path).expect("zshrc must exist");
+    assert!(rc.contains("fpath=(~/.zsh/completions $fpath)"));
+    assert!(rc.contains("autoload -Uz compinit && compinit"));
 }
 
 #[test]

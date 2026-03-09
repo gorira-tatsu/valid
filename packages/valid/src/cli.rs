@@ -1,3 +1,8 @@
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
 use clap::{Arg, ArgAction, Command};
 use clap_complete::{
     generate,
@@ -1622,13 +1627,145 @@ pub fn render_completion(surface: Surface, shell: &str) -> Result<String, String
     Ok(augment_completion(script, surface, shell))
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CompletionInstallResult {
+    pub status: String,
+    pub shell: String,
+    pub command: String,
+    pub written_files: Vec<String>,
+    pub updated_shell_configs: Vec<String>,
+}
+
+pub fn install_completion(
+    surface: Surface,
+    shell: &str,
+    shell_config: bool,
+    dry_run: bool,
+) -> Result<CompletionInstallResult, String> {
+    let script = render_completion(surface, shell)?;
+    let install_path = completion_install_path(surface, shell)?;
+    let mut written_files = Vec::new();
+    let mut updated_shell_configs = Vec::new();
+    if !dry_run {
+        if let Some(parent) = install_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create completion directory `{}`: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(&install_path, script).map_err(|error| {
+            format!(
+                "failed to write completion file `{}`: {error}",
+                install_path.display()
+            )
+        })?;
+    }
+    written_files.push(install_path.display().to_string());
+
+    if shell == "zsh" && shell_config {
+        let rc_path = zsh_rc_path()?;
+        if !dry_run {
+            ensure_zsh_shell_config(&rc_path)?;
+        }
+        updated_shell_configs.push(rc_path.display().to_string());
+    }
+
+    Ok(CompletionInstallResult {
+        status: if dry_run {
+            "planned".to_string()
+        } else {
+            "installed".to_string()
+        },
+        shell: shell.to_string(),
+        command: completion_command_label(surface).to_string(),
+        written_files,
+        updated_shell_configs,
+    })
+}
+
+fn completion_install_path(surface: Surface, shell: &str) -> Result<PathBuf, String> {
+    let home = home_dir()?;
+    let command = completion_file_stem(surface);
+    let path = match shell {
+        "bash" => home
+            .join(".local/share/bash-completion/completions")
+            .join(command),
+        "fish" => home
+            .join(".config/fish/completions")
+            .join(format!("{command}.fish")),
+        "zsh" => home.join(".zsh/completions").join(format!("_{command}")),
+        other => {
+            return Err(format!(
+                "unsupported shell `{other}`; expected bash, fish, or zsh"
+            ))
+        }
+    };
+    Ok(path)
+}
+
+fn completion_command_label(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Valid => "valid",
+        Surface::CargoValid => "cargo valid",
+        Surface::Registry => "registry",
+    }
+}
+
+fn completion_file_stem(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Valid => "valid",
+        Surface::CargoValid => "cargo-valid",
+        Surface::Registry => "registry",
+    }
+}
+
+fn home_dir() -> Result<PathBuf, String> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| "HOME is not set".to_string())
+}
+
+fn zsh_rc_path() -> Result<PathBuf, String> {
+    Ok(home_dir()?.join(".zshrc"))
+}
+
+fn ensure_zsh_shell_config(path: &Path) -> Result<(), String> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let mut next = existing.clone();
+    if !existing.contains("fpath=(~/.zsh/completions $fpath)") {
+        if !next.is_empty() && !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push_str("fpath=(~/.zsh/completions $fpath)\n");
+    }
+    if !existing.contains("autoload -Uz compinit && compinit") {
+        if !next.is_empty() && !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push_str("autoload -Uz compinit && compinit\n");
+    }
+    if next != existing {
+        fs::write(path, next).map_err(|error| {
+            format!("failed to update zsh config `{}`: {error}", path.display())
+        })?;
+    }
+    Ok(())
+}
+
 fn augment_completion(script: String, surface: Surface, shell: &str) -> String {
     match (surface, shell) {
-        (Surface::CargoValid, "fish") => {
-            format!("{script}\n{}", cargo_valid_fish_model_completion())
-        }
-        (Surface::CargoValid, "bash") => cargo_valid_bash_model_completion(script),
-        (Surface::CargoValid, "zsh") => cargo_valid_zsh_model_completion(script),
+        (Surface::Valid, "fish") => format!("{script}\n{}", valid_fish_completion()),
+        (Surface::Valid, "bash") => valid_bash_completion(script),
+        (Surface::Valid, "zsh") => valid_zsh_completion(script),
+        (Surface::CargoValid, "fish") => format!("{script}\n{}", cargo_valid_fish_completion()),
+        (Surface::CargoValid, "bash") => cargo_valid_bash_completion(script),
+        (Surface::CargoValid, "zsh") => cargo_valid_zsh_completion(script),
+        (Surface::Registry, "fish") => format!("{script}\n{}", registry_fish_completion()),
+        (Surface::Registry, "bash") => registry_bash_completion(script),
+        (Surface::Registry, "zsh") => registry_zsh_completion(script),
         _ => script,
     }
 }
@@ -1656,21 +1793,88 @@ fn cargo_valid_model_commands() -> &'static [&'static str] {
     ]
 }
 
-fn cargo_valid_fish_model_completion() -> String {
-    let commands = cargo_valid_model_commands().join(" ");
+fn cargo_valid_property_commands() -> &'static [&'static str] {
+    &[
+        "graph",
+        "handoff",
+        "benchmark",
+        "bench",
+        "check",
+        "verify",
+        "explain",
+        "coverage",
+        "testgen",
+        "replay",
+    ]
+}
+
+fn cargo_valid_action_commands() -> &'static [&'static str] {
+    &["testgen", "generate-tests", "replay"]
+}
+
+fn cargo_valid_fish_completion() -> String {
+    let model_commands = cargo_valid_model_commands().join(" ");
+    let property_commands = cargo_valid_property_commands().join(" ");
+    let action_commands = cargo_valid_action_commands().join(" ");
     format!(
         r#"
 function __fish_cargo_valid_model_names
-    cargo valid models 2>/dev/null
+    cargo valid completion candidates models 2>/dev/null
 end
 
-complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from {commands}" -f -a "(__fish_cargo_valid_model_names)"
+function __fish_cargo_valid_current_model
+    set -l tokens (commandline -opc)
+    set -l expecting 0
+    set -l saw_valid 0
+    for token in $tokens[2..-1]
+        if test $expecting -eq 1
+            set expecting 0
+            continue
+        end
+        if test "$token" = "valid" -a $saw_valid -eq 0
+            set saw_valid 1
+            continue
+        end
+        if test $saw_valid -eq 0
+            continue
+        end
+        switch $token
+            case --manifest-path --registry --file --example --bin --property --focus-action --actions --format --view --backend --solver-exec --solver-arg --repeat --seed
+                set expecting 1
+            case '--*'
+            case inspect graph diagram doc handoff lint readiness benchmark bench migrate check verify explain coverage orchestrate testgen generate-tests replay
+            case '*'
+                echo $token
+                return 0
+        end
+    end
+end
+
+function __fish_cargo_valid_property_names
+    set -l model (__fish_cargo_valid_current_model)
+    test -n "$model"; and cargo valid completion candidates properties $model 2>/dev/null
+end
+
+function __fish_cargo_valid_action_names
+    set -l model (__fish_cargo_valid_current_model)
+    test -n "$model"; and cargo valid completion candidates actions $model 2>/dev/null
+end
+
+function __fish_cargo_valid_view_names
+    cargo valid completion candidates views 2>/dev/null
+end
+
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from {model_commands}" -a "(__fish_cargo_valid_model_names)"
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from {property_commands}" -l property -a "(__fish_cargo_valid_property_names)"
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from {action_commands}" -l focus-action -a "(__fish_cargo_valid_action_names)"
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from replay" -l actions -a "(__fish_cargo_valid_action_names)"
+complete -c cargo -n "__fish_seen_subcommand_from valid; and __fish_seen_subcommand_from graph diagram" -l view -a "(__fish_cargo_valid_view_names)"
 "#
     )
 }
 
-fn cargo_valid_bash_model_completion(script: String) -> String {
-    let commands = cargo_valid_model_commands()
+fn cargo_valid_bash_completion(script: String) -> String {
+    let model_commands = cargo_valid_model_commands()
         .iter()
         .map(|command| format!(r#""{command}""#))
         .collect::<Vec<_>>()
@@ -1680,10 +1884,10 @@ fn cargo_valid_bash_model_completion(script: String) -> String {
         r#"{base}
 
 __valid_cargo_models() {{
-    cargo valid models 2>/dev/null
+    cargo valid completion candidates models 2>/dev/null
 }}
 
-__valid_cargo_model_command() {{
+__valid_cargo_command() {{
     local i token expecting_value=0 saw_valid=0
     for ((i = 1; i < COMP_CWORD; i++)); do
         token="${{COMP_WORDS[i]}}"
@@ -1699,12 +1903,12 @@ __valid_cargo_model_command() {{
             continue
         fi
         case "$token" in
-            --manifest-path|--registry|--file|--example|--bin)
+            --manifest-path|--registry|--file|--example|--bin|--property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--seed)
                 expecting_value=1
                 ;;
             --*)
                 ;;
-            {commands})
+            {model_commands})
                 printf '%s\n' "$token"
                 return 0
                 ;;
@@ -1713,17 +1917,74 @@ __valid_cargo_model_command() {{
     return 1
 }}
 
+__valid_cargo_model() {{
+    local i token command="" expecting_value=0 saw_valid=0
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        if [[ $expecting_value -eq 1 ]]; then
+            expecting_value=0
+            continue
+        fi
+        if [[ "$token" == "valid" && $saw_valid -eq 0 ]]; then
+            saw_valid=1
+            continue
+        fi
+        if [[ $saw_valid -eq 0 ]]; then
+            continue
+        fi
+        case "$token" in
+            --manifest-path|--registry|--file|--example|--bin|--property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--seed)
+                expecting_value=1
+                ;;
+            --*)
+                ;;
+            {model_commands})
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    printf '%s\n' "$token"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}}
+
 _cargo() {{
-    local cur
+    local cur prev command model completed_actions prefix
     cur="${{COMP_WORDS[COMP_CWORD]}}"
-    if [[ "${{COMP_WORDS[1]}}" == "valid" && "$cur" != -* ]]; then
-        local model_command
-        model_command="$(__valid_cargo_model_command)" || true
-        if [[ -n "$model_command" ]]; then
-            COMPREPLY=( $(compgen -W "$(__valid_cargo_models)" -- "$cur") )
-            if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
-                return 0
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    command="$(__valid_cargo_command)" || true
+    model="$(__valid_cargo_model)" || true
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$(cargo valid completion candidates properties "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --focus-action)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$(cargo valid completion candidates actions "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --actions)
+            if [[ -n "$model" ]]; then
+                completed_actions="${{cur%,*}}"
+                prefix="${{completed_actions:+${{completed_actions}},}}"
+                cur="${{cur##*,}}"
+                COMPREPLY=( $(compgen -W "$(cargo valid completion candidates actions "$model" 2>/dev/null)" -- "$cur") )
+                COMPREPLY=( "${{COMPREPLY[@]/#/$prefix}}" )
             fi
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --view)
+            COMPREPLY=( $(compgen -W "$(cargo valid completion candidates views 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+    esac
+    if [[ "${{COMP_WORDS[1]}}" == "valid" && -n "$command" && -z "$model" && "$cur" != -* ]]; then
+        COMPREPLY=( $(compgen -W "$(__valid_cargo_models)" -- "$cur") )
+        if [[ ${{#COMPREPLY[@]}} -gt 0 ]]; then
+            return 0
         fi
     fi
     __valid_base_cargo_completion "$@"
@@ -1732,20 +1993,20 @@ _cargo() {{
     )
 }
 
-fn cargo_valid_zsh_model_completion(script: String) -> String {
-    let commands = cargo_valid_model_commands().join("|");
+fn cargo_valid_zsh_completion(script: String) -> String {
+    let model_commands = cargo_valid_model_commands().join("|");
     let base = script.replacen("_cargo() {", "__valid_base_cargo_completion() {", 1);
     format!(
         r#"{base}
 
 __valid_cargo_models() {{
     local -a models
-    models=("${{(@f)$(cargo valid models 2>/dev/null)}}")
+    models=("${{(@f)$(cargo valid completion candidates models 2>/dev/null)}}")
     (( ${{#models[@]}} )) || return 1
     _describe -t models 'cargo valid models' models "$@"
 }}
 
-__valid_cargo_model_context() {{
+__valid_cargo_command() {{
     local i token expecting_value=0 saw_valid=0
     for ((i = 2; i < CURRENT; ++i)); do
         token="${{words[i]}}"
@@ -1759,13 +2020,45 @@ __valid_cargo_model_context() {{
         fi
         (( saw_valid )) || continue
         case "$token" in
-            --manifest-path|--registry|--file|--example|--bin)
+            --manifest-path|--registry|--file|--example|--bin|--property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--seed)
                 expecting_value=1
                 ;;
             --*)
                 ;;
-            ({commands}))
-                return 0
+            ({model_commands}))
+                print -r -- "$token"
+                ;;
+        esac
+    done
+    return 1
+}}
+
+__valid_cargo_model() {{
+    local i token command="" expecting_value=0 saw_valid=0
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        if (( expecting_value )); then
+            expecting_value=0
+            continue
+        fi
+        if [[ "$token" == "valid" && $saw_valid -eq 0 ]]; then
+            saw_valid=1
+            continue
+        fi
+        (( saw_valid )) || continue
+        case "$token" in
+            --manifest-path|--registry|--file|--example|--bin|--property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--seed)
+                expecting_value=1
+                ;;
+            --*)
+                ;;
+            ({model_commands}))
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    print -r -- "$token"
+                    return 0
+                fi
                 ;;
         esac
     done
@@ -1773,10 +2066,405 @@ __valid_cargo_model_context() {{
 }}
 
 _cargo() {{
-    if __valid_cargo_model_context; then
+    local command model prev current_word prefix current_action
+    command="$(__valid_cargo_command)" || true
+    model="$(__valid_cargo_model)" || true
+    prev="${{words[CURRENT-1]}}"
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && _describe -t properties 'cargo valid properties' "${{(@f)$(cargo valid completion candidates properties "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --focus-action)
+            [[ -n "$model" ]] && _describe -t actions 'cargo valid actions' "${{(@f)$(cargo valid completion candidates actions "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --actions)
+            if [[ -n "$model" ]]; then
+                current_word="${{words[CURRENT]}}"
+                prefix="${{current_word%,*}}"
+                current_action="${{current_word##*,}}"
+                compadd -Q -S '' -- "${{(@f)$(cargo valid completion candidates actions "$model" 2>/dev/null)/#/${{prefix:+$prefix,}}}}"
+                return 0
+            fi
+            ;;
+        --view)
+            _describe -t views 'cargo valid graph views' "${{(@f)$(cargo valid completion candidates views 2>/dev/null)}}" && return 0
+            ;;
+    esac
+    if [[ -n "$command" && -z "$model" && "${{words[CURRENT]}}" != -* ]]; then
         __valid_cargo_models && return 0
     fi
     __valid_base_cargo_completion "$@"
+}}
+"#
+    )
+}
+
+fn valid_fish_completion() -> String {
+    r#"
+function __fish_valid_model_names
+    valid completion candidates models 2>/dev/null
+end
+
+function __fish_valid_current_model
+    set -l tokens (commandline -opc)
+    for token in $tokens[3..-1]
+        switch $token
+            case --property --scenario --focus-action --actions --format --view --backend --solver-exec --solver-arg --seed --write --runner --runner-arg
+                return 1
+            case '--*'
+            case '*'
+                echo $token
+                return 0
+        end
+    end
+end
+
+function __fish_valid_property_names
+    set -l model (__fish_valid_current_model)
+    test -n "$model"; and valid completion candidates properties $model 2>/dev/null
+end
+
+function __fish_valid_action_names
+    set -l model (__fish_valid_current_model)
+    test -n "$model"; and valid completion candidates actions $model 2>/dev/null
+end
+
+function __fish_valid_view_names
+    valid completion candidates views 2>/dev/null
+end
+
+complete -c valid -n "__fish_seen_subcommand_from inspect graph doc handoff lint explain minimize trace orchestrate testgen distinguish replay coverage conformance check verify" -a "(__fish_valid_model_names)"
+complete -c valid -n "__fish_seen_subcommand_from graph handoff explain trace replay coverage check verify" -l property -a "(__fish_valid_property_names)"
+complete -c valid -n "__fish_seen_subcommand_from replay testgen" -l focus-action -a "(__fish_valid_action_names)"
+complete -c valid -n "__fish_seen_subcommand_from replay" -l actions -a "(__fish_valid_action_names)"
+complete -c valid -n "__fish_seen_subcommand_from graph" -l view -a "(__fish_valid_view_names)"
+"#
+    .to_string()
+}
+
+fn valid_bash_completion(script: String) -> String {
+    let base = script.replacen("_valid() {", "__valid_base_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_completion_command() {{
+    local i token
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        case "$token" in
+            --*) ;;
+            *) printf '%s\n' "$token"; return 0 ;;
+        esac
+    done
+    return 1
+}}
+
+__valid_completion_model() {{
+    local i token command=""
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        case "$token" in
+            --property|--scenario|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--seed|--write|--runner|--runner-arg)
+                ((i++))
+                ;;
+            --*) ;;
+            *)
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    printf '%s\n' "$token"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_valid() {{
+    local cur prev command model
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    command="$(__valid_completion_command)" || true
+    model="$(__valid_completion_model)" || true
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$(valid completion candidates properties "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --focus-action|--actions)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$(valid completion candidates actions "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --view)
+            COMPREPLY=( $(compgen -W "$(valid completion candidates views 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+    esac
+    if [[ -n "$command" && -z "$model" && "$cur" != -* ]]; then
+        COMPREPLY=( $(compgen -W "$(valid completion candidates models 2>/dev/null)" -- "$cur") )
+        [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+    fi
+    __valid_base_completion "$@"
+}}
+"#
+    )
+}
+
+fn valid_zsh_completion(script: String) -> String {
+    let base = script.replacen("_valid() {", "__valid_base_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_completion_command() {{
+    local i token
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        [[ "$token" == --* ]] && continue
+        print -r -- "$token"
+        return 0
+    done
+    return 1
+}}
+
+__valid_completion_model() {{
+    local i token command=""
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        case "$token" in
+            --property|--scenario|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--seed|--write|--runner|--runner-arg)
+                ((i++))
+                ;;
+            --*)
+                ;;
+            *)
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    print -r -- "$token"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_valid() {{
+    local curcontext="$curcontext" state line command model prev
+    command="$(__valid_completion_command)" || true
+    model="$(__valid_completion_model)" || true
+    prev="${{words[CURRENT-1]}}"
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && _describe -t properties 'valid properties' "${{(@f)$(valid completion candidates properties "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --focus-action|--actions)
+            [[ -n "$model" ]] && _describe -t actions 'valid actions' "${{(@f)$(valid completion candidates actions "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --view)
+            _describe -t views 'valid graph views' "${{(@f)$(valid completion candidates views 2>/dev/null)}}" && return 0
+            ;;
+    esac
+    if [[ -n "$command" && -z "$model" && "${{words[CURRENT]}}" != -* ]]; then
+        _describe -t models 'valid models' "${{(@f)$(valid completion candidates models 2>/dev/null)}}" && return 0
+    fi
+    __valid_base_completion "$@"
+}}
+"#
+    )
+}
+
+fn registry_fish_completion() -> String {
+    r#"
+function __fish_registry_command_name
+    set -l tokens (commandline -opc)
+    echo $tokens[1]
+end
+
+function __fish_registry_model_names
+    set -l cmd (__fish_registry_command_name)
+    test -n "$cmd"; and $cmd completion candidates models 2>/dev/null
+end
+
+function __fish_registry_current_model
+    set -l tokens (commandline -opc)
+    for token in $tokens[3..-1]
+        switch $token
+            case --property --focus-action --actions --format --view --backend --solver-exec --solver-arg --repeat --write
+                return 1
+            case '--*'
+            case '*'
+                echo $token
+                return 0
+        end
+    end
+end
+
+function __fish_registry_property_names
+    set -l cmd (__fish_registry_command_name)
+    set -l model (__fish_registry_current_model)
+    test -n "$cmd"; and test -n "$model"; and $cmd completion candidates properties $model 2>/dev/null
+end
+
+function __fish_registry_action_names
+    set -l cmd (__fish_registry_command_name)
+    set -l model (__fish_registry_current_model)
+    test -n "$cmd"; and test -n "$model"; and $cmd completion candidates actions $model 2>/dev/null
+end
+
+function __fish_registry_view_names
+    set -l cmd (__fish_registry_command_name)
+    test -n "$cmd"; and $cmd completion candidates views 2>/dev/null
+end
+
+complete -c registry -n "__fish_seen_subcommand_from inspect graph doc handoff lint benchmark migrate check explain coverage orchestrate testgen replay" -a "(__fish_registry_model_names)"
+complete -c registry -n "__fish_seen_subcommand_from graph handoff benchmark check replay" -l property -a "(__fish_registry_property_names)"
+complete -c registry -n "__fish_seen_subcommand_from replay testgen" -l focus-action -a "(__fish_registry_action_names)"
+complete -c registry -n "__fish_seen_subcommand_from replay" -l actions -a "(__fish_registry_action_names)"
+complete -c registry -n "__fish_seen_subcommand_from graph" -l view -a "(__fish_registry_view_names)"
+"#
+    .to_string()
+}
+
+fn registry_bash_completion(script: String) -> String {
+    let base = script.replacen("_registry() {", "__valid_base_registry_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_registry_command() {{
+    printf '%s\n' "${{COMP_WORDS[0]}}"
+}}
+
+__valid_registry_subcommand() {{
+    local i token
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        [[ "$token" == --* ]] && continue
+        printf '%s\n' "$token"
+        return 0
+    done
+    return 1
+}}
+
+__valid_registry_model() {{
+    local i token command=""
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        token="${{COMP_WORDS[i]}}"
+        case "$token" in
+            --property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--write)
+                ((i++))
+                ;;
+            --*)
+                ;;
+            *)
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    printf '%s\n' "$token"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_registry() {{
+    local cur prev cmd model registry_cmd
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    cmd="$(__valid_registry_subcommand)" || true
+    model="$(__valid_registry_model)" || true
+    registry_cmd="$(__valid_registry_command)"
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$($registry_cmd completion candidates properties "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --focus-action|--actions)
+            [[ -n "$model" ]] && COMPREPLY=( $(compgen -W "$($registry_cmd completion candidates actions "$model" 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+        --view)
+            COMPREPLY=( $(compgen -W "$($registry_cmd completion candidates views 2>/dev/null)" -- "$cur") )
+            [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+            ;;
+    esac
+    if [[ -n "$cmd" && -z "$model" && "$cur" != -* ]]; then
+        COMPREPLY=( $(compgen -W "$($registry_cmd completion candidates models 2>/dev/null)" -- "$cur") )
+        [[ ${{#COMPREPLY[@]}} -gt 0 ]] && return 0
+    fi
+    __valid_base_registry_completion "$@"
+}}
+"#
+    )
+}
+
+fn registry_zsh_completion(script: String) -> String {
+    let base = script.replacen("_registry() {", "__valid_base_registry_completion() {", 1);
+    format!(
+        r#"{base}
+
+__valid_registry_command() {{
+    print -r -- "${{words[1]}}"
+}}
+
+__valid_registry_subcommand() {{
+    local i token
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        [[ "$token" == --* ]] && continue
+        print -r -- "$token"
+        return 0
+    done
+    return 1
+}}
+
+__valid_registry_model() {{
+    local i token command=""
+    for ((i = 2; i < CURRENT; ++i)); do
+        token="${{words[i]}}"
+        case "$token" in
+            --property|--focus-action|--actions|--format|--view|--backend|--solver-exec|--solver-arg|--repeat|--write)
+                ((i++))
+                ;;
+            --*)
+                ;;
+            *)
+                if [[ -z "$command" ]]; then
+                    command="$token"
+                else
+                    print -r -- "$token"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
+}}
+
+_registry() {{
+    local prev cmd model registry_cmd
+    prev="${{words[CURRENT-1]}}"
+    cmd="$(__valid_registry_subcommand)" || true
+    model="$(__valid_registry_model)" || true
+    registry_cmd="$(__valid_registry_command)"
+    case "$prev" in
+        --property)
+            [[ -n "$model" ]] && _describe -t properties 'registry properties' "${{(@f)$($registry_cmd completion candidates properties "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --focus-action|--actions)
+            [[ -n "$model" ]] && _describe -t actions 'registry actions' "${{(@f)$($registry_cmd completion candidates actions "$model" 2>/dev/null)}}" && return 0
+            ;;
+        --view)
+            _describe -t views 'registry graph views' "${{(@f)$($registry_cmd completion candidates views 2>/dev/null)}}" && return 0
+            ;;
+    esac
+    if [[ -n "$cmd" && -z "$model" && "${{words[CURRENT]}}" != -* ]]; then
+        _describe -t models 'registry models' "${{(@f)$($registry_cmd completion candidates models 2>/dev/null)}}" && return 0
+    fi
+    __valid_base_registry_completion "$@"
 }}
 "#
     )

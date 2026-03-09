@@ -454,14 +454,34 @@ Legacy aliases still work:
 Shell completions are built in:
 
 ```sh
+valid completion install bash
+valid completion install fish
+valid completion install zsh --shell-config
+
+cargo valid completion install bash
+cargo valid completion install fish
+cargo valid completion install zsh --shell-config
+```
+
+If you want the raw scripts instead of writing into the default shell path:
+
+```sh
 valid completion bash > ~/.local/share/bash-completion/completions/valid
 valid completion fish > ~/.config/fish/completions/valid.fish
-valid completion zsh > "${fpath[1]}/_valid"
+valid completion zsh > ~/.zsh/completions/_valid
 
 cargo valid completion bash > ~/.local/share/bash-completion/completions/cargo-valid
 cargo valid completion fish > ~/.config/fish/completions/cargo-valid.fish
-cargo valid completion zsh > "${fpath[1]}/_cargo-valid"
+cargo valid completion zsh > ~/.zsh/completions/_cargo-valid
 ```
+
+The generated completions are dynamic:
+
+- `cargo valid inspect <TAB>` suggests model ids
+- `cargo valid verify counter --property <TAB>` suggests property ids
+- `cargo valid replay counter --actions <TAB>` suggests action ids
+- `cargo valid graph counter --view <TAB>` suggests graph views
+- `valid completion ...` also provides bundled-model and `.valid`-file-aware property/action completion
 
 Examples:
 

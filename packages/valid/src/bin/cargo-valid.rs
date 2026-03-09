@@ -22,10 +22,10 @@ use valid::{
     },
     bundled_models::{coverage_bundled_model, list_bundled_models},
     cli::{
-        child_stream_to_json, detect_json_flag, detect_progress_json_flag, message_diagnostic,
-        parse_batch_request, render_batch_response, render_cli_error_json, render_commands_json,
-        render_commands_text, render_completion, render_schema_json, usage_diagnostic, BatchResult,
-        ExitCode, ProgressReporter, Surface,
+        child_stream_to_json, detect_json_flag, detect_progress_json_flag, install_completion,
+        message_diagnostic, parse_batch_request, render_batch_response, render_cli_error_json,
+        render_commands_json, render_commands_text, render_completion, render_schema_json,
+        usage_diagnostic, BatchResult, ExitCode, ProgressReporter, Surface,
     },
     coverage::{render_coverage_json, render_coverage_text},
     doc::{
@@ -95,12 +95,14 @@ fn main() {
     let parsed = parse_cli(raw_args);
     match parsed.command.as_str() {
         "commands" => cmd_commands(parsed.json),
-        "completion" => cmd_completion(&parsed),
         "schema" => cmd_schema(&parsed),
         "batch" => cmd_batch(&parsed),
         _ => {}
     }
     let parsed = maybe_auto_discover_external(parsed);
+    if parsed.command == "completion" {
+        cmd_completion(&parsed);
+    }
     if parsed.command == "init" {
         cmd_init(&parsed);
     }
@@ -184,15 +186,61 @@ fn primary_usage() -> String {
     "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|completion|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
-fn cmd_completion(parsed: &CliArgs) {
-    let shell = parsed
-        .model
-        .as_deref()
-        .or_else(|| parsed.extra_positionals.first().map(String::as_str))
-        .unwrap_or_else(|| usage_exit("usage: cargo valid completion <bash|fish|zsh>"));
-    match render_completion(Surface::CargoValid, shell) {
-        Ok(script) => print!("{script}"),
-        Err(message) => message_exit("completion", false, &message, None),
+fn cmd_completion(parsed: &CliArgs) -> ! {
+    let usage = "usage: cargo valid completion <bash|fish|zsh>\n       cargo valid completion install <bash|fish|zsh> [--shell-config] [--stdout] [--json]\n       cargo valid completion candidates <models|properties|actions|views> [target]";
+    let args = completion_args(parsed);
+    let Some(first) = args.first().map(String::as_str) else {
+        usage_exit(usage);
+    };
+    match first {
+        "install" => {
+            let shell = args
+                .get(1)
+                .map(String::as_str)
+                .unwrap_or_else(|| usage_exit(usage));
+            let shell_config = parsed
+                .extra_positionals
+                .iter()
+                .any(|arg| arg == "--shell-config");
+            let stdout = parsed.extra_positionals.iter().any(|arg| arg == "--stdout");
+            match install_completion(Surface::CargoValid, shell, shell_config, stdout) {
+                Ok(result) => {
+                    if parsed.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string(&result)
+                                .expect("completion install json should serialize")
+                        );
+                    } else {
+                        println!("status: {}", result.status);
+                        println!("command: {}", result.command);
+                        println!("shell: {}", result.shell);
+                        println!("written_files: {}", result.written_files.join(", "));
+                        if !result.updated_shell_configs.is_empty() {
+                            println!(
+                                "updated_shell_configs: {}",
+                                result.updated_shell_configs.join(", ")
+                            );
+                        }
+                    }
+                }
+                Err(message) => message_exit("completion", parsed.json, &message, Some(usage)),
+            }
+        }
+        "candidates" => {
+            let kind = args
+                .get(1)
+                .map(String::as_str)
+                .unwrap_or_else(|| usage_exit(usage));
+            let target = args.get(2).map(String::as_str);
+            for value in completion_candidates_cargo(parsed, kind, target) {
+                println!("{value}");
+            }
+        }
+        shell => match render_completion(Surface::CargoValid, shell) {
+            Ok(script) => print!("{script}"),
+            Err(message) => message_exit("completion", false, &message, Some(usage)),
+        },
     }
     process::exit(ExitCode::Success.code());
 }
@@ -2230,6 +2278,126 @@ fn parse_models_json(stdout: &str) -> Vec<String> {
                 Some(trimmed.to_string())
             }
         })
+        .collect()
+}
+
+fn completion_args(parsed: &CliArgs) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(model) = &parsed.model {
+        args.push(model.clone());
+    }
+    args.extend(
+        parsed
+            .extra_positionals
+            .iter()
+            .filter(|arg| *arg != "--shell-config" && *arg != "--stdout" && *arg != "--json")
+            .cloned(),
+    );
+    args
+}
+
+fn completion_candidates_cargo(parsed: &CliArgs, kind: &str, target: Option<&str>) -> Vec<String> {
+    match kind {
+        "models" => {
+            if parsed.manifest_path.is_some()
+                || parsed.file.is_some()
+                || parsed.example.is_some()
+                || parsed.bin.is_some()
+            {
+                fetch_external_models(parsed)
+            } else {
+                list_bundled_models()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            }
+        }
+        "properties" => inspect_completion_candidates_cargo(parsed, target, "properties"),
+        "actions" => inspect_completion_candidates_cargo(parsed, target, "actions"),
+        "views" => ["overview", "logic", "failure", "deadlock", "scc"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn inspect_completion_candidates_cargo(
+    parsed: &CliArgs,
+    target: Option<&str>,
+    field: &str,
+) -> Vec<String> {
+    let Some(model) = target else {
+        return Vec::new();
+    };
+    if parsed.manifest_path.is_some()
+        || parsed.file.is_some()
+        || parsed.example.is_some()
+        || parsed.bin.is_some()
+    {
+        let output = build_external_command(&CliArgs {
+            command: "inspect".to_string(),
+            model: Some(model.to_string()),
+            seed: None,
+            repeat: 0,
+            baseline_mode: None,
+            threshold_percent: None,
+            strategy: None,
+            format: None,
+            view: None,
+            property_id: None,
+            backend: None,
+            solver_executable: None,
+            solver_args: Vec::new(),
+            actions: Vec::new(),
+            focus_action_id: None,
+            json: true,
+            progress_json: false,
+            manifest_path: parsed.manifest_path.clone(),
+            example: parsed.example.clone(),
+            bin: parsed.bin.clone(),
+            file: parsed.file.clone(),
+            suite_models: Vec::new(),
+            critical: false,
+            suite_name: None,
+            project_config: parsed.project_config.clone(),
+            benchmark_models: Vec::new(),
+            write_path: None,
+            check: false,
+            extra_positionals: Vec::new(),
+        })
+        .output()
+        .ok();
+        let Some(output) = output else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+        string_array_field(preferred_child_json(&output), field)
+    } else {
+        inspect_source(&InspectRequest {
+            request_id: "req-completion-candidates".to_string(),
+            source_name: normalized_model_ref(model),
+            source: String::new(),
+        })
+        .map(|inspect| match field {
+            "properties" => inspect.properties,
+            "actions" => inspect.actions,
+            _ => Vec::new(),
+        })
+        .unwrap_or_default()
+    }
+}
+
+fn string_array_field(value: Value, field: &str) -> Vec<String> {
+    value
+        .get(field)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter_map(Value::as_str)
+        .map(str::to_string)
         .collect()
 }
 
