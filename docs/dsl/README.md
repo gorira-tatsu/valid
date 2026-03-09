@@ -253,6 +253,18 @@ input space. Do not use them as a substitute for large arbitrary payloads or a
 full parameterized-action system. The current implementation is intentionally
 bounded and explicit.
 
+When a model uses bounded choices, the reporting surfaces distinguish:
+
+- the conceptual action, such as `Add`
+- the concrete expanded action, such as `Add[delta=2]`
+- the concrete `parameter_bindings`, such as `delta=2`
+
+`inspect` reports those identities per action and transition, plus
+`parameter_domains` and `expanded_choice_count`. `coverage` reports both
+conceptual-action coverage and concrete-choice coverage so expansion does not
+inflate business-flow progress. `explain`, `testgen`, and `handoff` preserve
+the same concrete parameter choice in their evidence.
+
 ## IDE Notes
 
 Current guidance for a smoother IDE experience:
@@ -614,11 +626,14 @@ cargo valid suite --suite=smoke
   Summarizes likely failure causes and next steps.
 - `coverage`
   Reports action, guard, path-tag, and requirement-tag coverage, including
-  business/setup splits.
+  business/setup splits plus conceptual-action versus concrete-choice splits
+  for bounded parameterized actions.
 - `generate-tests`
   Produces regression-oriented Rust tests under `generated-tests/`. JSON output
   reports `strictness` and `derivation` for each vector so review tooling can
-  tell strict trace-backed vectors from heuristic or synthetic ones.
+  tell strict trace-backed vectors from heuristic or synthetic ones. It also
+  adds `priority`, `selection_reason`, `novelty_key`, and bounded-choice
+  action metadata so review tooling can keep the highest-value vectors first.
 - `benchmark`
   Runs repeated verification and compares against committed baselines.
 - `suite`
@@ -702,10 +717,14 @@ The DSL is already useful for business workflow and policy-style finite-state
 models, but it still has limits:
 
 - solver lowering is still a bounded subset
+- bounded parameterized actions are implemented, but only for small explicit
+  finite domains rather than arbitrary runtime payloads
 - richer collections and set-membership abstractions are limited
 - declarative transitions are the strongest path; step models are intentionally
   second-class for analysis
 - `migrate --check` is an audit tool, not a full semantic equivalence checker
+- `testgen` is now prioritized and deduped, but it is still not a complete
+  scenario-planning system
 
 ## Recommended Modeling Style
 

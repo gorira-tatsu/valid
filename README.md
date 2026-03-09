@@ -48,9 +48,11 @@ The product story is now:
 
 - `valid init` for project-first bootstrap
 - scenarios, predicates, covers, and transition properties
+- bounded parameter choices that preserve one conceptual action while lowering
+  to finite concrete choices
 - project policy via `critical_properties` and `property_suites`
 - language-agnostic test vectors with observation-first metadata
-- handoff summaries that point at recommended generated vectors
+- handoff summaries that point at prioritized recommended generated vectors
 - dynamic shell completion plus `completion install`
 - failure, deadlock, and SCC-oriented graph views
 - artifact indexing and run-history surfaces
@@ -60,10 +62,11 @@ The product story is now:
 - Explore finite state spaces with the explicit backend
 - Return replayable counterexample traces
 - Explain failing transitions
-- Report action and guard coverage
+- Report both conceptual-action coverage and concrete-choice coverage
 - Generate Rust test files from counterexamples and witnesses
+- Rank and dedupe generated vectors for implementation handoff
 - Run Rust-defined models through `cargo-valid`
-- Run a pure-Rust embedded SAT path through `sat-varisat`
+- Run the preferred embedded SAT path through `sat-varisat`
 - Run a bounded `smt-cvc5` path for the current MVP subset
 - Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
 
@@ -72,9 +75,11 @@ The product story is now:
 - The Rust DSL is still evolving
 - `#[derive(ValidState)]` / `#[derive(ValidAction)]` work for the current
   common cases, but the derive surface is still intentionally small
+- parameterized actions are currently the bounded-choice form, not arbitrary
+  payload-bearing action parameters
 - Full solver coverage beyond the current bounded invariant subset is not done
-- `testgen` is useful, but still closer to regression asset generation than
-  fully intelligent scenario design
+- `testgen` now ranks and dedupes review vectors, but it is still not a full
+  scenario planner
 
 ## 3-Minute Quickstart
 
@@ -322,6 +327,7 @@ cargo valid testgen counter --json
 - recommended vector artifact paths
 - recommended next commands
 - a normalized recommended conformance surface such as `api`, `handler`, or `ui`
+- vector priority, selection reason, and bounded parameter choices when present
 
 The current guidance for that workflow lives in
 [docs/testgen-and-handoff.md](./docs/testgen-and-handoff.md) and
@@ -662,13 +668,27 @@ the install guide separate from the DSL guide.
 - `capabilities.testgen_ready`
 - `capabilities.reasons`
 
+For bounded parameterized actions, `inspect`, `explain`, and `testgen` also
+carry additive action identity metadata:
+
+- `conceptual_action_id`
+- `concrete_action_id`
+- `parameter_bindings`
+
+`inspect` additionally reports:
+
+- `parameter_domains`
+- `expanded_choice_count`
+
 For example, a `step`-only model can be explicit-ready but solver-not-ready,
 while a declarative transition model can be solver-ready.
 
 `transition_details` and coverage reports also expose inferred `path_tags`
 such as `allow_path`, `deny_path`, `boundary_path`, `guard_path`, and
-`write_path`. These are the shared decision/path vocabulary used by inspect,
-coverage, explain, and test generation.
+`write_path`. Coverage now separates conceptual-action coverage from concrete
+choice coverage so bounded parameter expansion does not overstate business
+review progress. These are the shared decision/path vocabulary used by
+inspect, coverage, explain, and test generation.
 
 `graph` is built from the same inspect data. Declarative models render guard
 conditions, concrete field updates, and path tags in Mermaid, DOT, and SVG.

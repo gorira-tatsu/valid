@@ -59,10 +59,11 @@ Current practical backend choices:
 - `explicit`
   default, no extra solver dependency, broadest surface coverage
 - `sat-varisat`
-  embedded pure-Rust SAT backend for the current boolean declarative subset.
-  Treat this as an embedded/portable backend, not yet the broadest solver path.
+  preferred embedded pure-Rust SAT backend for the current bounded declarative
+  subset. Use this as the main SAT path when the model stays within the
+  supported finite lowering surface.
 - `smt-cvc5`
-  external solver path for the bounded SMT subset
+  external solver path for the bounded SMT subset and broader experiments
 - `command`
   generic external adapter for experiments and integration
 
@@ -120,3 +121,9 @@ cargo valid --registry examples/iam_transition_registry.rs verify iam-access --b
 
 For external registry targets, `cargo-valid` automatically adds the
 `varisat-backend` feature when you choose `--backend=sat-varisat`.
+
+If you want project policy to prefer the SAT path once installed, add:
+
+```toml
+preferred_backends = ["explicit", "sat-varisat"]
+```

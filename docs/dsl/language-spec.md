@@ -155,6 +155,16 @@ Use `role = setup` for fixture/bootstrap transitions that prepare a state space
 but should not inflate business-action coverage. Coverage reporting separates
 overall action coverage, business/setup coverage, and requirement-tag coverage.
 
+When a transition comes from a bounded parameterized action, reporting keeps
+both identities:
+
+- conceptual action id, for example `Approve`
+- concrete expanded action id, for example `Approve[level=high]`
+
+`inspect`, `explain`, `testgen`, and `handoff` preserve the concrete parameter
+bindings, while `coverage` separates conceptual-action coverage from
+concrete-choice coverage.
+
 ### Step
 
 ```rust

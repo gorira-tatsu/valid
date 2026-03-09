@@ -7,6 +7,10 @@ Use this guide when the question is no longer "does the model verify?" but
 contract is the input sequence plus the expected observations and oracle
 targets, not framework-specific Rust, Jest, or pytest code.
 
+The current implementation also ranks and dedupes vectors before presenting
+the review surface. `handoff` is the compact shortlist; `testgen --json`
+remains the fuller machine-readable set.
+
 ## What each surface is for
 
 - `testgen`
@@ -55,6 +59,7 @@ It tells you:
 
 - which strategy the summary came from
 - how many vectors were generated
+- how many near-duplicate vectors were suppressed from the review surface
 - which files were written
 - which vectors are most worth implementing first
 
@@ -63,11 +68,16 @@ Each recommended vector includes:
 - `vector_id`
 - `property_id`
 - `strategy`
+- `priority`
+- `selection_reason`
 - `grouping`
 - `observation_layers`
 - `oracle_targets`
 - `suggested_surface`
 - `state_visibility`
+- `conceptual_action_ids`
+- `concrete_action_ids`
+- `parameter_bindings`
 - `artifact_paths`
 - `recommended_next_command`
 - `recommended_conformance_surface`
@@ -83,9 +93,24 @@ The top-level `testgen_summary` now also includes:
 - `recommended_mcp_tool`
 - `recommended_testgen_strategy`
 - `recommended_conformance_command`
+- `selection_policy`
+- `deduped_vector_count`
+- `suppressed_vector_count`
 
 Use `handoff` when you want a brief. Use `testgen` when you need the full JSON
 or generated artifacts.
+
+## Selection semantics
+
+The current prioritization policy is intentionally simple and review-oriented:
+
+- failing `counterexample` vectors stay at the top
+- risk-tagged and guard-coverage vectors are promoted ahead of generic witnesses
+- bounded parameter choices are kept visible instead of being collapsed away
+- near-duplicate vectors are suppressed using a stable novelty key
+
+This is better than raw asset dumping, but it is still not a full planner.
+Treat it as implementation triage, not automatic test strategy design.
 
 Canonical example:
 

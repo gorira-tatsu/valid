@@ -47,6 +47,15 @@ Recent vectors can also carry grouped metadata.
   Use these to map vectors back to product-facing requirement areas.
 - `risk_clusters`
   Use these to prioritize vectors that exercise higher-risk behavior.
+- `priority`
+  Use this as the first-pass ordering for implementation-facing review.
+- `selection_reason`
+  Use this to understand why a vector survived dedupe and was kept near the
+  top of the shortlist.
+- `novelty_key`
+  Use this to recognize vectors that differ only cosmetically from one another.
+- `parameter_bindings`
+  Use these when a conceptual action expands into bounded concrete choices.
 
 This is useful when one model supports both a feature-level review and a more
 operational "what should we test first?" question.
@@ -77,7 +86,7 @@ Use `--json` when you want the complete machine-readable vector contract.
 - Blocked action: `enablement`
 - Coverage improvement: `guard` or `transition`
 - Implementation handoff: start with `counterexample` or `witness`, then keep
-  the highest-value grouped vectors from `handoff`
+  the highest-value grouped and prioritized vectors from `handoff`
 
 ## Important limits
 
@@ -85,6 +94,8 @@ Use `--json` when you want the complete machine-readable vector contract.
 - `enablement` only makes sense when you know which action you want to unblock
 - `deadlock` and `enablement` are strong review tools, but they still depend on
   the explored finite state space
+- strategy selection is smarter than before, but it still does not replace
+  domain-specific human review of what should be tested next
 
 ## Next read
 
