@@ -33,10 +33,12 @@ Current examples:
   Small declarative arithmetic model using grouped `on Action { ... }`.
 - `handoff_testgen_registry.rs`
   Small registry that makes `handoff` and `testgen` line up around one failing
-  review gate.
+  review gate, including `counterexample_kind`, ranked vector `priority`, and
+  `selection_reason` in JSON output.
 - `property_suites_project/`
   Small project-first example that demonstrates `critical_properties` and
-  named `property_suites`.
+  named `property_suites`, plus the project-level `capabilities` and
+  `selfcheck` flow you would use before preferring `sat-varisat`.
 - `scenario_focus.valid`
   Small `.valid` example for scenario-focused review with `--scenario=...`.
 - `tenant_relation_registry.rs`
@@ -49,7 +51,8 @@ Current examples:
   temporary stand-in for the parameterized-action roadmap, not as a template
   for variant-per-input modeling.
 - `iam_transition_registry.rs`
-  Small declarative policy model with explicit path tags.
+  Small declarative policy model with explicit path tags and a bounded
+  `sat-varisat`-friendly verification surface.
 - `saas_multi_tenant_registry.rs`
   Medium-sized integration model that demonstrates the same shared-state
   pattern for tenant isolation and shared-service access.
@@ -91,15 +94,34 @@ cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen blocked-recovery --strategy=enablement --focus-action=RECOVER
 cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
 cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
+cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
+cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json | jq '.vectors[] | {counterexample_kind, priority, selection_reason}'
 cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --critical --json
 cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --suite=smoke --json
+cargo valid --manifest-path examples/property_suites_project/Cargo.toml capabilities --backend=sat-varisat --json
+cargo valid --manifest-path examples/property_suites_project/Cargo.toml selfcheck --json
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 cargo valid --registry examples/password_policy.rs inspect password-policy-safe
 cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
+cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION --backend=sat-varisat --json
 cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
 ```
+
+What to look for in the newer outputs:
+
+- `handoff_testgen_registry.rs`
+  `handoff` and `testgen --json` now keep `counterexample_kind`,
+  vector `priority`, `selection_reason`, and any bounded-choice
+  `parameter_bindings` when present.
+- `iam_transition_registry.rs`
+  The model stays inside the bounded declarative subset that `sat-varisat`
+  prefers, so it is the easiest example for backend comparison and capability
+  review.
+- `property_suites_project/`
+  Use it to see project-level `capabilities`, `selfcheck`, and suite output
+  together instead of registry-only flows.
 
 Project-first flow now scaffolds `valid/registry.rs` plus `valid/models/approval.rs`:
 

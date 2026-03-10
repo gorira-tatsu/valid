@@ -9,6 +9,12 @@ Purpose:
 First commands to try:
   cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
   cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
+
+What to look for:
+  - failing traces and vectors now keep `counterexample_kind`
+  - generated vectors are ranked with `priority` and `selection_reason`
+  - handoff output echoes the same review target instead of inventing a second
+    selection model
 */
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 

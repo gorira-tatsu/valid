@@ -1495,7 +1495,10 @@ mod tests {
         );
         let trace = result.trace.expect("deadlock trace");
         assert_eq!(trace.evidence_kind, EvidenceKind::Deadlock);
-        assert_eq!(trace.counterexample_kind, Some(CounterexampleKind::Deadlock));
+        assert_eq!(
+            trace.counterexample_kind,
+            Some(CounterexampleKind::Deadlock)
+        );
         assert_eq!(trace.steps.len(), 1);
         assert_eq!(trace.steps[0].action_id.as_deref(), Some("OnlyOnce"));
         assert_eq!(trace.steps[0].note.as_deref(), Some("deadlock detected"));

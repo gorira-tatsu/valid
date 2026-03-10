@@ -7094,7 +7094,10 @@ property P_RECOVERY_VISIBLE:
         .unwrap();
         validate_orchestrate_response(&response).unwrap();
         assert_eq!(response.runs.len(), 2);
-        assert_eq!(response.runs[0].counterexample_kind.as_deref(), Some("invariant"));
+        assert_eq!(
+            response.runs[0].counterexample_kind.as_deref(),
+            Some("invariant")
+        );
         assert!(response.aggregate_coverage.is_some());
     }
 }
