@@ -460,6 +460,7 @@ fn build_external_command(parsed: &CliArgs) -> Command {
     let target = resolve_external_target(parsed);
     let mut command = Command::new("cargo");
     command.arg("run");
+    command.arg("--quiet");
     let mut features = Vec::new();
     if external_target_requires_runtime_feature(parsed, &target) {
         features.push("verification-runtime");
@@ -2899,5 +2900,21 @@ mod tests {
             "valid.lock.json".to_string(),
             "--json".to_string(),
         ]));
+    }
+
+    #[test]
+    fn build_external_command_runs_cargo_quietly() {
+        let command = build_external_command(&CliArgs {
+            manifest_path: Some("Cargo.toml".to_string()),
+            file: Some("examples/valid_models.rs".to_string()),
+            command: "list".to_string(),
+            ..CliArgs::default()
+        });
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(args.starts_with(&["run".to_string(), "--quiet".to_string()]));
     }
 }

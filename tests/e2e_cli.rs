@@ -1417,6 +1417,9 @@ fn cli_project_mode_lists_and_inspects_models_via_valid() {
         String::from_utf8_lossy(&models.stderr)
     );
     assert!(String::from_utf8_lossy(&models.stdout).contains("approval-model"));
+    let models_stderr = String::from_utf8_lossy(&models.stderr);
+    assert!(!models_stderr.contains("Finished `dev` profile"));
+    assert!(!models_stderr.contains("Running `target/debug/"));
 
     let inspect = Command::new(binary_path())
         .current_dir(&project_dir)
