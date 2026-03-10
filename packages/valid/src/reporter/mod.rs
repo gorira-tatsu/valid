@@ -1741,6 +1741,7 @@ mod tests {
             run_id: "run-1".to_string(),
             property_id: "P_SAFE".to_string(),
             evidence_kind: EvidenceKind::Trace,
+            counterexample_kind: None,
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:x".to_string(),
             steps: vec![TraceStep {
@@ -2126,6 +2127,7 @@ mod tests {
             run_id: "run-1".to_string(),
             property_id: "P_RANGE".to_string(),
             evidence_kind: EvidenceKind::Counterexample,
+            counterexample_kind: Some(crate::evidence::CounterexampleKind::Invariant),
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:x".to_string(),
             steps: vec![TraceStep {

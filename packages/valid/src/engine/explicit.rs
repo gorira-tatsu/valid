@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    evidence::{EvidenceKind, EvidenceTrace, TraceStep},
+    evidence::{
+        counterexample_kind_for_property, CounterexampleKind, EvidenceKind, EvidenceTrace,
+        TraceStep,
+    },
     ir::{ModelIr, PropertyIr, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
@@ -37,6 +40,7 @@ pub struct PropertyResult {
     pub property_layer: crate::ir::PropertyLayer,
     pub status: RunStatus,
     pub assurance_level: AssuranceLevel,
+    pub counterexample_kind: Option<CounterexampleKind>,
     pub scenario_id: Option<String>,
     pub vacuous: bool,
     pub reason_code: Option<String>,
@@ -265,6 +269,7 @@ fn run_explicit(model: &ModelIr, plan: &RunPlan) -> Result<ExplicitRunResult, Di
             property_layer: property.layer,
             status: RunStatus::Pass,
             assurance_level: assurance,
+            counterexample_kind: None,
             scenario_id: plan.scenario_selection.clone(),
             vacuous: match property.kind {
                 PropertyKind::Transition => matched_transitions == 0,
@@ -507,6 +512,7 @@ fn temporal_result(
                 property_layer: property.layer,
                 status: RunStatus::Pass,
                 assurance_level: assurance,
+                counterexample_kind: None,
                 scenario_id: plan.scenario_selection.clone(),
                 vacuous: false,
                 reason_code: Some(pass_reason_code(property.kind, assurance).to_string()),
@@ -741,6 +747,7 @@ fn fail_result(
             property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
+            counterexample_kind: counterexample_kind_for_property(property.kind),
             scenario_id: plan.scenario_selection.clone(),
             vacuous,
             reason_code: Some(fail_reason_code(property.kind).to_string()),
@@ -757,6 +764,7 @@ fn fail_result(
             &plan.manifest.run_id,
             &property.property_id,
             property_evidence_kind(property.kind),
+            counterexample_kind_for_property(property.kind),
             nodes,
             failing_index,
             Some(fail_note(property.kind, assurance).to_string()),
@@ -789,6 +797,7 @@ fn deadlock_result(
             property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
+            counterexample_kind: Some(CounterexampleKind::Deadlock),
             scenario_id: plan.scenario_selection.clone(),
             vacuous,
             reason_code: Some("DEADLOCK_REACHED".to_string()),
@@ -805,6 +814,7 @@ fn deadlock_result(
             &plan.manifest.run_id,
             &property.property_id,
             EvidenceKind::Deadlock,
+            Some(CounterexampleKind::Deadlock),
             nodes,
             deadlock_index,
             Some("deadlock detected".to_string()),
@@ -841,6 +851,7 @@ fn unknown_result(
                 .unwrap_or(crate::ir::PropertyLayer::Assert),
             status: RunStatus::Unknown,
             assurance_level: AssuranceLevel::Incomplete,
+            counterexample_kind: None,
             scenario_id: plan.scenario_selection.clone(),
             vacuous: false,
             reason_code: None,
@@ -860,6 +871,7 @@ fn unknown_result(
                 .map(|property| property.property_id.as_str())
                 .unwrap_or("unknown"),
             EvidenceKind::Trace,
+            None,
             nodes,
             last_index,
             Some(unknown_note(
@@ -894,6 +906,7 @@ fn cover_hit_result(
             property_layer: property.layer,
             status: RunStatus::Pass,
             assurance_level: assurance,
+            counterexample_kind: None,
             scenario_id: plan.scenario_selection.clone(),
             vacuous: false,
             reason_code: Some("COVER_REACHED".to_string()),
@@ -910,6 +923,7 @@ fn cover_hit_result(
             &plan.manifest.run_id,
             &property.property_id,
             EvidenceKind::Witness,
+            None,
             nodes,
             hit_index,
             Some("cover target reached".to_string()),
@@ -936,6 +950,7 @@ fn cover_miss_result(
             property_layer: property.layer,
             status: RunStatus::Fail,
             assurance_level: assurance,
+            counterexample_kind: counterexample_kind_for_property(property.kind),
             scenario_id: plan.scenario_selection.clone(),
             vacuous,
             reason_code: Some("COVER_UNREACHED".to_string()),
@@ -993,6 +1008,7 @@ fn build_trace(
     run_id: &str,
     property_id: &str,
     evidence_kind: EvidenceKind,
+    counterexample_kind: Option<CounterexampleKind>,
     nodes: &[NodeRecord],
     end_index: usize,
     final_note: Option<String>,
@@ -1037,6 +1053,7 @@ fn build_trace(
         run_id: run_id.to_string(),
         property_id: property_id.to_string(),
         evidence_kind,
+        counterexample_kind,
         assurance_level,
         trace_hash: format!("trace:{}:{}", evidence_id, steps.len()),
         steps,
@@ -1197,7 +1214,7 @@ mod tests {
             check_explicit, AssuranceLevel, CheckOutcome, PropertySelection, ResourceLimits,
             RunPlan, RunStatus, SearchBounds, SearchStrategy, UnknownReason,
         },
-        evidence::EvidenceKind,
+        evidence::{CounterexampleKind, EvidenceKind},
         ir::{
             ActionIr, BinaryOp, ExprIr, FieldType, InitAssignment, ModelIr, PropertyIr,
             PropertyKind, SourceSpan, StateField, UpdateIr, Value,
@@ -1469,8 +1486,16 @@ mod tests {
             result.property_result.reason_code.as_deref(),
             Some("DEADLOCK_REACHED")
         );
+        assert_eq!(
+            result
+                .property_result
+                .counterexample_kind
+                .map(|kind| kind.as_str()),
+            Some("deadlock")
+        );
         let trace = result.trace.expect("deadlock trace");
         assert_eq!(trace.evidence_kind, EvidenceKind::Deadlock);
+        assert_eq!(trace.counterexample_kind, Some(CounterexampleKind::Deadlock));
         assert_eq!(trace.steps.len(), 1);
         assert_eq!(trace.steps[0].action_id.as_deref(), Some("OnlyOnce"));
         assert_eq!(trace.steps[0].note.as_deref(), Some("deadlock detected"));

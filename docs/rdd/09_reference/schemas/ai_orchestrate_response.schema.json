@@ -13,6 +13,7 @@
         "required": ["property_id", "status", "assurance_level", "run_id"],
         "properties": {
           "property_id": { "type": "string", "minLength": 1 },
+          "counterexample_kind": { "type": ["string", "null"] },
           "status": { "type": "string", "minLength": 1 },
           "assurance_level": { "type": "string", "minLength": 1 },
           "run_id": { "type": "string", "minLength": 1 }

@@ -8,6 +8,7 @@
     "run_id",
     "property_id",
     "evidence_kind",
+    "counterexample_kind",
     "assurance_level",
     "trace_hash",
     "steps"
@@ -18,6 +19,7 @@
     "run_id": { "type": "string" },
     "property_id": { "type": "string" },
     "evidence_kind": { "type": "string" },
+    "counterexample_kind": { "type": ["string", "null"] },
     "assurance_level": { "type": "string" },
     "trace_hash": { "type": "string" },
     "steps": {

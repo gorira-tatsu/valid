@@ -781,6 +781,7 @@ fn coverage_selfcheck_trace() -> EvidenceTrace {
         run_id: "run-selfcheck-coverage".to_string(),
         property_id: "P_SAFE".to_string(),
         evidence_kind: EvidenceKind::Trace,
+        counterexample_kind: None,
         assurance_level: AssuranceLevel::Complete,
         trace_hash: "sha256:selfcheck-coverage".to_string(),
         steps: vec![

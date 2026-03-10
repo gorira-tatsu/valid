@@ -203,6 +203,9 @@ pub fn summarize_testgen_vector(
         strictness: vector.strictness.clone(),
         derivation: vector.derivation.clone(),
         source_kind: vector.source_kind.clone(),
+        counterexample_kind: vector
+            .counterexample_kind
+            .map(|kind| kind.as_str().to_string()),
         strategy: vector.strategy.clone(),
         requirement_clusters: vector.grouping.requirement_clusters.clone(),
         risk_clusters: vector.grouping.risk_clusters.clone(),
@@ -551,6 +554,7 @@ pub struct ExplainResponse {
     pub evidence_id: String,
     pub property_id: String,
     pub property_layer: String,
+    pub counterexample_kind: Option<String>,
     pub breakpoint_kind: String,
     pub breakpoint_note: Option<String>,
     pub failure_step_index: usize,
@@ -614,6 +618,7 @@ pub struct ReviewCandidateDisagreement {
 pub struct ReviewPropertyReport {
     pub property_id: String,
     pub property_kind: String,
+    pub counterexample_kind: Option<String>,
     pub status: String,
     pub assurance_level: String,
     pub summary: String,
@@ -771,6 +776,7 @@ pub struct TestgenVectorSummary {
     pub strictness: String,
     pub derivation: String,
     pub source_kind: String,
+    pub counterexample_kind: Option<String>,
     pub strategy: String,
     pub requirement_clusters: Vec<String>,
     pub risk_clusters: Vec<String>,
@@ -928,6 +934,7 @@ pub struct OrchestrateRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrchestratedRunSummary {
     pub property_id: String,
+    pub counterexample_kind: Option<String>,
     pub status: String,
     pub assurance_level: String,
     pub run_id: String,
@@ -1333,6 +1340,10 @@ pub fn orchestrate_source(
                 }
                 OrchestratedRunSummary {
                     property_id: run.property_id,
+                    counterexample_kind: result
+                        .property_result
+                        .counterexample_kind
+                        .map(|kind| kind.as_str().to_string()),
                     status: format!("{:?}", result.status),
                     assurance_level: format!("{:?}", result.assurance_level),
                     run_id: result.manifest.run_id,
@@ -1340,6 +1351,7 @@ pub fn orchestrate_source(
             }
             CheckOutcome::Errored(error) => OrchestratedRunSummary {
                 property_id: run.property_id,
+                counterexample_kind: None,
                 status: "ERROR".to_string(),
                 assurance_level: format!("{:?}", error.assurance_level),
                 run_id: error.manifest.run_id,
@@ -1881,6 +1893,9 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
                 evidence_id: trace.evidence_id.clone(),
                 property_id: trace.property_id.clone(),
                 property_layer: property_layer_label(property_layer).to_string(),
+                counterexample_kind: trace
+                    .counterexample_kind
+                    .map(|kind| kind.as_str().to_string()),
                 breakpoint_kind: breakpoint_kind.to_string(),
                 breakpoint_note: failure_step.note.clone(),
                 failure_step_index: failure_step.index,
@@ -2111,6 +2126,10 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
         property_reports.push(ReviewPropertyReport {
             property_id: result.property_result.property_id.clone(),
             property_kind: property_kind_label(&result.property_result.property_kind).to_string(),
+            counterexample_kind: result
+                .property_result
+                .counterexample_kind
+                .map(|kind| kind.as_str().to_string()),
             status: review_status_label(result.status).to_string(),
             assurance_level: review_assurance_label(result.assurance_level).to_string(),
             summary: result.property_result.summary.clone(),
@@ -3331,13 +3350,14 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
 
 pub fn render_explain_json(response: &ExplainResponse) -> String {
     format!(
-        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"property_layer\":\"{}\",\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_conceptual_action_id\":{},\"failing_concrete_action_id\":{},\"failing_action_parameter_bindings\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
+        "{{\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"evidence_id\":\"{}\",\"property_id\":\"{}\",\"property_layer\":\"{}\",\"counterexample_kind\":{},\"breakpoint_kind\":\"{}\",\"breakpoint_note\":{},\"failure_step_index\":{},\"failing_action_id\":{},\"failing_conceptual_action_id\":{},\"failing_concrete_action_id\":{},\"failing_action_parameter_bindings\":{},\"failing_action_role\":{},\"decision_path\":{},\"failing_action_reads\":{},\"failing_action_writes\":{},\"failing_action_path_tags\":{},\"changed_fields\":{},\"field_diffs\":[{}],\"guard_reviews\":[{}],\"write_overlap_fields\":{},\"involved_fields\":{},\"review_context\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"repair_hints\":{},\"next_steps\":{},\"confidence\":{},\"best_practices\":{},\"review_summary\":{{\"headline\":\"{}\",\"review_level\":\"{}\"}}}}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
         escape_json(&response.evidence_id),
         escape_json(&response.property_id),
         escape_json(&response.property_layer),
+        render_optional_string(response.counterexample_kind.as_deref()),
         escape_json(&response.breakpoint_kind),
         render_optional_string(response.breakpoint_note.as_deref()),
         response.failure_step_index,
@@ -3432,6 +3452,9 @@ pub fn render_explain_text(response: &ExplainResponse) -> String {
     out.push_str(&format!("property_id: {}\n", response.property_id));
     out.push_str(&format!("property_layer: {}\n", response.property_layer));
     out.push_str(&format!("evidence_id: {}\n", response.evidence_id));
+    if let Some(kind) = &response.counterexample_kind {
+        out.push_str(&format!("counterexample_kind: {}\n", kind));
+    }
     out.push_str(&format!("breakpoint_kind: {}\n", response.breakpoint_kind));
     if let Some(note) = &response.breakpoint_note {
         out.push_str(&format!("breakpoint_note: {}\n", note));
@@ -3678,9 +3701,10 @@ pub fn render_review_json(response: &ReviewResponse) -> String {
             .property_reports
             .iter()
             .map(|report| format!(
-                "{{\"property_id\":\"{}\",\"property_kind\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"summary\":\"{}\",\"vacuous\":{},\"evidence_id\":{},\"trace_steps\":{},\"failing_action_id\":{},\"action_sequence\":{},\"ambiguity_flags\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"next_steps\":{},\"confidence\":{}}}",
+                "{{\"property_id\":\"{}\",\"property_kind\":\"{}\",\"counterexample_kind\":{},\"status\":\"{}\",\"assurance_level\":\"{}\",\"summary\":\"{}\",\"vacuous\":{},\"evidence_id\":{},\"trace_steps\":{},\"failing_action_id\":{},\"action_sequence\":{},\"ambiguity_flags\":{},\"candidate_causes\":[{}],\"repair_targets\":[{}],\"next_steps\":{},\"confidence\":{}}}",
                 escape_json(&report.property_id),
                 escape_json(&report.property_kind),
+                render_optional_string(report.counterexample_kind.as_deref()),
                 escape_json(&report.status),
                 escape_json(&report.assurance_level),
                 escape_json(&report.summary),
@@ -3787,6 +3811,9 @@ pub fn render_review_text(response: &ReviewResponse) -> String {
                 "- {} [{} {}] {}\n",
                 report.property_id, report.status, report.assurance_level, report.summary
             ));
+            if let Some(kind) = &report.counterexample_kind {
+                out.push_str(&format!("  counterexample_kind: {}\n", kind));
+            }
             out.push_str(&format!("  vacuous: {}\n", report.vacuous));
             out.push_str(&format!("  trace_steps: {}\n", report.trace_steps));
             if let Some(action_id) = &report.failing_action_id {
@@ -5442,6 +5469,9 @@ pub fn validate_explain_response(response: &ExplainResponse) -> Result<(), Strin
     require_non_empty(&response.evidence_id, "evidence_id")?;
     require_non_empty(&response.property_id, "property_id")?;
     require_non_empty(&response.breakpoint_kind, "breakpoint_kind")?;
+    if let Some(kind) = &response.counterexample_kind {
+        require_non_empty(kind, "counterexample_kind")?;
+    }
     for decision in &response.decision_path.decisions {
         require_non_empty(
             &decision.point.decision_id,
@@ -5508,6 +5538,9 @@ pub fn validate_review_response(response: &ReviewResponse) -> Result<(), String>
     for report in &response.property_reports {
         require_non_empty(&report.property_id, "property_reports[].property_id")?;
         require_non_empty(&report.property_kind, "property_reports[].property_kind")?;
+        if let Some(kind) = &report.counterexample_kind {
+            require_non_empty(kind, "property_reports[].counterexample_kind")?;
+        }
         require_non_empty(&report.status, "property_reports[].status")?;
         require_non_empty(
             &report.assurance_level,
@@ -5633,6 +5666,9 @@ pub fn validate_testgen_response(response: &TestgenResponse) -> Result<(), Strin
         require_non_empty(&vector.strictness, "vectors[].strictness")?;
         require_non_empty(&vector.derivation, "vectors[].derivation")?;
         require_non_empty(&vector.source_kind, "vectors[].source_kind")?;
+        if let Some(kind) = &vector.counterexample_kind {
+            require_non_empty(kind, "vectors[].counterexample_kind")?;
+        }
         require_non_empty(&vector.strategy, "vectors[].strategy")?;
         require_non_empty(&vector.observation_mode, "vectors[].observation_mode")?;
         require_non_empty(&vector.suggested_surface, "vectors[].suggested_surface")?;
@@ -5793,6 +5829,9 @@ pub fn validate_orchestrate_response(response: &OrchestrateResponse) -> Result<(
     require_non_empty(&response.request_id, "request_id")?;
     for run in &response.runs {
         require_non_empty(&run.property_id, "runs[].property_id")?;
+        if let Some(kind) = &run.counterexample_kind {
+            require_non_empty(kind, "runs[].counterexample_kind")?;
+        }
         require_non_empty(&run.status, "runs[].status")?;
         require_non_empty(&run.assurance_level, "runs[].assurance_level")?;
         require_non_empty(&run.run_id, "runs[].run_id")?;
@@ -6001,6 +6040,13 @@ mod tests {
         assert_eq!(
             result.property_result.property_kind,
             crate::ir::PropertyKind::DeadlockFreedom
+        );
+        assert_eq!(
+            result
+                .property_result
+                .counterexample_kind
+                .map(|kind| kind.as_str()),
+            Some("deadlock")
         );
         assert_eq!(
             result.property_result.reason_code.as_deref(),
@@ -6541,6 +6587,7 @@ property P_RECOVERY_VISIBLE:
         validate_explain_request(&request).unwrap();
         let response = explain_source(&request).unwrap();
         assert_eq!(response.property_id, "P_SAFE");
+        assert_eq!(response.counterexample_kind.as_deref(), Some("invariant"));
         assert_eq!(response.breakpoint_kind, "action_boundary");
         assert_eq!(response.failure_step_index, 0);
         assert_eq!(response.changed_fields, vec!["x".to_string()]);
@@ -7047,6 +7094,7 @@ property P_RECOVERY_VISIBLE:
         .unwrap();
         validate_orchestrate_response(&response).unwrap();
         assert_eq!(response.runs.len(), 2);
+        assert_eq!(response.runs[0].counterexample_kind.as_deref(), Some("invariant"));
         assert!(response.aggregate_coverage.is_some());
     }
 }

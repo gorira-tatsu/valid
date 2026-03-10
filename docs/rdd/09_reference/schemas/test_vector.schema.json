@@ -38,6 +38,7 @@
     "strategy": { "type": "string" },
     "generator_version": { "type": "string" },
     "seed": { "type": ["integer", "null"] },
+    "counterexample_kind": { "type": ["string", "null"] },
     "initial_state": { "type": ["object", "null"] },
     "actions": { "type": "array", "items": { "type": "object" } },
     "expected_observations": { "type": "array", "items": { "type": "object" } },

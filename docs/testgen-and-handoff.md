@@ -68,6 +68,7 @@ Each recommended vector includes:
 - `vector_id`
 - `property_id`
 - `strategy`
+- `counterexample_kind`
 - `priority`
 - `selection_reason`
 - `grouping`
@@ -99,6 +100,12 @@ The top-level `testgen_summary` now also includes:
 
 Use `handoff` when you want a brief. Use `testgen` when you need the full JSON
 or generated artifacts.
+
+When a vector comes from a failing run, `counterexample_kind` now preserves the
+violation shape carried by the underlying evidence trace. Today that means
+values such as `invariant`, `transition`, `deadlock`, or `temporal`, which is
+useful when you want to separate "generic failure" from "specific class of
+failure" in implementation triage.
 
 ## Selection semantics
 

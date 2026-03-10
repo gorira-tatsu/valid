@@ -9,7 +9,10 @@ use crate::{
         ExplicitRunResult, PropertyResult, ResourceLimits, RunPlan, RunStatus, SearchStrategy,
         UnknownReason,
     },
-    evidence::{EvidenceKind, EvidenceTrace, TraceStep},
+    evidence::{
+        counterexample_kind_for_property, CounterexampleKind, EvidenceKind, EvidenceTrace,
+        TraceStep,
+    },
     ir::ModelIr,
     kernel::replay::replay_actions,
     kernel::transition::{apply_action, build_initial_state},
@@ -946,6 +949,7 @@ impl SolverAdapter for CommandSolverAdapter {
                             crate::engine::PropertySelection::ExactlyOne(id) => id.clone(),
                         },
                         evidence_kind: EvidenceKind::Trace,
+                        counterexample_kind: None,
                         assurance_level: crate::engine::AssuranceLevel::Incomplete,
                         trace_hash: format!(
                             "cmd:{}:{}",
@@ -1009,6 +1013,7 @@ fn normalize_protocol_result(
         run_plan,
         &property_id,
         protocol_trace_kind(property_kind.clone(), protocol.status.as_str()),
+        protocol_counterexample_kind(property_kind, protocol.status.as_str()),
         assurance_level,
         &protocol.actions,
     )?;
@@ -1024,6 +1029,7 @@ fn normalize_protocol_result(
                 property_layer,
                 status: RunStatus::Pass,
                 assurance_level,
+                counterexample_kind: None,
                 scenario_id: run_plan.scenario_selection.clone(),
                 vacuous: false,
                 reason_code: Some(
@@ -1073,6 +1079,7 @@ fn normalize_protocol_result(
                     property_layer,
                     status: RunStatus::Fail,
                     assurance_level,
+                    counterexample_kind: counterexample_kind_for_property(property_kind),
                     scenario_id: run_plan.scenario_selection.clone(),
                     vacuous: false,
                     reason_code: Some(
@@ -1104,6 +1111,7 @@ fn normalize_protocol_result(
                 property_layer,
                 status: RunStatus::Unknown,
                 assurance_level,
+                counterexample_kind: None,
                 scenario_id: run_plan.scenario_selection.clone(),
                 vacuous: false,
                 reason_code: Some(
@@ -1150,6 +1158,7 @@ fn build_protocol_trace(
     run_plan: &RunPlan,
     property_id: &str,
     evidence_kind: EvidenceKind,
+    counterexample_kind: Option<CounterexampleKind>,
     assurance_level: AssuranceLevel,
     actions: &[String],
 ) -> Result<Option<EvidenceTrace>, String> {
@@ -1194,10 +1203,21 @@ fn build_protocol_trace(
         run_id: run_plan.manifest.run_id.clone(),
         property_id: property_id.to_string(),
         evidence_kind,
+        counterexample_kind,
         assurance_level,
         trace_hash: stable_hash_hex(&actions.join("\u{1f}")),
         steps,
     }))
+}
+
+fn protocol_counterexample_kind(
+    property_kind: crate::ir::PropertyKind,
+    status: &str,
+) -> Option<CounterexampleKind> {
+    if status != "FAIL" {
+        return None;
+    }
+    counterexample_kind_for_property(property_kind)
 }
 
 fn protocol_trace_kind(property_kind: crate::ir::PropertyKind, status: &str) -> EvidenceKind {

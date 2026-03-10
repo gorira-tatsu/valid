@@ -26,6 +26,7 @@
     "status": { "type": "string" },
     "evidence_id": { "type": "string" },
     "property_id": { "type": "string" },
+    "counterexample_kind": { "type": ["string", "null"] },
     "breakpoint_kind": { "type": "string" },
     "breakpoint_note": { "type": ["string", "null"] },
     "failure_step_index": { "type": "integer", "minimum": 0 },

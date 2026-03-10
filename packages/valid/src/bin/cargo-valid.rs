@@ -1676,6 +1676,13 @@ fn cmd_coverage(parsed: ParsedArgs) {
     progress.finish(ExitCode::Success);
 }
 
+fn render_optional_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
+    }
+}
+
 fn cmd_orchestrate(parsed: ParsedArgs) {
     let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
     progress.start(None);
@@ -1697,8 +1704,12 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
                     .iter()
                     .map(|run| {
                         format!(
-                            "{{\"property_id\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
-                            run.property_id, run.status, run.assurance_level, run.run_id
+                            "{{\"property_id\":\"{}\",\"counterexample_kind\":{},\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
+                            run.property_id,
+                            render_optional_string(run.counterexample_kind.as_deref()),
+                            run.status,
+                            run.assurance_level,
+                            run.run_id
                         )
                     })
                     .collect::<Vec<_>>()
@@ -1714,7 +1725,14 @@ fn cmd_orchestrate(parsed: ParsedArgs) {
                 );
             } else {
                 for run in response.runs {
-                    println!("property_id: {} status: {}", run.property_id, run.status);
+                    if let Some(kind) = &run.counterexample_kind {
+                        println!(
+                            "property_id: {} status: {} counterexample_kind: {}",
+                            run.property_id, run.status, kind
+                        );
+                    } else {
+                        println!("property_id: {} status: {}", run.property_id, run.status);
+                    }
                 }
             }
             progress.finish(ExitCode::Success);

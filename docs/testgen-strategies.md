@@ -56,6 +56,10 @@ Recent vectors can also carry grouped metadata.
   Use this to recognize vectors that differ only cosmetically from one another.
 - `parameter_bindings`
   Use these when a conceptual action expands into bounded concrete choices.
+- `counterexample_kind`
+  Use this when you need to know whether the replay came from an invariant,
+  transition, deadlock, or temporal violation rather than treating every
+  failing trace as the same kind of asset.
 
 This is useful when one model supports both a feature-level review and a more
 operational "what should we test first?" question.

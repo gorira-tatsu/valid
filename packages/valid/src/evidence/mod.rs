@@ -2,12 +2,14 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     engine::{
         explicit::{CheckErrorEnvelope, CheckOutcome, ExplicitRunResult},
         ArtifactPolicy, AssuranceLevel, ErrorStatus, RunStatus, UnknownReason,
     },
-    ir::{DecisionKind, DecisionOutcome, Path, Value},
+    ir::{DecisionKind, DecisionOutcome, Path, PropertyKind, Value},
     support::{
         artifact::{evidence_path, run_result_path, vector_path},
         artifact_index::{record_artifact, ArtifactRecord},
@@ -30,6 +32,38 @@ pub enum EvidenceKind {
     Certificate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CounterexampleKind {
+    Invariant,
+    Transition,
+    Deadlock,
+    Temporal,
+    Property,
+}
+
+impl CounterexampleKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Invariant => "invariant",
+            Self::Transition => "transition",
+            Self::Deadlock => "deadlock",
+            Self::Temporal => "temporal",
+            Self::Property => "property",
+        }
+    }
+}
+
+pub fn counterexample_kind_for_property(kind: PropertyKind) -> Option<CounterexampleKind> {
+    match kind {
+        PropertyKind::Invariant => Some(CounterexampleKind::Invariant),
+        PropertyKind::Reachability | PropertyKind::Cover => Some(CounterexampleKind::Property),
+        PropertyKind::Transition => Some(CounterexampleKind::Transition),
+        PropertyKind::DeadlockFreedom => Some(CounterexampleKind::Deadlock),
+        PropertyKind::Temporal => Some(CounterexampleKind::Temporal),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceTrace {
     pub schema_version: String,
@@ -37,6 +71,7 @@ pub struct EvidenceTrace {
     pub run_id: String,
     pub property_id: String,
     pub evidence_kind: EvidenceKind,
+    pub counterexample_kind: Option<CounterexampleKind>,
     pub assurance_level: AssuranceLevel,
     pub trace_hash: String,
     pub steps: Vec<TraceStep>,
@@ -169,6 +204,9 @@ pub fn validate_trace(trace: &EvidenceTrace) -> Result<(), String> {
     require_non_empty(&trace.run_id, "run_id")?;
     require_non_empty(&trace.property_id, "property_id")?;
     require_non_empty(&trace.trace_hash, "trace_hash")?;
+    if let Some(kind) = trace.counterexample_kind {
+        require_non_empty(kind.as_str(), "counterexample_kind")?;
+    }
     for (expected_index, step) in trace.steps.iter().enumerate() {
         if step.index != expected_index {
             return Err("trace step indexes must be contiguous and zero-based".to_string());
@@ -237,6 +275,9 @@ fn validate_property_result(result: &crate::engine::PropertyResult) -> Result<()
         crate::api::property_layer_label(result.property_layer),
         "property_result.property_layer",
     )?;
+    if let Some(kind) = result.counterexample_kind {
+        require_non_empty(kind.as_str(), "property_result.counterexample_kind")?;
+    }
     require_non_empty(&result.summary, "property_result.summary")?;
     Ok(())
 }
@@ -251,6 +292,11 @@ pub fn render_trace_json(trace: &EvidenceTrace) -> String {
         ",\"evidence_kind\":\"{}\"",
         evidence_kind_label(&trace.evidence_kind)
     ));
+    if let Some(kind) = trace.counterexample_kind {
+        out.push_str(&format!(",\"counterexample_kind\":\"{}\"", kind.as_str()));
+    } else {
+        out.push_str(",\"counterexample_kind\":null");
+    }
     out.push_str(&format!(
         ",\"assurance_level\":\"{}\"",
         assurance_label(trace.assurance_level)
@@ -364,6 +410,11 @@ pub fn validate_rendered_trace_json(body: &str) -> Result<(), String> {
     require_string_field(object, "run_id")?;
     require_string_field(object, "property_id")?;
     require_string_field(object, "evidence_kind")?;
+    if let Some(kind) = object.get("counterexample_kind") {
+        if !matches!(kind, crate::support::json::JsonValue::Null) {
+            require_string_field(object, "counterexample_kind")?;
+        }
+    }
     require_string_field(object, "assurance_level")?;
     require_string_field(object, "trace_hash")?;
     for step in require_array_field(object, "steps")? {
@@ -457,6 +508,9 @@ fn render_completed_text(result: &ExplicitRunResult) -> String {
         "property_layer: {}\n",
         crate::api::property_layer_label(result.property_result.property_layer)
     ));
+    if let Some(kind) = result.property_result.counterexample_kind {
+        out.push_str(&format!("counterexample_kind: {}\n", kind.as_str()));
+    }
     out.push_str(&format!("summary: {}\n", result.property_result.summary));
     out.push_str(&format!("explored_states: {}\n", result.explored_states));
     out.push_str(&format!(
@@ -620,6 +674,14 @@ fn render_completed_json(model_id: &str, result: &ExplicitRunResult) -> String {
     out.push_str(&format!(
         ",\"assurance_level\":\"{}\"",
         assurance_label(result.property_result.assurance_level)
+    ));
+    out.push_str(&format!(
+        ",\"counterexample_kind\":{}",
+        result
+            .property_result
+            .counterexample_kind
+            .map(|kind| format!("\"{}\"", escape_json(kind.as_str())))
+            .unwrap_or_else(|| "null".to_string())
     ));
     if let Some(reason_code) = &result.property_result.reason_code {
         out.push_str(&format!(
@@ -1166,8 +1228,8 @@ mod tests {
     use super::{
         render_diagnostics_json, render_outcome_json, render_trace_json,
         validate_rendered_diagnostics_json, validate_rendered_outcome_json,
-        validate_rendered_trace_json, write_outcome_artifacts, EvidenceKind, EvidenceTrace,
-        TraceStep,
+        validate_rendered_trace_json, write_outcome_artifacts, CounterexampleKind, EvidenceKind,
+        EvidenceTrace, TraceStep,
     };
 
     #[test]
@@ -1190,6 +1252,7 @@ mod tests {
                 property_layer: crate::ir::PropertyLayer::Assert,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
+                counterexample_kind: Some(CounterexampleKind::Invariant),
                 scenario_id: None,
                 vacuous: false,
                 reason_code: Some("PROPERTY_FAILED".to_string()),
@@ -1206,6 +1269,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 property_id: "SAFE".to_string(),
                 evidence_kind: EvidenceKind::Trace,
+                counterexample_kind: Some(CounterexampleKind::Invariant),
                 assurance_level: AssuranceLevel::Complete,
                 trace_hash: "tracehash".to_string(),
                 steps: vec![TraceStep {
@@ -1229,6 +1293,7 @@ mod tests {
         assert!(json.contains("\"seed\":11"));
         assert!(json.contains("\"platform_metadata\""));
         assert!(json.contains("\"status\":\"FAIL\""));
+        assert!(json.contains("\"counterexample_kind\":\"invariant\""));
         assert!(json.contains("\"ci\":{\"exit_code\":2"));
         assert!(json.contains("\"review_summary\""));
         validate_rendered_outcome_json(&json).unwrap();
@@ -1254,6 +1319,7 @@ mod tests {
                 property_layer: crate::ir::PropertyLayer::Assert,
                 status: RunStatus::Fail,
                 assurance_level: AssuranceLevel::Complete,
+                counterexample_kind: Some(CounterexampleKind::Invariant),
                 scenario_id: None,
                 vacuous: false,
                 reason_code: Some("PROPERTY_FAILED".to_string()),
@@ -1270,6 +1336,7 @@ mod tests {
                 run_id: "run-artifact-test".to_string(),
                 property_id: "SAFE".to_string(),
                 evidence_kind: EvidenceKind::Trace,
+                counterexample_kind: Some(CounterexampleKind::Invariant),
                 assurance_level: AssuranceLevel::Complete,
                 trace_hash: "tracehash".to_string(),
                 steps: vec![],
@@ -1292,6 +1359,7 @@ mod tests {
             run_id: "run-1".to_string(),
             property_id: "SAFE".to_string(),
             evidence_kind: EvidenceKind::Trace,
+            counterexample_kind: Some(CounterexampleKind::Invariant),
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "tracehash".to_string(),
             steps: vec![TraceStep {

@@ -3380,13 +3380,14 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"counterexample_kind\":{},\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.property_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
+                            vector.counterexample_kind.as_ref().map(|kind| format!("\"{}\"", kind)).unwrap_or_else(|| "null".to_string()),
                             vector.strategy,
                             vector
                                 .requirement_clusters
@@ -3868,8 +3869,12 @@ fn cmd_orchestrate(args: Vec<String>) {
                     .iter()
                     .map(|run| {
                         format!(
-                            "{{\"property_id\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
-                            run.property_id, run.status, run.assurance_level, run.run_id
+                            "{{\"property_id\":\"{}\",\"counterexample_kind\":{},\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
+                            run.property_id,
+                            render_optional_string(run.counterexample_kind.as_deref()),
+                            run.status,
+                            run.assurance_level,
+                            run.run_id
                         )
                     })
                     .collect::<Vec<_>>()
@@ -3885,7 +3890,14 @@ fn cmd_orchestrate(args: Vec<String>) {
                 );
             } else {
                 for run in &response.runs {
-                    println!("property_id: {} status: {}", run.property_id, run.status);
+                    if let Some(kind) = &run.counterexample_kind {
+                        println!(
+                            "property_id: {} status: {} counterexample_kind: {}",
+                            run.property_id, run.status, kind
+                        );
+                    } else {
+                        println!("property_id: {} status: {}", run.property_id, run.status);
+                    }
                 }
                 if let Some(report) = &response.aggregate_coverage {
                     println!();

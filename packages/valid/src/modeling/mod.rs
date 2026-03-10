@@ -2671,6 +2671,9 @@ pub fn explain_machine<M: VerifiedMachine>(request_id: &str) -> Result<ExplainRe
         evidence_id: trace.evidence_id,
         property_id: trace.property_id,
         property_layer: "assert".to_string(),
+        counterexample_kind: trace
+            .counterexample_kind
+            .map(|kind| kind.as_str().to_string()),
         breakpoint_kind: if failure_step
             .note
             .as_deref()
@@ -2780,6 +2783,7 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 strategy: "witness".to_string(),
                 generator_version: env!("CARGO_PKG_VERSION").to_string(),
                 seed: None,
+                counterexample_kind: None,
                 actions: vec![VectorActionStep {
                     index: 0,
                     action_id: action_id.clone(),
@@ -3326,6 +3330,7 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         strategy: strategy.to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        counterexample_kind: None,
         actions,
         initial_state: Some(nodes.first()?.state.snapshot()),
         expected_observations: if trace.is_empty() {
@@ -4398,6 +4403,7 @@ pub fn check_machine_outcome_for_property_with_seed<M: VerifiedMachine>(
             property_layer: crate::ir::PropertyLayer::Assert,
             status,
             assurance_level: AssuranceLevel::Complete,
+            counterexample_kind: None,
             scenario_id: None,
             vacuous: false,
             reason_code,
@@ -4757,6 +4763,7 @@ fn build_evidence_trace<M: VerifiedMachine>(
         run_id,
         property_id: result.property_id.to_string(),
         evidence_kind: EvidenceKind::Trace,
+        counterexample_kind: None,
         assurance_level: AssuranceLevel::Complete,
         trace_hash,
         steps,

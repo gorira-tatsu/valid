@@ -792,8 +792,12 @@ fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
             .iter()
             .map(|run| {
                 format!(
-                    "{{\"property_id\":\"{}\",\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
-                    run.property_id, run.status, run.assurance_level, run.run_id
+                    "{{\"property_id\":\"{}\",\"counterexample_kind\":{},\"status\":\"{}\",\"assurance_level\":\"{}\",\"run_id\":\"{}\"}}",
+                    run.property_id,
+                    render_optional_string(run.counterexample_kind.as_deref()),
+                    run.status,
+                    run.assurance_level,
+                    run.run_id
                 )
             })
             .collect::<Vec<_>>()
@@ -809,7 +813,14 @@ fn cmd_orchestrate(models: &[RegisteredModel], args: Vec<String>) {
         );
     } else {
         for run in response.runs {
-            println!("property_id: {} status: {}", run.property_id, run.status);
+            if let Some(kind) = &run.counterexample_kind {
+                println!(
+                    "property_id: {} status: {} counterexample_kind: {}",
+                    run.property_id, run.status, kind
+                );
+            } else {
+                println!("property_id: {} status: {}", run.property_id, run.status);
+            }
         }
     }
     progress.finish(ExitCode::Success);
@@ -1195,6 +1206,10 @@ fn orchestrate_machine<M: VerifiedMachine>(
                             }
                             OrchestratedRunSummary {
                                 property_id: run.property_id,
+                                counterexample_kind: result
+                                    .property_result
+                                    .counterexample_kind
+                                    .map(|kind| kind.as_str().to_string()),
                                 status: format!("{:?}", result.status),
                                 assurance_level: format!("{:?}", result.assurance_level),
                                 run_id: result.manifest.run_id,
@@ -1202,6 +1217,7 @@ fn orchestrate_machine<M: VerifiedMachine>(
                         }
                         CheckOutcome::Errored(error) => OrchestratedRunSummary {
                             property_id: run.property_id,
+                            counterexample_kind: None,
                             status: "ERROR".to_string(),
                             assurance_level: format!("{:?}", error.assurance_level),
                             run_id: error.manifest.run_id,
@@ -1227,6 +1243,10 @@ fn orchestrate_machine<M: VerifiedMachine>(
         .into_iter()
         .map(|result| OrchestratedRunSummary {
             property_id: result.property_result.property_id,
+            counterexample_kind: result
+                .property_result
+                .counterexample_kind
+                .map(|kind| kind.as_str().to_string()),
             status: format!("{:?}", result.status),
             assurance_level: format!("{:?}", result.assurance_level),
             run_id: result.manifest.run_id,
@@ -1855,6 +1875,13 @@ fn cmd_schema(args: Vec<String>) {
     match render_schema_json(Surface::Registry, &normalize_command(&command)) {
         Ok(body) => println!("{body}"),
         Err(message) => message_exit("schema", true, &message, Some(SCHEMA_USAGE)),
+    }
+}
+
+fn render_optional_string(value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
     }
 }
 

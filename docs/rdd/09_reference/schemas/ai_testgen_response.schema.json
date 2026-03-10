@@ -37,6 +37,7 @@
           "strictness": { "type": "string" },
           "derivation": { "type": "string" },
           "source_kind": { "type": "string" },
+          "counterexample_kind": { "type": ["string", "null"] },
           "strategy": { "type": "string" },
           "observation_mode": { "type": "string" },
           "observation_layers": {

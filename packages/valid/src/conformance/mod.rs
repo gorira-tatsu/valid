@@ -208,6 +208,7 @@ pub fn build_vector_from_actions(
         strategy: "conformance".to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        counterexample_kind: None,
         actions,
         initial_state: Some(initial.as_named_map(model)),
         expected_observations,
@@ -737,6 +738,7 @@ mod tests {
             strategy: "counterexample".to_string(),
             generator_version: "0.1.0".to_string(),
             seed: None,
+            counterexample_kind: None,
             actions: vec![VectorActionStep {
                 index: 0,
                 action_id: "Jump".to_string(),

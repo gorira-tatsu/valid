@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    evidence::{write_vector_artifact, EvidenceKind, EvidenceTrace},
+    evidence::{write_vector_artifact, CounterexampleKind, EvidenceKind, EvidenceTrace},
     ir::{DecisionKind, DecisionOutcome, ModelIr, Path, PropertyKind, Value},
     kernel::{
         eval::eval_expr,
@@ -100,6 +100,8 @@ pub struct TestVector {
     pub strategy: String,
     pub generator_version: String,
     pub seed: Option<u64>,
+    #[serde(default)]
+    pub counterexample_kind: Option<CounterexampleKind>,
     #[serde(default)]
     pub actions: Vec<VectorActionStep>,
     #[serde(default)]
@@ -391,6 +393,7 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         strategy: "counterexample".to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        counterexample_kind: trace.counterexample_kind,
         initial_state: trace.steps.first().map(|step| step.state_before.clone()),
         expected_observations,
         actions,
@@ -804,6 +807,7 @@ fn build_model_deadlock_vector(
         strategy: "deadlock".to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        counterexample_kind: Some(CounterexampleKind::Deadlock),
         actions,
         initial_state,
         expected_observations,
@@ -941,6 +945,7 @@ fn synthetic_trace_from_states(
         run_id: format!("run-witness-{}", action_signature.replace("->", "-")),
         property_id: property_id.to_string(),
         evidence_kind: crate::evidence::EvidenceKind::Witness,
+        counterexample_kind: None,
         assurance_level: crate::engine::AssuranceLevel::Complete,
         trace_hash: format!("trace:witness:{action_signature}"),
         steps,
@@ -1827,6 +1832,7 @@ fn build_model_vector_for_node(
         strategy: strategy.to_string(),
         generator_version: env!("CARGO_PKG_VERSION").to_string(),
         seed: None,
+        counterexample_kind: None,
         actions,
         initial_state: Some(nodes.first()?.state.as_named_map(model)),
         expected_observations,
@@ -2037,6 +2043,7 @@ mod tests {
             run_id: "run-1".to_string(),
             property_id: "SAFE".to_string(),
             evidence_kind: EvidenceKind::Witness,
+            counterexample_kind: None,
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:trace".to_string(),
             steps,
@@ -2114,6 +2121,7 @@ mod tests {
             run_id: "run-1".to_string(),
             property_id: "P_SAFE".to_string(),
             evidence_kind: EvidenceKind::Counterexample,
+            counterexample_kind: Some(crate::evidence::CounterexampleKind::Invariant),
             assurance_level: AssuranceLevel::Complete,
             trace_hash: "sha256:x".to_string(),
             steps: vec![TraceStep {

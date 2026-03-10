@@ -24,6 +24,7 @@
       "properties": {
         "property_id": { "type": "string" },
         "property_kind": { "type": "string" },
+        "counterexample_kind": { "type": ["string", "null"] },
         "status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
         "terminal_state_id": { "type": ["string", "null"] },
         "evidence_id": { "type": ["string", "null"] },

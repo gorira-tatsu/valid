@@ -421,6 +421,10 @@ pub fn orchestrate_bundled_model(
                         }
                         OrchestratedRunSummary {
                             property_id: run.property_id,
+                            counterexample_kind: result
+                                .property_result
+                                .counterexample_kind
+                                .map(|kind| kind.as_str().to_string()),
                             status: format!("{:?}", result.status),
                             assurance_level: format!("{:?}", result.assurance_level),
                             run_id: result.manifest.run_id,
@@ -428,6 +432,7 @@ pub fn orchestrate_bundled_model(
                     }
                     CheckOutcome::Errored(error) => OrchestratedRunSummary {
                         property_id: run.property_id,
+                        counterexample_kind: None,
                         status: "ERROR".to_string(),
                         assurance_level: format!("{:?}", error.assurance_level),
                         run_id: error.manifest.run_id,
@@ -464,6 +469,10 @@ pub fn orchestrate_bundled_model(
         .into_iter()
         .map(|result| OrchestratedRunSummary {
             property_id: result.property_result.property_id,
+            counterexample_kind: result
+                .property_result
+                .counterexample_kind
+                .map(|kind| kind.as_str().to_string()),
             status: format!("{:?}", result.status),
             assurance_level: format!("{:?}", result.assurance_level),
             run_id: result.manifest.run_id,
