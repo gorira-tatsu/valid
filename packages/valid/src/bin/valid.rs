@@ -58,10 +58,11 @@ use valid::{
         scaffold_project_init,
     },
     reporter::{
-        build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
-        render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
-        render_model_svg_with_view, render_model_text_failure, render_model_text_with_view,
-        render_trace_mermaid, render_trace_sequence_mermaid, GraphView,
+        build_failure_graph_slice, build_graph_snapshot, render_model_dot_failure,
+        render_model_dot_with_view, render_model_mermaid_failure, render_model_mermaid_with_view,
+        render_model_svg_failure, render_model_svg_with_view, render_model_text_failure,
+        render_model_text_with_view, render_trace_mermaid, render_trace_sequence_mermaid,
+        GraphView,
     },
     selfcheck::{run_smoke_selfcheck, write_selfcheck_artifact},
     solver::{capabilities_for_config, AdapterConfig},
@@ -410,6 +411,8 @@ struct CommonModelArgs {
     #[arg(long)]
     property: Option<String>,
     #[arg(long)]
+    profile: Option<String>,
+    #[arg(long)]
     scenario: Option<String>,
     #[arg(long)]
     seed: Option<u64>,
@@ -432,6 +435,8 @@ struct GraphArgs {
     view: Option<String>,
     #[arg(long)]
     property: Option<String>,
+    #[arg(long)]
+    profile: Option<String>,
     #[command(flatten)]
     json_progress: JsonProgressArgs,
 }
@@ -452,6 +457,8 @@ struct HandoffArgs {
     path: String,
     #[arg(long)]
     property: Option<String>,
+    #[arg(long)]
+    profile: Option<String>,
     #[arg(long)]
     backend: Option<String>,
     #[arg(long = "solver-exec")]
@@ -545,6 +552,8 @@ struct TraceArgs {
     #[arg(long)]
     property: Option<String>,
     #[arg(long)]
+    profile: Option<String>,
+    #[arg(long)]
     scenario: Option<String>,
     #[arg(long)]
     seed: Option<u64>,
@@ -563,6 +572,8 @@ struct TestgenArgs {
     path: String,
     #[arg(long)]
     property: Option<String>,
+    #[arg(long)]
+    profile: Option<String>,
     #[arg(long)]
     strategy: Option<String>,
     #[arg(long = "focus-action")]
@@ -803,6 +814,7 @@ fn common_to_parsed(args: CommonModelArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        profile_id: args.profile,
         scenario_id: args.scenario,
         ..ParsedArgs::default()
     }
@@ -825,6 +837,7 @@ fn graph_to_parsed(args: GraphArgs) -> ParsedArgs {
         format: args.format,
         view: args.view,
         property_id: args.property,
+        profile_id: args.profile,
         ..ParsedArgs::default()
     }
 }
@@ -849,6 +862,7 @@ fn handoff_to_parsed(args: HandoffArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        profile_id: args.profile,
         write_path: args.write,
         check: args.check,
         ..ParsedArgs::default()
@@ -918,6 +932,7 @@ fn trace_to_parsed(args: TraceArgs) -> ParsedArgs {
         solver_args: args.solver_args,
         format: args.format,
         property_id: args.property,
+        profile_id: args.profile,
         scenario_id: args.scenario,
         ..ParsedArgs::default()
     }
@@ -933,6 +948,7 @@ fn testgen_to_parsed(args: TestgenArgs) -> ParsedArgs {
         solver_executable: args.solver_exec,
         solver_args: args.solver_args,
         property_id: args.property,
+        profile_id: args.profile,
         focus_action_id: args.focus_action,
         extra: args.strategy,
         ..ParsedArgs::default()
@@ -2953,6 +2969,7 @@ fn cmd_check(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
@@ -2993,6 +3010,7 @@ fn cmd_explain(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
@@ -3145,7 +3163,27 @@ fn render_graph_output(
 ) -> Result<String, String> {
     if view != GraphView::Failure {
         return Ok(match render_format {
-            "json" => format!("{}\n", render_inspect_json(response)),
+            "json" => {
+                let mut body: Value = serde_json::from_str(&render_inspect_json(response))
+                    .map_err(|err| format!("failed to prepare graph json: {err}"))?;
+                body["graph_view"] = Value::String(
+                    match view {
+                        GraphView::Overview => "overview",
+                        GraphView::Logic => "logic",
+                        GraphView::Failure => "failure",
+                        GraphView::Deadlock => "deadlock",
+                        GraphView::Scc => "scc",
+                    }
+                    .to_string(),
+                );
+                body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot(response, view))
+                    .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
+                format!(
+                    "{}\n",
+                    serde_json::to_string(&body)
+                        .map_err(|err| format!("failed to render graph json: {err}"))?
+                )
+            }
             "text" => render_model_text_with_view(response, view),
             "dot" => format!("{}\n", render_model_dot_with_view(response, view)),
             "svg" => format!("{}\n", render_model_svg_with_view(response, view)),
@@ -3162,6 +3200,7 @@ fn render_graph_output(
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: Some(property_id.clone()),
+        profile_id: parsed.profile_id.clone(),
         scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
@@ -3189,6 +3228,8 @@ fn render_graph_output(
             let mut body: Value = serde_json::from_str(&render_inspect_json(response))
                 .map_err(|err| format!("failed to prepare graph json: {err}"))?;
             body["graph_view"] = Value::String("failure".to_string());
+            body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot(response, view))
+                .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
             body["graph_slice"] = serde_json::json!({
                 "property_id": slice.property_id,
                 "failing_action_id": slice.failing_action_id,
@@ -3343,6 +3384,7 @@ fn cmd_handoff(args: Vec<String>) {
                 source_name: parsed.path.clone(),
                 source: source.clone(),
                 property_id: Some(property_id.clone()),
+                profile_id: parsed.profile_id.clone(),
                 scenario_id: None,
                 seed: None,
                 backend: parsed.backend.clone(),
@@ -3366,6 +3408,7 @@ fn cmd_handoff(args: Vec<String>) {
             source_name: parsed.path.clone(),
             source: source.clone(),
             property_id: parsed.property_id.clone(),
+            profile_id: parsed.profile_id.clone(),
             scenario_id: None,
             seed: None,
             backend: parsed.backend.clone(),
@@ -3406,6 +3449,7 @@ fn cmd_handoff(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source: source.clone(),
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         focus_action_id: None,
         strategy: "counterexample".to_string(),
         seed: None,
@@ -3744,6 +3788,7 @@ fn cmd_testgen(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source: source.clone(),
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         strategy,
         focus_action_id: parsed.focus_action_id.clone(),
         seed: parsed.seed,
@@ -3775,7 +3820,7 @@ fn cmd_testgen(args: Vec<String>) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"counterexample_kind\":{},\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"counterexample_kind\":{},\"witness_kind\":{},\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"canonical_witness\":[{}],\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.property_id,
@@ -3783,6 +3828,7 @@ fn cmd_testgen(args: Vec<String>) {
                             vector.derivation,
                             vector.source_kind,
                             vector.counterexample_kind.as_ref().map(|kind| format!("\"{}\"", kind)).unwrap_or_else(|| "null".to_string()),
+                            vector.witness_kind.as_ref().map(|kind| format!("\"{}\"", kind)).unwrap_or_else(|| "null".to_string()),
                             vector.strategy,
                             vector
                                 .requirement_clusters
@@ -3809,6 +3855,7 @@ fn cmd_testgen(args: Vec<String>) {
                             vector.conceptual_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
                             vector.concrete_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
                             vector.parameter_bindings.iter().map(|binding| format!("{{\"name\":\"{}\",\"value\":\"{}\"}}", binding.name, binding.value)).collect::<Vec<_>>().join(","),
+                            vector.canonical_witness.iter().map(|step| format!("\"{}\"", step)).collect::<Vec<_>>().join(","),
                             vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                         ))
                         .collect::<Vec<_>>()
@@ -3977,6 +4024,7 @@ fn cmd_trace(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
@@ -4337,6 +4385,7 @@ fn cmd_coverage(args: Vec<String>) {
         source_name: parsed.path.clone(),
         source,
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
         scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend,
@@ -4375,6 +4424,7 @@ struct ParsedArgs {
     format: Option<String>,
     view: Option<String>,
     property_id: Option<String>,
+    profile_id: Option<String>,
     scenario_id: Option<String>,
     actions: Vec<String>,
     focus_action_id: Option<String>,
@@ -4428,6 +4478,8 @@ where
             parsed.seed = Some(parse_seed_arg(value, usage));
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--profile=") {
+            parsed.profile_id = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--scenario=") {
             parsed.scenario_id = Some(value.to_string());
         } else if arg == "--write" {
@@ -4446,6 +4498,11 @@ where
             ));
         } else if arg == "--scenario" {
             parsed.scenario_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
+            );
+        } else if arg == "--profile" {
+            parsed.profile_id = Some(
                 iter.next()
                     .unwrap_or_else(|| usage_exit("valid", parsed.json, usage)),
             );

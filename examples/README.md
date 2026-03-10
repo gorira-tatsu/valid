@@ -13,6 +13,29 @@ Every example should start with a `/* ... */` block comment that explains:
 - which command to run first
 - why the example exists
 
+Command surface guide:
+
+- `valid ...`
+  Use for `.valid` examples and real project roots created by `valid init`.
+- `cargo valid --registry ...`
+  Use for standalone Rust registry files in this directory.
+- `cargo run --example ...`
+  Use for runnable harness examples that are meant to execute Rust code, not
+  only registry commands.
+
+## Pick by workflow
+
+- Project-first walkthrough and backend readiness:
+  `property_suites_project/`
+- Analysis profiles and graph snapshots on a `.valid` source:
+  `scenario_focus.valid`
+- Ranked handoff and witness-aware vector review:
+  `handoff_testgen_registry.rs`
+- SAT-friendly bounded registry review:
+  `iam_transition_registry.rs`
+- In-process Rust conformance harness:
+  `conformance_harness.rs`
+
 Current examples:
 
 - `valid_models.rs`
@@ -87,7 +110,8 @@ cargo valid --registry examples/valid_models.rs models
 cargo run --example compose_helper_registry
 cargo run --example conformance_harness
 valid inspect examples/scenario_focus.valid --json
-valid check examples/scenario_focus.valid --scenario=DeletedPost --json
+valid check examples/scenario_focus.valid --profile=DeletedPost --json
+valid graph examples/scenario_focus.valid --format=json
 valid inspect examples/cover_review.valid --json
 valid check examples/cover_review.valid --property=C_RECOVERED_PATH --json
 cargo valid --registry examples/deadlock_enablement_registry.rs testgen deadlock-terminal --strategy=deadlock
@@ -111,6 +135,10 @@ cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isol
 
 What to look for in the newer outputs:
 
+- `scenario_focus.valid`
+  `inspect --json` shows `default_profile_id`, `analysis_profiles`, and bounded
+  state-field `domain` metadata. `graph --format=json` shows the
+  `graph_snapshot` reduction surface that review tooling can consume directly.
 - `handoff_testgen_registry.rs`
   `handoff` and `testgen --json` now keep `counterexample_kind`,
   vector `priority`, `selection_reason`, and any bounded-choice
@@ -130,6 +158,15 @@ valid init
 valid models
 valid inspect approval-model
 valid handoff approval-model
+```
+
+From inside the small example project you can run the same project-mode flow:
+
+```sh
+cd examples/property_suites_project
+valid models
+valid capabilities --backend=sat-varisat --json
+valid selfcheck --json
 ```
 
 Generated tests are written under `generated-tests/`, not under `tests/`.

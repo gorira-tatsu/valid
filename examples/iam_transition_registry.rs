@@ -15,11 +15,13 @@ IAM 風アクセス評価例
 
 最初に試すコマンド:
   cargo valid --registry examples/iam_transition_registry.rs inspect iam-access
+  cargo valid --registry examples/iam_transition_registry.rs graph iam-access --format=json
   cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION
   cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION --backend=sat-varisat --json
 
 見どころ:
   - `sat-varisat` で扱いやすい bounded bool surface の確認用
+  - `graph --format=json` で review-oriented snapshot を取りやすい
   - path tags を保ったまま backend 比較や explain/testgen の起点にしやすい
 */
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};

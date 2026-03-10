@@ -80,6 +80,7 @@ pub struct HandoffRecommendedVector {
     pub property_id: String,
     pub strategy: String,
     pub counterexample_kind: Option<String>,
+    pub witness_kind: Option<String>,
     pub priority: String,
     pub selection_reason: String,
     pub grouping: Vec<String>,
@@ -88,6 +89,7 @@ pub struct HandoffRecommendedVector {
     pub suggested_surface: String,
     pub state_visibility: String,
     pub parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
+    pub canonical_witness: Vec<String>,
     pub artifact_paths: Vec<String>,
     pub recommended_next_command: String,
     pub recommended_conformance_surface: String,
@@ -300,6 +302,11 @@ fn recommended_handoff_vectors(
             property_id: vector.property_id.clone(),
             strategy: vector.strategy.clone(),
             counterexample_kind: vector.counterexample_kind.clone(),
+            witness_kind: vector
+                .notes
+                .iter()
+                .find_map(|note| note.strip_prefix("witness_kind:"))
+                .map(str::to_string),
             priority: vector.priority.clone(),
             selection_reason: vector.selection_reason.clone(),
             grouping,
@@ -308,6 +315,12 @@ fn recommended_handoff_vectors(
             suggested_surface: vector.suggested_surface.clone(),
             state_visibility: vector.state_visibility.clone(),
             parameter_bindings: vector.parameter_bindings.clone(),
+            canonical_witness: vector
+                .notes
+                .iter()
+                .find_map(|note| note.strip_prefix("canonical_witness:"))
+                .map(|value| value.split(',').map(str::to_string).collect())
+                .unwrap_or_default(),
             artifact_paths,
             recommended_next_command: recommended_next_command(vector),
             recommended_conformance_surface,
@@ -1208,6 +1221,7 @@ mod tests {
             request_id: "req".to_string(),
             status: "ok".to_string(),
             model_id: "Demo".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities {
@@ -1232,6 +1246,9 @@ mod tests {
                     explicit_status: "not_applicable".to_string(),
                     solver_status: "not_applicable".to_string(),
                     reason: String::new(),
+                    fairness_support: "not_applicable".to_string(),
+                    fairness_kinds: Vec::new(),
+                    semantics_scope: "not_applicable".to_string(),
                     backend_statuses: Vec::new(),
                 },
                 reasons: Vec::new(),
@@ -1247,6 +1264,14 @@ mod tests {
                 range: Some("0..=1".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: crate::api::InspectBoundedDomain {
+                    kind: "range".to_string(),
+                    summary: "0..=1".to_string(),
+                    cardinality: Some(2),
+                    min: Some("0".to_string()),
+                    max: Some("1".to_string()),
+                    values: Vec::new(),
+                },
             }],
             action_details: vec![crate::api::InspectAction {
                 action_id: "Inc".to_string(),
@@ -1261,6 +1286,15 @@ mod tests {
             }],
             predicate_details: Vec::new(),
             scenario_details: Vec::new(),
+            analysis_profiles: vec![crate::api::InspectAnalysisProfile {
+                profile_id: "default".to_string(),
+                scenario_id: None,
+                scope_expr: None,
+                backend_hint: None,
+                doc_graph_policy: "full".to_string(),
+                deadlock_check: true,
+                notes: vec!["test profile".to_string()],
+            }],
             transition_details: vec![crate::api::InspectTransition {
                 action_id: "Inc".to_string(),
                 conceptual_action_id: "Inc".to_string(),
@@ -1334,6 +1368,7 @@ mod tests {
                 derivation: "explicit".to_string(),
                 source_kind: "counterexample".to_string(),
                 counterexample_kind: Some("invariant".to_string()),
+                witness_kind: Some("positive".to_string()),
                 strategy: "counterexample".to_string(),
                 requirement_clusters: vec!["property:P_SAFE".to_string()],
                 risk_clusters: Vec::new(),
@@ -1350,6 +1385,7 @@ mod tests {
                 conceptual_action_ids: vec!["Inc".to_string()],
                 concrete_action_ids: vec!["Inc".to_string()],
                 parameter_bindings: Vec::new(),
+                canonical_witness: vec!["Inc".to_string()],
                 notes: vec!["counterexample vector".to_string()],
             }],
             vector_groups: vec![crate::api::TestgenGroupSummary {

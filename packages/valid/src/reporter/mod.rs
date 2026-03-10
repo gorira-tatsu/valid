@@ -1,6 +1,7 @@
 //! Presenters for human-readable derived outputs such as Mermaid, DOT, and SVG.
 
 use crate::{api::InspectResponse, evidence::EvidenceTrace};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Public graph-view selector used by CLI and report renderers.
@@ -38,6 +39,30 @@ pub struct FailureGraphSlice {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphSnapshot {
+    pub reduction: String,
+    pub focus_indices: Vec<usize>,
+    pub deadlocks: Vec<String>,
+    pub truncated: bool,
+    pub nodes: Vec<GraphSnapshotNode>,
+    pub edges: Vec<GraphSnapshotEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphSnapshotNode {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GraphSnapshotEdge {
+    pub from: String,
+    pub to: String,
+    pub relation: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActionGraphNode {
     action_id: String,
@@ -59,6 +84,103 @@ struct ActionGraphSummary {
     nodes: Vec<ActionGraphNode>,
     edges: Vec<(usize, usize)>,
     sccs: Vec<ActionGraphScc>,
+}
+
+pub fn build_graph_snapshot(response: &InspectResponse, view: GraphView) -> GraphSnapshot {
+    let reduction = match view {
+        GraphView::Overview | GraphView::Logic => "full",
+        GraphView::Failure => "boundary_paths",
+        GraphView::Deadlock => "deadlock_focus",
+        GraphView::Scc => "scc_condensation",
+    }
+    .to_string();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for field in &response.state_field_details {
+        nodes.push(GraphSnapshotNode {
+            id: format!("field:{}", field.name),
+            kind: "state_field".to_string(),
+            label: field.name.clone(),
+        });
+    }
+    for action in &response.action_details {
+        nodes.push(GraphSnapshotNode {
+            id: format!("action:{}", action.action_id),
+            kind: "action".to_string(),
+            label: action.action_id.clone(),
+        });
+        for field in &action.reads {
+            edges.push(GraphSnapshotEdge {
+                from: format!("action:{}", action.action_id),
+                to: format!("field:{field}"),
+                relation: "reads".to_string(),
+            });
+        }
+        for field in &action.writes {
+            edges.push(GraphSnapshotEdge {
+                from: format!("action:{}", action.action_id),
+                to: format!("field:{field}"),
+                relation: "writes".to_string(),
+            });
+        }
+    }
+    for property in &response.property_details {
+        nodes.push(GraphSnapshotNode {
+            id: format!("property:{}", property.property_id),
+            kind: "property".to_string(),
+            label: property.property_id.clone(),
+        });
+    }
+    for property in &response.property_details {
+        for transition in &response.transition_details {
+            if transition
+                .writes
+                .iter()
+                .any(|field| property.expr.as_deref().unwrap_or_default().contains(field))
+            {
+                edges.push(GraphSnapshotEdge {
+                    from: format!("property:{}", property.property_id),
+                    to: format!("action:{}", transition.action_id),
+                    relation: "depends_on".to_string(),
+                });
+            }
+        }
+    }
+    let focus_indices = match view {
+        GraphView::Failure => response
+            .transition_details
+            .iter()
+            .enumerate()
+            .filter_map(|(index, transition)| {
+                transition
+                    .path_tags
+                    .iter()
+                    .any(|tag| tag == "risk_path" || tag == "guard_path")
+                    .then_some(index)
+            })
+            .collect(),
+        GraphView::Deadlock => response
+            .property_details
+            .iter()
+            .enumerate()
+            .filter_map(|(index, property)| (property.kind == "deadlock_freedom").then_some(index))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let deadlocks = response
+        .property_details
+        .iter()
+        .filter(|property| property.kind == "deadlock_freedom")
+        .map(|property| property.property_id.clone())
+        .collect();
+    GraphSnapshot {
+        reduction,
+        focus_indices,
+        deadlocks,
+        truncated: false,
+        nodes,
+        edges,
+    }
 }
 
 /// Build a focused graph slice around the last failing step of an evidence
@@ -1716,8 +1838,9 @@ mod tests {
 
     use crate::{
         api::{
-            InspectAction, InspectCapabilities, InspectProperty, InspectResponse,
-            InspectStateField, InspectTransition, InspectTransitionUpdate,
+            InspectAction, InspectAnalysisProfile, InspectBoundedDomain, InspectCapabilities,
+            InspectProperty, InspectResponse, InspectStateField, InspectTransition,
+            InspectTransitionUpdate,
         },
         engine::AssuranceLevel,
         evidence::{EvidenceKind, EvidenceTrace, TraceStep},
@@ -1732,6 +1855,29 @@ mod tests {
         render_model_svg_with_view, render_model_text_with_view, render_trace_mermaid,
         render_trace_sequence_mermaid, GraphView,
     };
+
+    fn default_profiles() -> Vec<InspectAnalysisProfile> {
+        vec![InspectAnalysisProfile {
+            profile_id: "default".to_string(),
+            scenario_id: None,
+            scope_expr: None,
+            backend_hint: None,
+            doc_graph_policy: "full".to_string(),
+            deadlock_check: true,
+            notes: vec!["test profile".to_string()],
+        }]
+    }
+
+    fn range_domain(summary: &str) -> InspectBoundedDomain {
+        InspectBoundedDomain {
+            kind: "range".to_string(),
+            summary: summary.to_string(),
+            cardinality: None,
+            min: None,
+            max: None,
+            values: Vec::new(),
+        }
+    }
 
     #[test]
     fn renders_state_mermaid() {
@@ -1771,6 +1917,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities::fully_ready(),
@@ -1785,6 +1932,7 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: range_domain("0..=3"),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -1799,6 +1947,7 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),
@@ -1841,6 +1990,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities::fully_ready(),
@@ -1855,6 +2005,7 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: range_domain("0..=3"),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -1869,6 +2020,7 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),
@@ -1911,6 +2063,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities::fully_ready(),
@@ -1925,6 +2078,7 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: range_domain("0..=3"),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -1939,6 +2093,7 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),
@@ -1979,6 +2134,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: false,
             machine_ir_error: Some("step models are opaque".to_string()),
             capabilities: InspectCapabilities {
@@ -2015,6 +2171,7 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: range_domain("0..=3"),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -2029,6 +2186,7 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),
@@ -2068,6 +2226,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities::fully_ready(),
@@ -2082,6 +2241,7 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: range_domain("0..=3"),
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -2096,6 +2256,7 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),
@@ -2166,6 +2327,7 @@ mod tests {
             request_id: "req-1".to_string(),
             status: "ok".to_string(),
             model_id: "WorkflowModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities::fully_ready(),
@@ -2178,6 +2340,7 @@ mod tests {
                 InspectStateField {
                     name: "x".to_string(),
                     rust_type: "u8".to_string(),
+                    domain: range_domain("0..=3"),
                     range: Some("0..=3".to_string()),
                     variants: Vec::new(),
                     is_set: false,
@@ -2185,6 +2348,7 @@ mod tests {
                 InspectStateField {
                     name: "y".to_string(),
                     rust_type: "u8".to_string(),
+                    domain: range_domain("0..=3"),
                     range: Some("0..=3".to_string()),
                     variants: Vec::new(),
                     is_set: false,
@@ -2192,6 +2356,7 @@ mod tests {
                 InspectStateField {
                     name: "z".to_string(),
                     rust_type: "u8".to_string(),
+                    domain: range_domain("0..=3"),
                     range: Some("0..=3".to_string()),
                     variants: Vec::new(),
                     is_set: false,
@@ -2234,6 +2399,7 @@ mod tests {
             ],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_profiles(),
             transition_details: vec![],
             property_details: vec![InspectProperty {
                 property_id: "P_NO_DEADLOCK".to_string(),

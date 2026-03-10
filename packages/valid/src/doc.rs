@@ -3,6 +3,7 @@ use serde_json::json;
 use crate::{
     api::InspectResponse,
     project::{doc_repair_surfaces, doc_suggested_reruns, RerunSuggestion},
+    reporter::{build_graph_snapshot, GraphView},
     support::{
         artifact_index::{record_artifact, synthetic_run_id, ArtifactRecord},
         hash::stable_hash_hex,
@@ -223,6 +224,7 @@ fn render_doc_markdown(
     contract_hash: &str,
 ) -> String {
     let mut out = String::new();
+    let snapshot = build_graph_snapshot(inspect, GraphView::Overview);
     out.push_str(&format!(
         "<!-- valid-doc: model_id={} source_hash={} contract_hash={} -->\n\n",
         inspect.model_id, source_hash, contract_hash
@@ -230,14 +232,30 @@ fn render_doc_markdown(
     out.push_str(&format!("# {}\n\n", inspect.model_id));
     out.push_str("## Overview\n\n");
     out.push_str(&format!(
-        "- machine_ir_ready: {}\n- explicit_ready: {}\n- solver_ready: {}\n- contract_hash: `{}`\n\n",
+        "- machine_ir_ready: {}\n- explicit_ready: {}\n- solver_ready: {}\n- default_profile: `{}`\n- contract_hash: `{}`\n\n",
         inspect.machine_ir_ready,
         inspect.capabilities.explicit_ready,
         inspect.capabilities.solver_ready,
+        inspect.default_profile_id,
         contract_hash
     ));
+    out.push_str("## Analysis Profiles\n\n");
+    for profile in &inspect.analysis_profiles {
+        out.push_str(&format!(
+            "- `{}` doc_graph_policy=`{}` deadlock_check=`{}`{}\n",
+            profile.profile_id,
+            profile.doc_graph_policy,
+            profile.deadlock_check,
+            profile
+                .scope_expr
+                .as_ref()
+                .map(|expr| format!(" scope=`{expr}`"))
+                .unwrap_or_default()
+        ));
+    }
+    out.push('\n');
     out.push_str("## State Fields\n\n");
-    out.push_str("| name | type | range | variants |\n| --- | --- | --- | --- |\n");
+    out.push_str("| name | type | range | domain | variants |\n| --- | --- | --- | --- | --- |\n");
     for field in &inspect.state_field_details {
         let variants = if field.variants.is_empty() {
             String::new()
@@ -245,10 +263,11 @@ fn render_doc_markdown(
             field.variants.join(", ")
         };
         out.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} |\n",
             field.name,
             field.rust_type,
             field.range.clone().unwrap_or_default(),
+            field.domain.summary,
             variants
         ));
     }
@@ -285,6 +304,18 @@ fn render_doc_markdown(
             transition.path_tags.join(", ")
         ));
     }
+    out.push_str("\n## Graph Summary\n\n");
+    out.push_str(&format!(
+        "- reduction: `{}`\n- nodes: `{}`\n- edges: `{}`\n- deadlocks: `{}`\n",
+        snapshot.reduction,
+        snapshot.nodes.len(),
+        snapshot.edges.len(),
+        if snapshot.deadlocks.is_empty() {
+            "none".to_string()
+        } else {
+            snapshot.deadlocks.join(", ")
+        }
+    ));
     out.push_str("\n## Mermaid\n\n```mermaid\n");
     out.push_str(mermaid);
     if !mermaid.ends_with('\n') {
@@ -339,6 +370,7 @@ mod tests {
             request_id: "req-doc".to_string(),
             status: "ok".to_string(),
             model_id: "CounterModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities {
@@ -367,6 +399,9 @@ mod tests {
                     explicit_status: "not_applicable".to_string(),
                     solver_status: "not_applicable".to_string(),
                     reason: String::new(),
+                    fairness_support: "not_applicable".to_string(),
+                    fairness_kinds: Vec::new(),
+                    semantics_scope: "not_applicable".to_string(),
                     backend_statuses: Vec::new(),
                 },
                 reasons: Vec::new(),
@@ -382,6 +417,14 @@ mod tests {
                 range: Some("0..=3".to_string()),
                 variants: Vec::new(),
                 is_set: false,
+                domain: crate::api::InspectBoundedDomain {
+                    kind: "range".to_string(),
+                    summary: "0..=3".to_string(),
+                    cardinality: Some(4),
+                    min: Some("0".to_string()),
+                    max: Some("3".to_string()),
+                    values: Vec::new(),
+                },
             }],
             action_details: vec![InspectAction {
                 action_id: "INC".to_string(),
@@ -396,6 +439,15 @@ mod tests {
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: vec![crate::api::InspectAnalysisProfile {
+                profile_id: "default".to_string(),
+                scenario_id: None,
+                scope_expr: None,
+                backend_hint: None,
+                doc_graph_policy: "full".to_string(),
+                deadlock_check: true,
+                notes: vec!["test profile".to_string()],
+            }],
             transition_details: vec![InspectTransition {
                 action_id: "INC".to_string(),
                 conceptual_action_id: "INC".to_string(),

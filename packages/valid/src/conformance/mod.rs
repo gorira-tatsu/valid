@@ -119,6 +119,14 @@ pub struct ConformanceReport {
     pub actual_property_holds: Option<bool>,
     pub runner: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness_kind: Option<String>,
+    #[serde(default)]
+    pub canonical_witness: Vec<String>,
+    #[serde(default)]
+    pub expected_output: Vec<BTreeMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projected_state: Option<BTreeMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub traceback: Option<TracebackSummary>,
     #[serde(default)]
     pub candidate_causes: Vec<ExplainCandidateCause>,
@@ -232,6 +240,10 @@ pub fn build_vector_from_actions(
         setup_contract: SetupContract::default(),
         implementation_hints: ImplementationHints::default(),
         replay_target: None,
+        witness_kind: None,
+        canonical_witness: Vec::new(),
+        expected_output: Vec::new(),
+        projected_state: None,
     };
     vector.normalize_language_agnostic_contract();
     Ok(vector)
@@ -450,6 +462,17 @@ pub fn compare_conformance(
         expected_property_holds: vector.expected_property_holds,
         actual_property_holds: response.property_holds,
         runner: runner.to_string(),
+        witness_kind: vector.witness_kind.as_ref().map(|kind| {
+            match kind {
+                crate::testgen::WitnessKind::Positive => "positive",
+                crate::testgen::WitnessKind::Negative => "negative",
+                crate::testgen::WitnessKind::Replay => "replay",
+            }
+            .to_string()
+        }),
+        canonical_witness: vector.canonical_witness.clone(),
+        expected_output: vector.expected_output.clone(),
+        projected_state: vector.projected_state.clone(),
         traceback: traceback.clone(),
         candidate_causes,
         repair_targets,
@@ -492,6 +515,17 @@ fn harness_runtime_report(vector: &TestVector, runner: &str, summary: String) ->
         expected_property_holds: vector.expected_property_holds,
         actual_property_holds: None,
         runner: runner.to_string(),
+        witness_kind: vector.witness_kind.as_ref().map(|kind| {
+            match kind {
+                crate::testgen::WitnessKind::Positive => "positive",
+                crate::testgen::WitnessKind::Negative => "negative",
+                crate::testgen::WitnessKind::Replay => "replay",
+            }
+            .to_string()
+        }),
+        canonical_witness: vector.canonical_witness.clone(),
+        expected_output: vector.expected_output.clone(),
+        projected_state: vector.projected_state.clone(),
         traceback: traceback.clone(),
         candidate_causes,
         repair_targets,
@@ -766,6 +800,10 @@ mod tests {
             setup_contract: SetupContract::default(),
             implementation_hints: ImplementationHints::default(),
             replay_target: None,
+            witness_kind: None,
+            canonical_witness: Vec::new(),
+            expected_output: Vec::new(),
+            projected_state: None,
         }
     }
 

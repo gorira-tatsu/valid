@@ -492,6 +492,44 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
     let state_field_details = M::State::state_fields()
         .into_iter()
         .map(|field| InspectStateField {
+            domain: {
+                let variants_owned = field
+                    .variants
+                    .as_ref()
+                    .map(|variants| {
+                        variants
+                            .iter()
+                            .map(|item| item.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                crate::api::InspectBoundedDomain {
+                    kind: if field.is_set {
+                        "enum_set".to_string()
+                    } else if field.is_relation {
+                        "enum_relation".to_string()
+                    } else if field.is_map {
+                        "enum_map".to_string()
+                    } else if field.variants.is_some() {
+                        "enum".to_string()
+                    } else if field.rust_type == "bool" {
+                        "bool".to_string()
+                    } else {
+                        "opaque".to_string()
+                    },
+                    summary: field.range.map(str::to_string).unwrap_or_else(|| {
+                        if variants_owned.is_empty() {
+                            field.rust_type.to_string()
+                        } else {
+                            variants_owned.join("|")
+                        }
+                    }),
+                    cardinality: (!variants_owned.is_empty()).then_some(variants_owned.len()),
+                    min: None,
+                    max: None,
+                    values: variants_owned,
+                }
+            },
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
@@ -624,6 +662,7 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: M::model_id().to_string(),
+        default_profile_id: "default".to_string(),
         machine_ir_ready: capabilities.ir_ready,
         machine_ir_error: capabilities.machine_ir_error.clone(),
         capabilities: InspectCapabilities {
@@ -648,6 +687,9 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
                 explicit_status: "not_applicable".to_string(),
                 solver_status: "not_applicable".to_string(),
                 reason: String::new(),
+                fairness_support: "not_applicable".to_string(),
+                fairness_kinds: Vec::new(),
+                semantics_scope: "not_applicable".to_string(),
                 backend_statuses: Vec::new(),
             },
             reasons: capabilities.reasons.clone(),
@@ -668,6 +710,15 @@ fn build_inspect_response<M: crate::modeling::VerifiedMachine>(
             .collect(),
         state_field_details,
         action_details,
+        analysis_profiles: vec![crate::api::InspectAnalysisProfile {
+            profile_id: "default".to_string(),
+            scenario_id: None,
+            scope_expr: None,
+            backend_hint: None,
+            doc_graph_policy: "full".to_string(),
+            deadlock_check: true,
+            notes: vec!["bundled machine uses the default analysis profile".to_string()],
+        }],
         predicate_details: vec![],
         scenario_details: vec![],
         transition_details,

@@ -28,6 +28,14 @@ pub struct ReplayTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WitnessKind {
+    Positive,
+    Negative,
+    Replay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservationContract {
     pub mode: String,
     #[serde(default)]
@@ -142,6 +150,14 @@ pub struct TestVector {
     pub implementation_hints: ImplementationHints,
     #[serde(default)]
     pub replay_target: Option<ReplayTarget>,
+    #[serde(default)]
+    pub witness_kind: Option<WitnessKind>,
+    #[serde(default)]
+    pub canonical_witness: Vec<String>,
+    #[serde(default)]
+    pub expected_output: Vec<BTreeMap<String, Value>>,
+    #[serde(default)]
+    pub projected_state: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +214,26 @@ impl TestVector {
         }
         if self.implementation_hints.notes.is_empty() {
             self.implementation_hints = infer_implementation_hints(self);
+        }
+        if self.expected_output.is_empty() {
+            self.expected_output = self.expected_observations.clone();
+        }
+        if self.projected_state.is_none() {
+            self.projected_state = self.expected_observations.last().cloned();
+        }
+        if self.canonical_witness.is_empty() {
+            self.canonical_witness = self
+                .actions
+                .iter()
+                .map(|step| step.action_id.clone())
+                .collect();
+        }
+        if self.witness_kind.is_none() {
+            self.witness_kind = Some(match self.expected_guard_enabled {
+                Some(false) => WitnessKind::Negative,
+                _ if self.source_kind == "spec_conformance" => WitnessKind::Replay,
+                _ => WitnessKind::Positive,
+            });
         }
     }
 }
@@ -417,6 +453,10 @@ fn build_base_vector_from_trace(trace: &EvidenceTrace) -> Result<TestVector, Str
         setup_contract: SetupContract::default(),
         implementation_hints: ImplementationHints::default(),
         replay_target: None,
+        witness_kind: None,
+        canonical_witness: Vec::new(),
+        expected_output: Vec::new(),
+        projected_state: None,
     }))
 }
 
@@ -837,6 +877,10 @@ fn build_model_deadlock_vector(
         setup_contract: SetupContract::default(),
         implementation_hints: ImplementationHints::default(),
         replay_target: None,
+        witness_kind: None,
+        canonical_witness: Vec::new(),
+        expected_output: Vec::new(),
+        projected_state: None,
     })
 }
 
@@ -1856,6 +1900,10 @@ fn build_model_vector_for_node(
         setup_contract: SetupContract::default(),
         implementation_hints: ImplementationHints::default(),
         replay_target: None,
+        witness_kind: None,
+        canonical_witness: Vec::new(),
+        expected_output: Vec::new(),
+        projected_state: None,
     }))
 }
 

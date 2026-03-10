@@ -854,12 +854,13 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                 .vectors
                 .iter()
                 .map(|vector| format!(
-                    "{{\"vector_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
+                    "{{\"vector_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"witness_kind\":{},\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"canonical_witness\":[{}],\"notes\":[{}]}}",
                     vector.vector_id,
                     vector.property_id,
                     vector.strictness,
                     vector.derivation,
                     vector.source_kind,
+                    vector.witness_kind.as_ref().map(|kind| format!("\"{}\"", kind)).unwrap_or_else(|| "null".to_string()),
                     vector.strategy,
                     vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
                     vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
@@ -876,6 +877,7 @@ fn cmd_testgen(models: &[RegisteredModel], args: Vec<String>) {
                     vector.conceptual_action_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(","),
                     vector.concrete_action_ids.iter().map(|id| format!("\"{}\"", id)).collect::<Vec<_>>().join(","),
                     vector.parameter_bindings.iter().map(|binding| format!("{{\"name\":\"{}\",\"value\":\"{}\"}}", binding.name, binding.value)).collect::<Vec<_>>().join(","),
+                    vector.canonical_witness.iter().map(|step| format!("\"{}\"", step)).collect::<Vec<_>>().join(","),
                     vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                 ))
                 .collect::<Vec<_>>()
@@ -982,6 +984,44 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
     let state_field_details = M::State::state_fields()
         .into_iter()
         .map(|field| InspectStateField {
+            domain: {
+                let variants_owned = field
+                    .variants
+                    .as_ref()
+                    .map(|variants| {
+                        variants
+                            .iter()
+                            .map(|item| item.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                crate::api::InspectBoundedDomain {
+                    kind: if field.is_set {
+                        "enum_set".to_string()
+                    } else if field.is_relation {
+                        "enum_relation".to_string()
+                    } else if field.is_map {
+                        "enum_map".to_string()
+                    } else if field.variants.is_some() {
+                        "enum".to_string()
+                    } else if field.rust_type == "bool" {
+                        "bool".to_string()
+                    } else {
+                        "opaque".to_string()
+                    },
+                    summary: field.range.map(str::to_string).unwrap_or_else(|| {
+                        if variants_owned.is_empty() {
+                            field.rust_type.to_string()
+                        } else {
+                            variants_owned.join("|")
+                        }
+                    }),
+                    cardinality: (!variants_owned.is_empty()).then_some(variants_owned.len()),
+                    min: None,
+                    max: None,
+                    values: variants_owned,
+                }
+            },
             name: field.name.to_string(),
             rust_type: field.rust_type.to_string(),
             range: field.range.map(str::to_string),
@@ -1114,6 +1154,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: M::model_id().to_string(),
+        default_profile_id: "default".to_string(),
         machine_ir_ready: capabilities.ir_ready,
         machine_ir_error: capabilities.machine_ir_error.clone(),
         capabilities: InspectCapabilities {
@@ -1138,6 +1179,9 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
                 explicit_status: "not_applicable".to_string(),
                 solver_status: "not_applicable".to_string(),
                 reason: String::new(),
+                fairness_support: "not_applicable".to_string(),
+                fairness_kinds: Vec::new(),
+                semantics_scope: "not_applicable".to_string(),
                 backend_statuses: Vec::new(),
             },
             reasons: capabilities.reasons.clone(),
@@ -1158,6 +1202,15 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             .collect(),
         state_field_details,
         action_details,
+        analysis_profiles: vec![crate::api::InspectAnalysisProfile {
+            profile_id: "default".to_string(),
+            scenario_id: None,
+            scope_expr: None,
+            backend_hint: None,
+            doc_graph_policy: "full".to_string(),
+            deadlock_check: true,
+            notes: vec!["registry-backed machine uses the default analysis profile".to_string()],
+        }],
         predicate_details: vec![],
         scenario_details: vec![],
         transition_details,

@@ -257,6 +257,7 @@ mod tests {
                 source_name: "compose".to_string(),
                 source: String::new(),
                 property_id: Some("Left::P_SHARED_STAYS_FALSE".to_string()),
+                profile_id: None,
                 scenario_id: None,
                 seed: None,
                 backend: Some("explicit".to_string()),

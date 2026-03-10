@@ -53,6 +53,9 @@ pub struct CapabilityMatrix {
 pub struct TemporalCapabilityMatrix {
     pub status: String,
     pub semantics: String,
+    pub fairness_support: String,
+    pub fairness_kinds: Vec<String>,
+    pub semantics_scope: String,
     pub assurance_levels: Vec<String>,
     pub supported_operators: Vec<String>,
     pub unsupported_operators: Vec<String>,
@@ -241,6 +244,9 @@ fn complete_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "complete".to_string(),
         semantics: "reachable_graph_fixpoint".to_string(),
+        fairness_support: "supported".to_string(),
+        fairness_kinds: vec!["weak".to_string(), "strong".to_string()],
+        semantics_scope: "reachable_graph".to_string(),
         assurance_levels: vec!["complete".to_string(), "bounded".to_string()],
         supported_operators: all_temporal_operators(),
         unsupported_operators: Vec::new(),
@@ -252,6 +258,9 @@ fn bounded_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "bounded".to_string(),
         semantics: "depth_bounded_search".to_string(),
+        fairness_support: "unsupported".to_string(),
+        fairness_kinds: Vec::new(),
+        semantics_scope: "bounded_lasso".to_string(),
         assurance_levels: vec!["bounded".to_string()],
         supported_operators: all_temporal_operators(),
         unsupported_operators: Vec::new(),
@@ -263,6 +272,9 @@ fn unavailable_temporal_support(note: impl Into<String>) -> TemporalCapabilityMa
     TemporalCapabilityMatrix {
         status: "unavailable".to_string(),
         semantics: "unavailable".to_string(),
+        fairness_support: "unsupported".to_string(),
+        fairness_kinds: Vec::new(),
+        semantics_scope: "not_available".to_string(),
         assurance_levels: Vec::new(),
         supported_operators: Vec::new(),
         unsupported_operators: all_temporal_operators(),

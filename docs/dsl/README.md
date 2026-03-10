@@ -260,10 +260,13 @@ When a model uses bounded choices, the reporting surfaces distinguish:
 - the concrete `parameter_bindings`, such as `delta=2`
 
 `inspect` reports those identities per action and transition, plus
-`parameter_domains` and `expanded_choice_count`. `coverage` reports both
-conceptual-action coverage and concrete-choice coverage so expansion does not
-inflate business-flow progress. `explain`, `testgen`, and `handoff` preserve
-the same concrete parameter choice in their evidence.
+`parameter_domains` and `expanded_choice_count`. It now also emits bounded
+domain summaries for state fields and a small `analysis_profiles` surface:
+`default` is the full-model profile, and scenario-backed profiles provide the
+current scoped review path. `coverage` reports both conceptual-action coverage
+and concrete-choice coverage so expansion does not inflate business-flow
+progress. `explain`, `testgen`, and `handoff` preserve the same concrete
+parameter choice in their evidence.
 
 ## IDE Notes
 
@@ -652,6 +655,12 @@ cargo valid suite --suite=smoke
 - `coverage_ready`
 - `explain_ready`
 - `testgen_ready`
+
+Temporal capability reporting now also distinguishes:
+
+- `fairness_support`
+- `fairness_kinds`
+- `semantics_scope`
 
 Typical reasons for degraded readiness:
 

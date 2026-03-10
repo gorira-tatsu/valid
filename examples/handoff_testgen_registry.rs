@@ -13,6 +13,8 @@ First commands to try:
 What to look for:
   - failing traces and vectors now keep `counterexample_kind`
   - generated vectors are ranked with `priority` and `selection_reason`
+  - witness-aware output keeps `canonical_witness` and concrete action ids when
+    present
   - handoff output echoes the same review target instead of inventing a second
     selection model
 */

@@ -132,6 +132,167 @@ fn expanded_choice_counts(model: &ModelIr) -> BTreeMap<String, usize> {
     counts
 }
 
+fn bounded_domain_for_field_type(field_type: &crate::ir::FieldType) -> InspectBoundedDomain {
+    match field_type {
+        crate::ir::FieldType::Bool => InspectBoundedDomain {
+            kind: "bool".to_string(),
+            summary: "false|true".to_string(),
+            cardinality: Some(2),
+            min: None,
+            max: None,
+            values: vec!["false".to_string(), "true".to_string()],
+        },
+        crate::ir::FieldType::String { min_len, max_len } => InspectBoundedDomain {
+            kind: "string".to_string(),
+            summary: match (min_len, max_len) {
+                (Some(min), Some(max)) => format!("string[{min}..={max}]"),
+                _ => "string".to_string(),
+            },
+            cardinality: None,
+            min: min_len.map(|value| value.to_string()),
+            max: max_len.map(|value| value.to_string()),
+            values: Vec::new(),
+        },
+        crate::ir::FieldType::BoundedU8 { min, max } => InspectBoundedDomain {
+            kind: "bounded_u8".to_string(),
+            summary: format!("{min}..={max}"),
+            cardinality: Some(usize::from(max.saturating_sub(*min)) + 1),
+            min: Some(min.to_string()),
+            max: Some(max.to_string()),
+            values: Vec::new(),
+        },
+        crate::ir::FieldType::BoundedU16 { min, max } => InspectBoundedDomain {
+            kind: "bounded_u16".to_string(),
+            summary: format!("{min}..={max}"),
+            cardinality: Some((*max as usize).saturating_sub(*min as usize) + 1),
+            min: Some(min.to_string()),
+            max: Some(max.to_string()),
+            values: Vec::new(),
+        },
+        crate::ir::FieldType::BoundedU32 { min, max } => InspectBoundedDomain {
+            kind: "bounded_u32".to_string(),
+            summary: format!("{min}..={max}"),
+            cardinality: usize::try_from(*max - *min).ok().map(|width| width + 1),
+            min: Some(min.to_string()),
+            max: Some(max.to_string()),
+            values: Vec::new(),
+        },
+        crate::ir::FieldType::Enum { variants } => InspectBoundedDomain {
+            kind: "enum".to_string(),
+            summary: variants.join("|"),
+            cardinality: Some(variants.len()),
+            min: None,
+            max: None,
+            values: variants.clone(),
+        },
+        crate::ir::FieldType::EnumSet { variants } => InspectBoundedDomain {
+            kind: "enum_set".to_string(),
+            summary: format!("subset({})", variants.join("|")),
+            cardinality: Some(2usize.saturating_pow(variants.len() as u32)),
+            min: None,
+            max: None,
+            values: variants.clone(),
+        },
+        crate::ir::FieldType::EnumRelation {
+            left_variants,
+            right_variants,
+        } => InspectBoundedDomain {
+            kind: "enum_relation".to_string(),
+            summary: format!(
+                "relation({} -> {})",
+                left_variants.join("|"),
+                right_variants.join("|")
+            ),
+            cardinality: None,
+            min: None,
+            max: None,
+            values: vec![
+                format!("left:{}", left_variants.join("|")),
+                format!("right:{}", right_variants.join("|")),
+            ],
+        },
+        crate::ir::FieldType::EnumMap {
+            key_variants,
+            value_variants,
+        } => InspectBoundedDomain {
+            kind: "enum_map".to_string(),
+            summary: format!(
+                "map({} -> {})",
+                key_variants.join("|"),
+                value_variants.join("|")
+            ),
+            cardinality: None,
+            min: None,
+            max: None,
+            values: vec![
+                format!("keys:{}", key_variants.join("|")),
+                format!("values:{}", value_variants.join("|")),
+            ],
+        },
+    }
+}
+
+fn inspect_analysis_profiles(model: &ModelIr) -> Vec<InspectAnalysisProfile> {
+    let mut profiles = vec![InspectAnalysisProfile {
+        profile_id: "default".to_string(),
+        scenario_id: None,
+        scope_expr: None,
+        backend_hint: None,
+        doc_graph_policy: "full".to_string(),
+        deadlock_check: true,
+        notes: vec![
+            "uses the full reachable model surface".to_string(),
+            "default profile for inspect/check/testgen flows".to_string(),
+        ],
+    }];
+    profiles.extend(
+        model
+            .scenarios
+            .iter()
+            .map(|scenario| InspectAnalysisProfile {
+                profile_id: scenario.scenario_id.clone(),
+                scenario_id: Some(scenario.scenario_id.clone()),
+                scope_expr: Some(render_expr_ir(&scenario.expr)),
+                backend_hint: Some("explicit".to_string()),
+                doc_graph_policy: "boundary_paths".to_string(),
+                deadlock_check: false,
+                notes: vec![
+                    "scenario-backed profile narrows traces to the named scope".to_string(),
+                    "scenario profiles currently force backend=explicit".to_string(),
+                ],
+            }),
+    );
+    profiles
+}
+
+fn resolve_profile_selection(
+    model: &ModelIr,
+    profile_id: Option<&str>,
+    scenario_id: Option<&str>,
+) -> Result<(String, Option<String>), String> {
+    let profiles = inspect_analysis_profiles(model);
+    match (profile_id, scenario_id) {
+        (Some(profile), Some(scenario)) if profile != scenario && profile != "default" => Err(
+            format!("profile `{profile}` does not match scenario `{scenario}`"),
+        ),
+        (Some(profile), _) => {
+            let selected = profiles
+                .iter()
+                .find(|candidate| candidate.profile_id == profile)
+                .ok_or_else(|| format!("unknown profile `{profile}`"))?;
+            Ok((selected.profile_id.clone(), selected.scenario_id.clone()))
+        }
+        (None, Some(scenario)) => {
+            let selected = profiles
+                .iter()
+                .find(|candidate| candidate.scenario_id.as_deref() == Some(scenario))
+                .ok_or_else(|| format!("unknown scenario/profile `{scenario}`"))?;
+            Ok((selected.profile_id.clone(), selected.scenario_id.clone()))
+        }
+        (None, None) => Ok(("default".to_string(), None)),
+    }
+}
+
 fn vector_identity_metadata(
     vector: &crate::testgen::TestVector,
 ) -> (
@@ -191,8 +352,22 @@ pub fn summarize_testgen_vector(
         .find_map(|note| note.strip_prefix("novelty_key:"))
         .unwrap_or("")
         .to_string();
+    let witness_kind = vector.witness_kind.as_ref().map(|kind| match kind {
+        crate::testgen::WitnessKind::Positive => "positive".to_string(),
+        crate::testgen::WitnessKind::Negative => "negative".to_string(),
+        crate::testgen::WitnessKind::Replay => "replay".to_string(),
+    });
     let mut notes = vector.notes.clone();
     notes.push("selection_policy:stable_review_surface".to_string());
+    if let Some(kind) = &witness_kind {
+        notes.push(format!("witness_kind:{kind}"));
+    }
+    if !vector.canonical_witness.is_empty() {
+        notes.push(format!(
+            "canonical_witness:{}",
+            vector.canonical_witness.join(",")
+        ));
+    }
     if suppressed_vector_count > 0 {
         notes.push(format!("suppressed_vectors:{suppressed_vector_count}"));
     }
@@ -206,6 +381,7 @@ pub fn summarize_testgen_vector(
         counterexample_kind: vector
             .counterexample_kind
             .map(|kind| kind.as_str().to_string()),
+        witness_kind,
         strategy: vector.strategy.clone(),
         requirement_clusters: vector.grouping.requirement_clusters.clone(),
         risk_clusters: vector.grouping.risk_clusters.clone(),
@@ -222,6 +398,7 @@ pub fn summarize_testgen_vector(
         conceptual_action_ids,
         concrete_action_ids,
         parameter_bindings,
+        canonical_witness: vector.canonical_witness.clone(),
         notes,
     }
 }
@@ -320,6 +497,7 @@ pub struct InspectResponse {
     pub request_id: String,
     pub status: String,
     pub model_id: String,
+    pub default_profile_id: String,
     pub machine_ir_ready: bool,
     pub machine_ir_error: Option<String>,
     pub capabilities: InspectCapabilities,
@@ -332,8 +510,20 @@ pub struct InspectResponse {
     pub action_details: Vec<InspectAction>,
     pub predicate_details: Vec<InspectNamedExpr>,
     pub scenario_details: Vec<InspectNamedExpr>,
+    pub analysis_profiles: Vec<InspectAnalysisProfile>,
     pub transition_details: Vec<InspectTransition>,
     pub property_details: Vec<InspectProperty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectAnalysisProfile {
+    pub profile_id: String,
+    pub scenario_id: Option<String>,
+    pub scope_expr: Option<String>,
+    pub backend_hint: Option<String>,
+    pub doc_graph_policy: String,
+    pub deadlock_check: bool,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +577,9 @@ pub struct InspectTemporalCapabilities {
     pub explicit_status: String,
     pub solver_status: String,
     pub reason: String,
+    pub fairness_support: String,
+    pub fairness_kinds: Vec<String>,
+    pub semantics_scope: String,
     pub backend_statuses: Vec<InspectTemporalBackendStatus>,
 }
 
@@ -395,6 +588,9 @@ pub struct InspectTemporalBackendStatus {
     pub backend: String,
     pub status: String,
     pub semantics: String,
+    pub fairness_support: String,
+    pub fairness_kinds: Vec<String>,
+    pub semantics_scope: String,
     pub assurance_levels: Vec<String>,
     pub supported_operators: Vec<String>,
     pub unsupported_operators: Vec<String>,
@@ -410,6 +606,9 @@ impl InspectTemporalCapabilities {
             explicit_status: "not_applicable".to_string(),
             solver_status: "not_applicable".to_string(),
             reason: String::new(),
+            fairness_support: "not_applicable".to_string(),
+            fairness_kinds: Vec::new(),
+            semantics_scope: "not_applicable".to_string(),
             backend_statuses: Vec::new(),
         }
     }
@@ -422,6 +621,17 @@ pub struct InspectStateField {
     pub range: Option<String>,
     pub variants: Vec<String>,
     pub is_set: bool,
+    pub domain: InspectBoundedDomain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InspectBoundedDomain {
+    pub kind: String,
+    pub summary: String,
+    pub cardinality: Option<usize>,
+    pub min: Option<String>,
+    pub max: Option<String>,
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -487,6 +697,7 @@ pub struct CheckRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub profile_id: Option<String>,
     pub scenario_id: Option<String>,
     pub seed: Option<u64>,
     pub backend: Option<String>,
@@ -737,6 +948,7 @@ pub struct TestgenRequest {
     pub source_name: String,
     pub source: String,
     pub property_id: Option<String>,
+    pub profile_id: Option<String>,
     pub strategy: String,
     pub focus_action_id: Option<String>,
     pub seed: Option<u64>,
@@ -777,6 +989,7 @@ pub struct TestgenVectorSummary {
     pub derivation: String,
     pub source_kind: String,
     pub counterexample_kind: Option<String>,
+    pub witness_kind: Option<String>,
     pub strategy: String,
     pub requirement_clusters: Vec<String>,
     pub risk_clusters: Vec<String>,
@@ -793,6 +1006,7 @@ pub struct TestgenVectorSummary {
     pub conceptual_action_ids: Vec<String>,
     pub concrete_action_ids: Vec<String>,
     pub parameter_bindings: Vec<crate::ir::ActionParameterBinding>,
+    pub canonical_witness: Vec<String>,
     pub notes: Vec<String>,
 }
 
@@ -876,6 +1090,9 @@ fn inspect_temporal_capabilities(model: &ModelIr) -> InspectTemporalCapabilities
         explicit_status: "complete".to_string(),
         solver_status: "bounded_or_unavailable".to_string(),
         reason: "temporal semantics are backend-specific: explicit evaluates over the reachable graph, mock-bmc is bounded-only, and current SAT/SMT/command adapters do not lower temporal formulas".to_string(),
+        fairness_support: "explicit_only".to_string(),
+        fairness_kinds: vec!["weak".to_string(), "strong".to_string()],
+        semantics_scope: "reachable_graph_or_bounded".to_string(),
         backend_statuses,
     }
 }
@@ -903,6 +1120,9 @@ fn temporal_backend_statuses() -> Vec<InspectTemporalBackendStatus> {
                 backend: matrix.backend_name,
                 status: matrix.temporal.status,
                 semantics: matrix.temporal.semantics,
+                fairness_support: matrix.temporal.fairness_support,
+                fairness_kinds: matrix.temporal.fairness_kinds,
+                semantics_scope: matrix.temporal.semantics_scope,
                 assurance_levels: matrix.temporal.assurance_levels,
                 supported_operators: matrix.temporal.supported_operators,
                 unsupported_operators: matrix.temporal.unsupported_operators,
@@ -989,11 +1209,13 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
     };
     let parameter_domains = parameter_domains_by_conceptual_action(model);
     let expanded_counts = expanded_choice_counts(model);
+    let analysis_profiles = inspect_analysis_profiles(model);
     InspectResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: model.model_id.clone(),
+        default_profile_id: "default".to_string(),
         machine_ir_ready: true,
         machine_ir_error: None,
         capabilities: InspectCapabilities {
@@ -1070,6 +1292,7 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
                     _ => Vec::new(),
                 },
                 is_set: matches!(field.ty, crate::ir::FieldType::EnumSet { .. }),
+                domain: bounded_domain_for_field_type(&field.ty),
             })
             .collect(),
         action_details: model
@@ -1116,6 +1339,7 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
                 expr: render_expr_ir(&scenario.expr),
             })
             .collect(),
+        analysis_profiles,
         transition_details: model
             .actions
             .iter()
@@ -1374,6 +1598,36 @@ pub fn orchestrate_source(
 pub fn check_model(request: &CheckRequest, model: &ModelIr, source_hash: String) -> CheckOutcome {
     let adapter = backend_config_from_request(request).unwrap_or(AdapterConfig::Explicit);
     let snapshot = snapshot_model(model);
+    let (profile_id, resolved_scenario_id) = match resolve_profile_selection(
+        model,
+        request.profile_id.as_deref(),
+        request.scenario_id.as_deref(),
+    ) {
+        Ok(selection) => selection,
+        Err(message) => {
+            return CheckOutcome::Errored(CheckErrorEnvelope {
+                manifest: build_run_manifest(
+                    request.request_id.clone(),
+                    format!(
+                        "run-{}",
+                        stable_hash_hex(&request.request_id).replace("sha256:", "")
+                    ),
+                    source_hash,
+                    snapshot.contract_hash,
+                    crate::engine::BackendKind::Explicit,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    request.seed,
+                ),
+                status: crate::engine::ErrorStatus::Error,
+                assurance_level: crate::engine::AssuranceLevel::Incomplete,
+                diagnostics: vec![Diagnostic::new(
+                    crate::support::diagnostics::ErrorCode::SearchError,
+                    crate::support::diagnostics::DiagnosticSegment::EngineSearch,
+                    message,
+                )],
+            });
+        }
+    };
     let property_id = request
         .property_id
         .clone()
@@ -1398,7 +1652,7 @@ pub fn check_model(request: &CheckRequest, model: &ModelIr, source_hash: String)
         request.seed,
     );
     plan.property_selection = PropertySelection::ExactlyOne(property_id);
-    plan.scenario_selection = request.scenario_id.clone();
+    plan.scenario_selection = resolved_scenario_id.clone();
     let selected_property = model
         .properties
         .iter()
@@ -1412,7 +1666,8 @@ pub fn check_model(request: &CheckRequest, model: &ModelIr, source_hash: String)
     let requires_explicit = matches!(
         selected_property.kind,
         PropertyKind::DeadlockFreedom | PropertyKind::Cover | PropertyKind::Transition
-    ) || request.scenario_id.is_some();
+    ) || resolved_scenario_id.is_some()
+        || profile_id != "default";
     if requires_explicit && !matches!(adapter, AdapterConfig::Explicit) {
         return CheckOutcome::Errored(CheckErrorEnvelope {
             manifest: plan.manifest.clone(),
@@ -1549,6 +1804,15 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
         );
     }
     let compiled_model = frontend::compile_model(&request.source).ok();
+    let resolved_scenario = compiled_model.as_ref().and_then(|model| {
+        resolve_profile_selection(
+            model,
+            request.profile_id.as_deref(),
+            request.scenario_id.as_deref(),
+        )
+        .ok()
+        .and_then(|(_, scenario_id)| scenario_id)
+    });
     match check_source(request) {
         CheckOutcome::Completed(result) => {
             let trace = result.trace.ok_or_else(|| CheckErrorEnvelope {
@@ -1636,7 +1900,7 @@ pub fn explain_source(request: &CheckRequest) -> Result<ExplainResponse, CheckEr
             let review_context = build_review_context(
                 compiled_model.as_ref(),
                 selected_property,
-                request.scenario_id.as_deref(),
+                resolved_scenario.as_deref(),
                 &failure_step.state_before,
                 &failure_step.state_after,
                 result.property_result.vacuous,
@@ -1995,6 +2259,7 @@ pub fn review_source(request: &CheckRequest) -> Result<ReviewResponse, CheckErro
             source_name: request.source_name.clone(),
             source: verification_source.clone(),
             property_id: Some(property_id.clone()),
+            profile_id: request.profile_id.clone(),
             scenario_id: request.scenario_id.clone(),
             seed: request.seed,
             backend: request.backend.clone(),
@@ -2416,6 +2681,7 @@ pub fn minimize_source(request: &MinimizeRequest) -> Result<MinimizeResponse, Ch
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id,
+        profile_id: None,
         scenario_id: None,
         seed: request.seed,
         backend: request.backend.clone(),
@@ -2481,6 +2747,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
             source_name: request.source_name.clone(),
             source: request.source.clone(),
             property_id: request.property_id.clone(),
+            profile_id: request.profile_id.clone(),
             scenario_id: None,
             seed: request.seed,
             backend: request.backend.clone(),
@@ -2524,6 +2791,7 @@ pub fn testgen_source(request: &TestgenRequest) -> Result<TestgenResponse, Check
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: request.property_id.clone(),
+        profile_id: request.profile_id.clone(),
         scenario_id: None,
         seed: request.seed,
         backend: request.backend.clone(),
@@ -2829,6 +3097,9 @@ pub fn validate_check_request(request: &CheckRequest) -> Result<(), String> {
     if let Some(property_id) = request.property_id.as_deref() {
         require_non_empty(property_id, "property_id")?;
     }
+    if let Some(profile_id) = request.profile_id.as_deref() {
+        require_non_empty(profile_id, "profile_id")?;
+    }
     if let Some(scenario_id) = request.scenario_id.as_deref() {
         require_non_empty(scenario_id, "scenario_id")?;
     }
@@ -2961,14 +3232,30 @@ fn validate_capability_detail(
     Ok(())
 }
 
+fn render_bounded_domain_json(domain: &InspectBoundedDomain) -> String {
+    format!(
+        "{{\"kind\":\"{}\",\"summary\":\"{}\",\"cardinality\":{},\"min\":{},\"max\":{},\"values\":{}}}",
+        escape_json(&domain.kind),
+        escape_json(&domain.summary),
+        domain
+            .cardinality
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "null".to_string()),
+        render_optional_string(domain.min.as_deref()),
+        render_optional_string(domain.max.as_deref()),
+        render_string_array(&domain.values)
+    )
+}
+
 pub fn render_inspect_json(response: &InspectResponse) -> String {
     let mut out = String::from("{");
     out.push_str(&format!(
-        "\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"machine_ir_ready\":{},\"machine_ir_error\":{}",
+        "\"schema_version\":\"{}\",\"request_id\":\"{}\",\"status\":\"{}\",\"model_id\":\"{}\",\"default_profile_id\":\"{}\",\"machine_ir_ready\":{},\"machine_ir_error\":{}",
         escape_json(&response.schema_version),
         escape_json(&response.request_id),
         escape_json(&response.status),
         escape_json(&response.model_id),
+        escape_json(&response.default_profile_id),
         response.machine_ir_ready,
         response
             .machine_ir_error
@@ -3024,7 +3311,7 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{},\"variants\":{},\"is_set\":{}}}",
+            "{{\"name\":\"{}\",\"rust_type\":\"{}\",\"range\":{},\"variants\":{},\"is_set\":{},\"domain\":{}}}",
             escape_json(&field.name),
             escape_json(&field.rust_type),
             field
@@ -3033,7 +3320,8 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
                 .map(|range| format!("\"{}\"", escape_json(range)))
                 .unwrap_or_else(|| "null".to_string()),
             render_string_array(&field.variants),
-            field.is_set
+            field.is_set,
+            render_bounded_domain_json(&field.domain),
         ));
     }
     out.push(']');
@@ -3077,6 +3365,23 @@ pub fn render_inspect_json(response: &InspectResponse) -> String {
             "{{\"id\":\"{}\",\"expr\":\"{}\"}}",
             escape_json(&scenario.id),
             escape_json(&scenario.expr)
+        ));
+    }
+    out.push(']');
+    out.push_str(",\"analysis_profiles\":[");
+    for (index, profile) in response.analysis_profiles.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"profile_id\":\"{}\",\"scenario_id\":{},\"scope_expr\":{},\"backend_hint\":{},\"doc_graph_policy\":\"{}\",\"deadlock_check\":{},\"notes\":{}}}",
+            escape_json(&profile.profile_id),
+            render_optional_string(profile.scenario_id.as_deref()),
+            render_optional_string(profile.scope_expr.as_deref()),
+            render_optional_string(profile.backend_hint.as_deref()),
+            escape_json(&profile.doc_graph_policy),
+            profile.deadlock_check,
+            render_string_array(&profile.notes),
         ));
     }
     out.push(']');
@@ -3182,6 +3487,10 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
     out.push_str(&render_capability_details_text(&response.capabilities));
     out.push_str("summary:\n");
     out.push_str(&format!(
+        "- default_profile: {}\n",
+        response.default_profile_id
+    ));
+    out.push_str(&format!(
         "- state_fields ({}): {}\n",
         response.state_fields.len(),
         render_csv_or_none(&response.state_fields)
@@ -3216,6 +3525,7 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
                     field.name.clone(),
                     field.rust_type.clone(),
                     field.range.clone().unwrap_or_else(|| "-".to_string()),
+                    field.domain.summary.clone(),
                     if field.is_set {
                         "set".to_string()
                     } else {
@@ -3230,7 +3540,10 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
             })
             .collect::<Vec<_>>();
         out.push_str(&indent_block(
-            &render_text_table(&["name", "type", "range", "shape", "variants"], &rows),
+            &render_text_table(
+                &["name", "type", "range", "domain", "shape", "variants"],
+                &rows,
+            ),
             2,
         ));
         out.push('\n');
@@ -3273,6 +3586,32 @@ pub fn render_inspect_text(response: &InspectResponse) -> String {
                 "  expr:\n{}\n",
                 indent_block(&pretty_expr(&scenario.expr), 4)
             ));
+        }
+    }
+    if !response.analysis_profiles.is_empty() {
+        out.push_str("analysis_profiles:\n");
+        for profile in &response.analysis_profiles {
+            out.push_str(&format!("- {}\n", profile.profile_id));
+            if let Some(scenario_id) = &profile.scenario_id {
+                out.push_str(&format!("  scenario_id: {}\n", scenario_id));
+            }
+            if let Some(scope_expr) = &profile.scope_expr {
+                out.push_str(&format!(
+                    "  scope:\n{}\n",
+                    indent_block(&pretty_expr(scope_expr), 4)
+                ));
+            }
+            out.push_str(&format!(
+                "  doc_graph_policy: {}\n",
+                profile.doc_graph_policy
+            ));
+            out.push_str(&format!("  deadlock_check: {}\n", profile.deadlock_check));
+            if let Some(backend_hint) = &profile.backend_hint {
+                out.push_str(&format!("  backend_hint: {}\n", backend_hint));
+            }
+            if !profile.notes.is_empty() {
+                out.push_str(&format!("  notes: {}\n", profile.notes.join(" | ")));
+            }
         }
     }
     if !response.transition_details.is_empty() {
@@ -4944,10 +5283,13 @@ fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilit
         .iter()
         .map(|backend| {
             format!(
-                "{{\"backend\":\"{}\",\"status\":\"{}\",\"semantics\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
+                "{{\"backend\":\"{}\",\"status\":\"{}\",\"semantics\":\"{}\",\"fairness_support\":\"{}\",\"fairness_kinds\":{},\"semantics_scope\":\"{}\",\"assurance_levels\":{},\"supported_operators\":{},\"unsupported_operators\":{},\"notes\":{}}}",
                 escape_json(&backend.backend),
                 escape_json(&backend.status),
                 escape_json(&backend.semantics),
+                escape_json(&backend.fairness_support),
+                render_string_array(&backend.fairness_kinds),
+                escape_json(&backend.semantics_scope),
                 render_string_array(&backend.assurance_levels),
                 render_string_array(&backend.supported_operators),
                 render_string_array(&backend.unsupported_operators),
@@ -4957,7 +5299,7 @@ fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilit
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"property_ids\":{},\"operators\":{},\"support_level\":\"{}\",\"explicit_status\":\"{}\",\"solver_status\":\"{}\",\"reason\":{},\"backend_statuses\":[{}]}}",
+        "{{\"property_ids\":{},\"operators\":{},\"support_level\":\"{}\",\"explicit_status\":\"{}\",\"solver_status\":\"{}\",\"reason\":{},\"fairness_support\":\"{}\",\"fairness_kinds\":{},\"semantics_scope\":\"{}\",\"backend_statuses\":[{}]}}",
         render_string_array(&temporal.property_ids),
         render_string_array(&temporal.operators),
         escape_json(&temporal.support_level),
@@ -4968,6 +5310,9 @@ fn render_temporal_inspect_capabilities_json(temporal: &InspectTemporalCapabilit
         } else {
             format!("\"{}\"", escape_json(&temporal.reason))
         },
+        escape_json(&temporal.fairness_support),
+        render_string_array(&temporal.fairness_kinds),
+        escape_json(&temporal.semantics_scope),
         backend_statuses
     )
 }
@@ -5049,8 +5394,12 @@ fn render_temporal_capability_details_text(temporal: &InspectTemporalCapabilitie
         return String::new();
     }
     let mut line = format!(
-        "- temporal support_level={} explicit_status={} solver_status={}",
-        temporal.support_level, temporal.explicit_status, temporal.solver_status
+        "- temporal support_level={} explicit_status={} solver_status={} fairness_support={} semantics_scope={}",
+        temporal.support_level,
+        temporal.explicit_status,
+        temporal.solver_status,
+        temporal.fairness_support,
+        temporal.semantics_scope
     );
     if !temporal.property_ids.is_empty() {
         line.push_str(&format!(
@@ -5064,14 +5413,30 @@ fn render_temporal_capability_details_text(temporal: &InspectTemporalCapabilitie
     if !temporal.reason.is_empty() {
         line.push_str(&format!(" reason={}", temporal.reason));
     }
+    if !temporal.fairness_kinds.is_empty() {
+        line.push_str(&format!(
+            " fairness_kinds=[{}]",
+            temporal.fairness_kinds.join(", ")
+        ));
+    }
     let mut out = format!("temporal_capabilities:\n{}\n", indent_block(&line, 2));
     if !temporal.backend_statuses.is_empty() {
         out.push_str("  backend_matrix:\n");
         for backend in &temporal.backend_statuses {
             let mut backend_line = format!(
-                "- {} status={} semantics={}",
-                backend.backend, backend.status, backend.semantics
+                "- {} status={} semantics={} fairness_support={} semantics_scope={}",
+                backend.backend,
+                backend.status,
+                backend.semantics,
+                backend.fairness_support,
+                backend.semantics_scope
             );
+            if !backend.fairness_kinds.is_empty() {
+                backend_line.push_str(&format!(
+                    " fairness_kinds=[{}]",
+                    backend.fairness_kinds.join(", ")
+                ));
+            }
             if !backend.assurance_levels.is_empty() {
                 backend_line.push_str(&format!(
                     " assurance_levels=[{}]",
@@ -5799,6 +6164,9 @@ pub fn validate_testgen_request(request: &TestgenRequest) -> Result<(), String> 
     if !is_bundled_model_ref(&request.source_name) {
         require_non_empty(&request.source, "source")?;
     }
+    if let Some(profile_id) = request.profile_id.as_deref() {
+        require_non_empty(profile_id, "profile_id")?;
+    }
     match request.strategy.as_str() {
         "counterexample" | "transition" | "witness" | "guard" | "boundary" | "path"
         | "random" | "deadlock" | "enablement" => Ok(()),
@@ -5860,14 +6228,49 @@ mod tests {
         validate_explain_response, validate_inspect_request, validate_inspect_response,
         validate_minimize_request, validate_minimize_response, validate_orchestrate_response,
         validate_review_response, validate_testgen_request, validate_testgen_response,
-        CapabilitiesRequest, CheckRequest, InspectAction, InspectCapabilities, InspectProperty,
-        InspectRequest, InspectResponse, InspectTransition, InspectTransitionUpdate,
-        MinimizeRequest, OrchestrateRequest, TestgenRequest,
+        CapabilitiesRequest, CheckRequest, InspectAction, InspectAnalysisProfile,
+        InspectBoundedDomain, InspectCapabilities, InspectProperty, InspectRequest,
+        InspectResponse, InspectTransition, InspectTransitionUpdate, MinimizeRequest,
+        OrchestrateRequest, TestgenRequest,
     };
 
     fn cleanup_generated_files(paths: &[String]) {
         for path in paths {
             let _ = fs::remove_file(path);
+        }
+    }
+
+    fn default_analysis_profiles() -> Vec<InspectAnalysisProfile> {
+        vec![InspectAnalysisProfile {
+            profile_id: "default".to_string(),
+            scenario_id: None,
+            scope_expr: None,
+            backend_hint: None,
+            doc_graph_policy: "full".to_string(),
+            deadlock_check: true,
+            notes: vec!["test profile".to_string()],
+        }]
+    }
+
+    fn range_domain(summary: &str) -> InspectBoundedDomain {
+        InspectBoundedDomain {
+            kind: "range".to_string(),
+            summary: summary.to_string(),
+            cardinality: None,
+            min: None,
+            max: None,
+            values: Vec::new(),
+        }
+    }
+
+    fn bool_domain() -> InspectBoundedDomain {
+        InspectBoundedDomain {
+            kind: "bool".to_string(),
+            summary: "false|true".to_string(),
+            cardinality: Some(2),
+            min: None,
+            max: None,
+            values: vec!["false".to_string(), "true".to_string()],
         }
     }
 
@@ -5981,6 +6384,7 @@ mod tests {
             source_name: "post.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_VISIBLE_ONLY_AFTER_DELETE".to_string()),
+            profile_id: None,
             scenario_id: Some("DeletedPost".to_string()),
             seed: None,
             backend: None,
@@ -6002,6 +6406,7 @@ mod tests {
             source_name: "post.valid".to_string(),
             source: source.to_string(),
             property_id: Some("C_DELETED_VIEW".to_string()),
+            profile_id: None,
             scenario_id: Some("DeletedPost".to_string()),
             seed: None,
             backend: None,
@@ -6027,6 +6432,7 @@ mod tests {
             source_name: "deadlock.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Advance:\n  pre: x == 0\n  post:\n    x = 1\nproperty P_LIVE: deadlock_freedom\n".to_string(),
             property_id: Some("P_LIVE".to_string()),
+            profile_id: None,
             scenario_id: None,
             backend: None,
             solver_executable: None,
@@ -6062,6 +6468,7 @@ mod tests {
             source_name: "deadlock.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..1]\ninit:\n  x = 0\naction Stay:\n  pre: true\n  post:\n    x = x\nproperty P_LIVE: deadlock_freedom\n".to_string(),
             property_id: Some("P_LIVE".to_string()),
+            profile_id: None,
             scenario_id: None,
             backend: None,
             solver_executable: None,
@@ -6102,6 +6509,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "reviewable.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_RECOVERY_VISIBLE".to_string()),
+            profile_id: None,
             scenario_id: None,
             backend: None,
             solver_executable: None,
@@ -6153,6 +6561,7 @@ property P_RECOVERY_VISIBLE:
             request_id: "req".to_string(),
             status: "ok".to_string(),
             model_id: "FizzLike".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: false,
             machine_ir_error: Some(
                 "unsupported machine guard expression `state.i % 3 == 0`".to_string(),
@@ -6188,6 +6597,7 @@ property P_RECOVERY_VISIBLE:
             action_details: vec![],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_analysis_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "STEP".to_string(),
                 conceptual_action_id: "STEP".to_string(),
@@ -6223,6 +6633,7 @@ property P_RECOVERY_VISIBLE:
             request_id: "req-maint".to_string(),
             status: "ok".to_string(),
             model_id: "LargeApprovalFlow".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities {
@@ -6254,6 +6665,7 @@ property P_RECOVERY_VISIBLE:
                 .collect(),
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_analysis_profiles(),
             transition_details: (0..10)
                 .map(|index| InspectTransition {
                     action_id: format!("ACTION_{index}"),
@@ -6378,6 +6790,7 @@ property P_RECOVERY_VISIBLE:
             request_id: "req".to_string(),
             status: "ok".to_string(),
             model_id: "PasswordPolicySafeModel".to_string(),
+            default_profile_id: "default".to_string(),
             machine_ir_ready: true,
             machine_ir_error: None,
             capabilities: InspectCapabilities {
@@ -6415,6 +6828,7 @@ property P_RECOVERY_VISIBLE:
                     range: Some("0..=64".to_string()),
                     variants: vec![],
                     is_set: false,
+                    domain: range_domain("0..=64"),
                 },
                 super::InspectStateField {
                     name: "password_set".to_string(),
@@ -6422,6 +6836,7 @@ property P_RECOVERY_VISIBLE:
                     range: None,
                     variants: vec![],
                     is_set: false,
+                    domain: bool_domain(),
                 },
             ],
             action_details: vec![super::InspectAction {
@@ -6441,6 +6856,7 @@ property P_RECOVERY_VISIBLE:
             }],
             predicate_details: vec![],
             scenario_details: vec![],
+            analysis_profiles: default_analysis_profiles(),
             transition_details: vec![InspectTransition {
                 action_id: "SET_STRONG_PASSWORD".to_string(),
                 conceptual_action_id: "SET_STRONG_PASSWORD".to_string(),
@@ -6495,24 +6911,30 @@ property P_RECOVERY_VISIBLE:
         capability_details:
           - solver reason=solver backends only support the scalar IR subset migration_hint=replace String-heavy state with finite enums or bounded integers unsupported_features=[regex_match(...), state field `password`: String]
         summary:
+        - default_profile: default
         - state_fields (3): password, password_set, compliant
         - actions (1): SET_STRONG_PASSWORD
         - predicates (0): none
         - scenarios (0): none
         - properties (2): P_PASSWORD_POLICY_MATCHES_FLAG, P_PASSWORD_LENGTH_BOUND
         state_fields:
-          ╭──────────────┬────────┬────────┬───────┬──────────╮
-          │     name     │  type  │ range  │ shape │ variants │
-          ├──────────────┼────────┼────────┼───────┼──────────┤
-          │ password     │ String │ 0..=64 │ -     │ -        │
-          │ password_set │ bool   │ -      │ -     │ -        │
-          ╰──────────────┴────────┴────────┴───────┴──────────╯
+          ╭──────────────┬────────┬────────┬────────────┬───────┬──────────╮
+          │     name     │  type  │ range  │   domain   │ shape │ variants │
+          ├──────────────┼────────┼────────┼────────────┼───────┼──────────┤
+          │ password     │ String │ 0..=64 │ 0..=64     │ -     │ -        │
+          │ password_set │ bool   │ -      │ false|true │ -     │ -        │
+          ╰──────────────┴────────┴────────┴────────────┴───────┴──────────╯
         actions:
           ╭─────────────────────┬──────────┬──────────────┬───────────────────────────────────╮
           │       action        │   role   │    reads     │              writes               │
           ├─────────────────────┼──────────┼──────────────┼───────────────────────────────────┤
           │ SET_STRONG_PASSWORD │ business │ password_set │ password, password_set, compliant │
           ╰─────────────────────┴──────────┴──────────────┴───────────────────────────────────╯
+        analysis_profiles:
+        - default
+          doc_graph_policy: full
+          deadlock_check: true
+          notes: test profile
         transitions:
         - SET_STRONG_PASSWORD
           role: business
@@ -6561,6 +6983,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "broken.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  y = 0\n".to_string(),
             property_id: None,
+            profile_id: None,
             scenario_id: None,
             seed: None,
             backend: None,
@@ -6578,6 +7001,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: Some(41),
             backend: None,
@@ -6638,6 +7062,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_REACH".to_string()),
+            profile_id: None,
             scenario_id: None,
             backend: None,
             solver_executable: None,
@@ -6668,6 +7093,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "access.valid".to_string(),
             source: source.to_string(),
             property_id: Some("ENV_READY".to_string()),
+            profile_id: None,
             scenario_id: None,
             backend: None,
             solver_executable: None,
@@ -6711,6 +7137,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: None,
+            profile_id: None,
             strategy: "counterexample".to_string(),
             focus_action_id: None,
             seed: None,
@@ -6732,6 +7159,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: None,
+            profile_id: None,
             strategy: "witness".to_string(),
             focus_action_id: None,
             seed: None,
@@ -6757,6 +7185,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_REACH".to_string()),
+            profile_id: None,
             strategy: "witness".to_string(),
             focus_action_id: None,
             backend: None,
@@ -6780,6 +7209,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "deadlock.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_LIVE".to_string()),
+            profile_id: None,
             strategy: "deadlock".to_string(),
             focus_action_id: None,
             seed: None,
@@ -6803,6 +7233,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "enablement.valid".to_string(),
             source: source.to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             strategy: "enablement".to_string(),
             focus_action_id: Some("Target".to_string()),
             seed: None,
@@ -6834,6 +7265,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: source.to_string(),
             property_id: None,
+            profile_id: None,
             strategy: "guard".to_string(),
             focus_action_id: None,
             seed: None,
@@ -6961,6 +7393,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: "".to_string(),
             property_id: None,
+            profile_id: None,
             scenario_id: None,
             seed: None,
             backend: None,
@@ -6978,6 +7411,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "a.valid".to_string(),
             source: "model A".to_string(),
             property_id: None,
+            profile_id: None,
             strategy: "weird".to_string(),
             focus_action_id: None,
             seed: None,
@@ -6996,6 +7430,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "cmd.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: Some(47),
             backend: Some("command".to_string()),
@@ -7020,6 +7455,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "hash.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: None,
             backend: None,
@@ -7042,6 +7478,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "seed.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\nproperty P_SAFE:\n  invariant: x <= 7\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: None,
             backend: None,
@@ -7067,6 +7504,7 @@ property P_RECOVERY_VISIBLE:
             source_name: "seed.valid".to_string(),
             source: "model A\nstate:\n  x: u8[0..7]\ninit:\n  x = 0\naction Jump:\n  pre: true\n  post:\n    x = 2\nproperty P_SAFE:\n  invariant: x <= 1\n".to_string(),
             property_id: Some("P_SAFE".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: Some(99),
             backend: None,

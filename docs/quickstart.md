@@ -105,6 +105,28 @@ Look at the generated graph:
 valid graph approval-model --view=overview
 ```
 
+Once that starter project works, the next useful step is to compare the three
+main review surfaces:
+
+```sh
+valid inspect approval-model --json
+valid graph approval-model --format=json
+valid handoff approval-model --json
+```
+
+Those three outputs now expose:
+
+- bounded-domain summaries for state fields
+- analysis profile metadata
+- graph snapshots with reduction metadata
+- ranked handoff/testgen summaries for implementation follow-up
+
+Outside a scaffolded project, keep the command split simple:
+
+- use `valid ...` for `.valid` files such as `examples/scenario_focus.valid`
+- use `cargo valid --registry ...` for standalone Rust registry files under
+  `examples/`
+
 ## When to Read More
 
 - If install fails or you want distribution details, read

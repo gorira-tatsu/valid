@@ -2824,6 +2824,10 @@ pub fn build_machine_test_vectors_for_property<M: VerifiedMachine>(
                 setup_contract: crate::testgen::SetupContract::default(),
                 implementation_hints: crate::testgen::ImplementationHints::default(),
                 replay_target: None,
+                witness_kind: None,
+                canonical_witness: Vec::new(),
+                expected_output: Vec::new(),
+                projected_state: None,
             };
             vector.normalize_language_agnostic_contract();
             vectors.push(vector);
@@ -3361,6 +3365,10 @@ fn build_machine_vector_for_node<M: VerifiedMachine>(
         setup_contract: crate::testgen::SetupContract::default(),
         implementation_hints: crate::testgen::ImplementationHints::default(),
         replay_target: None,
+        witness_kind: None,
+        canonical_witness: Vec::new(),
+        expected_output: Vec::new(),
+        projected_state: None,
     };
     vector.normalize_language_agnostic_contract();
     Some(vector)

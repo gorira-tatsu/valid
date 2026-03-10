@@ -55,6 +55,11 @@ agent owns the final test body, mocks, hooks, and assertion style.
 `valid handoff` and `cargo valid handoff` now include a `testgen_summary`
 section. That summary is intentionally smaller than the full vector set.
 
+Command surface note:
+
+- use `valid ...` for project-root models and `.valid` files
+- use `cargo valid --registry ...` for standalone Rust registry example files
+
 It tells you:
 
 - which strategy the summary came from
@@ -69,6 +74,7 @@ Each recommended vector includes:
 - `property_id`
 - `strategy`
 - `counterexample_kind`
+- `witness_kind`
 - `priority`
 - `selection_reason`
 - `grouping`
@@ -79,6 +85,7 @@ Each recommended vector includes:
 - `conceptual_action_ids`
 - `concrete_action_ids`
 - `parameter_bindings`
+- `canonical_witness`
 - `artifact_paths`
 - `recommended_next_command`
 - `recommended_conformance_surface`
@@ -119,21 +126,36 @@ The current prioritization policy is intentionally simple and review-oriented:
 This is better than raw asset dumping, but it is still not a full planner.
 Treat it as implementation triage, not automatic test strategy design.
 
+`conformance` now also preserves witness-oriented metadata from the accepted
+vector:
+
+- `witness_kind`
+  Whether the vector is best treated as a positive witness, negative witness,
+  or spec replay witness.
+- `canonical_witness`
+  The stable action sequence to record in runtime-facing harnesses or CI notes.
+- `expected_output`
+  The expected observation payloads to compare first.
+- `projected_state`
+  The final projected state when state visibility is available.
+
 Canonical example:
 
 ```sh
+valid testgen examples/scenario_focus.valid --strategy=witness --profile=DeletedPost --json
 cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
 cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
-valid check examples/scenario_focus.valid --scenario=DeletedPost --json
 ```
 
 ## Recommended command flow
 
 ```sh
-cargo valid inspect <model>
-cargo valid handoff <model> --json
-cargo valid testgen <model> --json
-cargo valid conformance <model> --runner <runner>
+valid inspect <project-model-or.valid-path>
+valid handoff <project-model-or.valid-path> --json
+valid testgen <project-model-or.valid-path> --json
+cargo valid --registry <registry.rs> handoff <model> --json
+cargo valid --registry <registry.rs> testgen <model> --json
+cargo valid --registry <registry.rs> conformance <model> --runner <runner>
 ```
 
 If you are working through MCP:

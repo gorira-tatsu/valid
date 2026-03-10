@@ -37,6 +37,7 @@ fn main() {
             source_name: "compose-helper".to_string(),
             source: "compose helper".to_string(),
             property_id: Some("Fulfillment::P_SHIP_REQUIRES_SHARED".to_string()),
+            profile_id: None,
             scenario_id: None,
             seed: None,
             backend: Some("explicit".to_string()),

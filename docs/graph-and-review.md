@@ -11,12 +11,15 @@ question is truly global.
 - `inspect`
   Use first to understand capability, properties, scenarios, and action
   metadata.
+  `inspect` now also reports bounded state-field domains and analysis profiles.
 - `explain`
   Use when you need failure context, field diffs, and candidate causes.
 - `trace`
   Use when you need the concrete sequence that led to a state.
 - `graph`
   Use when the review question is about structure, not only one failing step.
+  `graph --format=json` now returns a `graph_snapshot` with reduction metadata,
+  node/edge summaries, focus indices, and deadlock identifiers.
 
 ## Graph views
 
@@ -32,6 +35,17 @@ question is truly global.
   Best when the problem is terminal behavior or a stuck state.
 - `scc`
   Best when the graph is large and you need cycle or condensation structure.
+
+The reduction metadata is intentionally review-oriented:
+
+- `full`
+  Keep the main structure for overview or logic review.
+- `boundary_paths`
+  Focus around failure-oriented or scoped review paths.
+- `deadlock_focus`
+  Keep terminal/deadlock-oriented summaries.
+- `scc_condensation`
+  Keep the condensed cyclic structure.
 
 ## Review workflow
 
@@ -63,11 +77,19 @@ instead of scanning raw full-state dumps first.
 ## Example commands
 
 ```sh
-cargo valid inspect <model>
-cargo valid explain <model> --property=<id>
-cargo valid trace <model> --property=<id> --format=json
-cargo valid graph <model> --view=failure
-cargo valid graph <model> --view=deadlock
+valid inspect examples/scenario_focus.valid --json
+valid check examples/scenario_focus.valid --profile=DeletedPost --json
+valid explain examples/scenario_focus.valid --property=P_NOT_FOUND_WHEN_DELETED
+valid graph examples/scenario_focus.valid --format=json
+valid graph examples/scenario_focus.valid --view=failure
+```
+
+For standalone Rust registry files rather than `.valid` models or project-root
+models, use `cargo valid --registry ...`:
+
+```sh
+cargo valid --registry examples/iam_transition_registry.rs inspect iam-access
+cargo valid --registry examples/iam_transition_registry.rs graph iam-access --view=logic
 ```
 
 ## When not to use a graph first

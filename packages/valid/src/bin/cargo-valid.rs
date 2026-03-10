@@ -770,6 +770,7 @@ fn cmd_all(parsed: ParsedArgs) {
             source_name: normalized_model_ref(&run.model_id),
             source: String::new(),
             property_id: run.property_id.clone(),
+            profile_id: None,
             scenario_id: None,
             seed: parsed.seed,
             backend: parsed.backend.clone(),
@@ -928,6 +929,7 @@ fn render_cargo_graph_output(
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: Some(property_id.clone()),
+        profile_id: None,
         scenario_id: None,
         seed: parsed.seed,
         backend: parsed.backend.clone(),
@@ -1092,6 +1094,7 @@ fn cmd_handoff(parsed: ParsedArgs) {
                         source_name: source_name.clone(),
                         source: String::new(),
                         property_id: Some(property_id.clone()),
+                        profile_id: None,
                         scenario_id: None,
                         seed: None,
                         backend: parsed.backend.clone(),
@@ -1118,6 +1121,7 @@ fn cmd_handoff(parsed: ParsedArgs) {
                 source_name: source_name.clone(),
                 source: String::new(),
                 property_id: parsed.property_id.clone(),
+                profile_id: None,
                 focus_action_id: None,
                 strategy: "counterexample".to_string(),
                 seed: None,
@@ -1242,6 +1246,7 @@ fn cmd_benchmark(parsed: ParsedArgs) {
                 source_name: normalized_model_ref(&model),
                 source: String::new(),
                 property_id: parsed.property_id.clone(),
+                profile_id: None,
                 scenario_id: None,
                 seed: parsed.seed,
                 backend: parsed.backend.clone(),
@@ -1397,6 +1402,7 @@ fn cmd_check(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
+        profile_id: None,
         scenario_id: None,
         seed: parsed.seed,
         backend: parsed.backend.clone(),
@@ -1425,6 +1431,7 @@ fn cmd_explain(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
+        profile_id: None,
         scenario_id: None,
         seed: parsed.seed,
         backend: parsed.backend.clone(),
@@ -1534,6 +1541,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
+        profile_id: None,
         strategy: parsed
             .strategy
             .clone()
@@ -1557,13 +1565,14 @@ fn cmd_testgen(parsed: ParsedArgs) {
                         .vectors
                         .iter()
                         .map(|vector| format!(
-                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"notes\":[{}]}}",
+                            "{{\"vector_id\":\"{}\",\"run_id\":\"{}\",\"property_id\":\"{}\",\"strictness\":\"{}\",\"derivation\":\"{}\",\"source_kind\":\"{}\",\"witness_kind\":{},\"strategy\":\"{}\",\"requirement_clusters\":[{}],\"risk_clusters\":[{}],\"observation_mode\":\"{}\",\"observation_layers\":[{}],\"oracle_targets\":[{}],\"suggested_surface\":\"{}\",\"state_visibility\":\"{}\",\"focus_action_id\":{},\"expected_guard_enabled\":{},\"priority\":\"{}\",\"selection_reason\":\"{}\",\"novelty_key\":\"{}\",\"conceptual_action_ids\":[{}],\"concrete_action_ids\":[{}],\"parameter_bindings\":[{}],\"canonical_witness\":[{}],\"notes\":[{}]}}",
                             vector.vector_id,
                             vector.run_id,
                             vector.property_id,
                             vector.strictness,
                             vector.derivation,
                             vector.source_kind,
+                            vector.witness_kind.as_ref().map(|kind| format!("\"{}\"", kind)).unwrap_or_else(|| "null".to_string()),
                             vector.strategy,
                             vector.requirement_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
                             vector.risk_clusters.iter().map(|cluster| format!("\"{}\"", cluster)).collect::<Vec<_>>().join(","),
@@ -1580,6 +1589,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
                             vector.conceptual_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
                             vector.concrete_action_ids.iter().map(|s| format!("\"{}\"", s)).collect::<Vec<_>>().join(","),
                             vector.parameter_bindings.iter().map(|binding| format!("{{\"name\":\"{}\",\"value\":\"{}\"}}", binding.name, binding.value)).collect::<Vec<_>>().join(","),
+                            vector.canonical_witness.iter().map(|step| format!("\"{}\"", step)).collect::<Vec<_>>().join(","),
                             vector.notes.iter().map(|note| format!("\"{}\"", note)).collect::<Vec<_>>().join(",")
                         ))
                         .collect::<Vec<_>>()

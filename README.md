@@ -50,6 +50,8 @@ The product story is now:
 - scenarios, predicates, covers, and transition properties
 - bounded parameter choices that preserve one conceptual action while lowering
   to finite concrete choices
+- analysis profiles with a default full-model profile plus scenario-backed
+  profiles for explicit scoped review
 - project policy via `critical_properties` and `property_suites`
 - language-agnostic test vectors with observation-first metadata
 - handoff summaries that point at prioritized recommended generated vectors
@@ -65,14 +67,20 @@ The product story is now:
 - Return replayable counterexample traces
 - Explain failing transitions
 - Report both conceptual-action coverage and concrete-choice coverage
+- Surface bounded-domain metadata for state fields in `inspect`
 - Generate Rust test files from counterexamples and witnesses
 - Rank and dedupe generated vectors for implementation handoff
+- Carry witness metadata such as `witness_kind`, `canonical_witness`,
+  `expected_output`, and `projected_state` through conformance-oriented flows
 - Run Rust-defined models through project-aware `valid` commands
 - Run the preferred embedded SAT path through `sat-varisat`
 - Report backend preference, selfcheck readiness, and parity readiness before a
   solver-backed run
 - Run a bounded `smt-cvc5` path for the current MVP subset
 - Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
+- Emit graph snapshots with reduction metadata for overview, failure, deadlock,
+  and SCC review surfaces
+- Report temporal fairness support separately from temporal operator support
 
 ## Current Limits
 
@@ -81,6 +89,8 @@ The product story is now:
   common cases, but the derive surface is still intentionally small
 - parameterized actions are currently the bounded-choice form, not arbitrary
   payload-bearing action parameters
+- analysis profiles are currently default + scenario-backed, not a full custom
+  authoring surface yet
 - Full solver coverage beyond the current bounded invariant subset is not done
 - `testgen` now ranks and dedupes review vectors, but it is still not a full
   scenario planner
@@ -190,6 +200,14 @@ The main files to inspect after onboarding are:
 - `.mcp/codex.toml`
 - `artifacts/handoff/ApprovalModel.md`
 
+Once that starter flow works, keep this command split in mind:
+
+- `valid ...`
+  Use for project-root workflows and `.valid` files.
+- `cargo valid --registry ...`
+  Use for standalone Rust registry examples such as files under `examples/`
+  that are not full `valid init` projects.
+
 ```toml
 registry = "valid/registry.rs"
 default_backend = "explicit"
@@ -228,6 +246,47 @@ declare:
 - `default_suite`
 - coverage gates such as
   `minimum_overall_coverage_percent`,
+
+## Feature-First Commands
+
+Use these when you want to see the newer surfaces directly rather than only the
+starter `approval-model`.
+
+- Analysis profiles on a `.valid` model:
+
+```sh
+valid inspect examples/scenario_focus.valid --json
+valid check examples/scenario_focus.valid --profile=DeletedPost --json
+```
+
+- Graph snapshots with reduction metadata:
+
+```sh
+valid graph examples/scenario_focus.valid --format=json
+```
+
+- Ranked handoff and witness-aware vectors from a Rust registry example:
+
+```sh
+cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
+cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
+```
+
+- SAT-friendly backend review on a bounded Rust registry example:
+
+```sh
+cargo valid --registry examples/iam_transition_registry.rs inspect iam-access
+cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION --backend=sat-varisat --json
+```
+
+- Project-level capability and selfcheck review:
+
+```sh
+cd examples/property_suites_project
+valid models
+valid capabilities --backend=sat-varisat --json
+valid selfcheck --json
+```
   `minimum_business_coverage_percent`,
   `minimum_setup_coverage_percent`, and
   `minimum_requirement_coverage_percent`
