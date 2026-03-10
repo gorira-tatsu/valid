@@ -1,17 +1,19 @@
 /*
-最小カウンタ例
+Minimal counter example
 
-目的:
-  - Rust DSL の最小構成を読むための入口にする
-  - `step` モデルと declarative モデルの違いを説明する前の最小 fixture にする
+Purpose:
+  - provide the smallest readable entry point into the Rust DSL
+  - act as the baseline fixture before explaining the tradeoffs between
+    `step` models and declarative transition models
 
-含まれるモデル:
-  - counter
-    ロック中は増えず、x は常に 0..=3 に収まる
-  - failing-counter
-    わざと弱い不変条件を置き、反例・explain・testgen の入口にする
+Included models:
+  - `counter`
+    Does not increment while locked and keeps `x` within `0..=3`.
+  - `failing-counter`
+    Uses an intentionally weak invariant so counterexample, explain, and
+    testgen flows have a small failing fixture.
 
-最初に試すコマンド:
+First commands to try:
   cargo valid --registry examples/valid_models.rs inspect counter
   cargo valid --registry examples/valid_models.rs verify failing-counter
 */

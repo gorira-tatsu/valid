@@ -1,26 +1,29 @@
 /*
-FizzBuzz 形式検証モデル
+FizzBuzz verification example
 
-FizzBuzz のルールを有限状態モデルとして表現し、形式検証を行う。
+Purpose:
+  - model the classic FizzBuzz rules as a finite-state system
+  - keep the arithmetic predicates small enough to inspect and verify directly
+  - provide a compact declarative example that is not only auth or workflow
 
-ルール:
-  - カウンタ i を 1 から 15 まで進める
-  - i が 3 の倍数（5 の倍数でない）→ Fizz
-  - i が 5 の倍数（3 の倍数でない）→ Buzz
-  - i が 3 の倍数かつ 5 の倍数 → FizzBuzz
-  - それ以外 → Number
+Rules:
+  - advance counter `i` from 1 through 15
+  - if `i` is divisible by 3 but not 5, mark Fizz
+  - if `i` is divisible by 5 but not 3, mark Buzz
+  - if `i` is divisible by both 3 and 5, mark FizzBuzz
+  - otherwise treat the step as Number
 
-検証する不変条件:
-  - P_COUNTER_BOUND: カウンタは常に 0..=15 の範囲内
-  - P_FIZZ_DIVISIBLE_BY_3: Fizz 出力なら i は 3 の倍数
-  - P_BUZZ_DIVISIBLE_BY_5: Buzz 出力なら i は 5 の倍数
-  - P_FIZZBUZZ_DIVISIBLE_BY_BOTH: FizzBuzz 出力なら i は 3 と 5 の両方の倍数
-  - P_NUMBER_NOT_DIVISIBLE: Number 出力なら i は 3 の倍数でも 5 の倍数でもない（i=0 は開始前のため除外）
+Properties to inspect:
+  - `P_COUNTER_BOUND`: the counter stays within `0..=15`
+  - `P_FIZZ_DIVISIBLE_BY_3`: Fizz implies divisibility by 3
+  - `P_BUZZ_DIVISIBLE_BY_5`: Buzz implies divisibility by 5
+  - `P_FIZZBUZZ_DIVISIBLE_BY_BOTH`: FizzBuzz implies divisibility by both
+  - `P_NUMBER_NOT_DIVISIBLE`: Number implies divisibility by neither 3 nor 5
 
-実行:
-  cargo run --example fizzbuzz -- verify fizzbuzz
-  cargo run --example fizzbuzz -- inspect fizzbuzz
-  cargo run --example fizzbuzz -- graph fizzbuzz --format=mermaid
+First commands to try:
+  cargo valid --registry examples/fizzbuzz.rs inspect fizzbuzz
+  cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZZ_DIVISIBLE_BY_BOTH
+  cargo valid --registry examples/fizzbuzz.rs graph fizzbuzz --format=mermaid
 */
 
 use valid::{registry::run_registry_cli, valid_model, valid_models, valid_state, ValidAction};

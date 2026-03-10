@@ -1,28 +1,30 @@
 /*
-IAM 風アクセス評価例
+IAM-style access review example
 
-目的:
-  - declarative `transitions` と path tags を使った solver-ready 例を示す
-  - embedded SAT / SMT / command backend で扱いやすい bool 中心モデルを用意する
+Purpose:
+  - show a declarative, solver-ready model that keeps path tags visible
+  - provide a bounded boolean surface that is easy to compare across backends
 
-含まれるモデル:
-  - iam-access
-    Billing read は boundary と session の両方を要求する安全な仕様
+Included model:
+  - `iam-access`
+    A safe policy that requires both a permissions boundary and a session
+    before billing read is allowed.
 
-主な性質:
-  - P_BILLING_READ_REQUIRES_BOUNDARY
-  - P_BILLING_READ_REQUIRES_SESSION
+Key properties:
+  - `P_BILLING_READ_REQUIRES_BOUNDARY`
+  - `P_BILLING_READ_REQUIRES_SESSION`
 
-最初に試すコマンド:
+First commands to try:
   cargo valid --registry examples/iam_transition_registry.rs inspect iam-access
   cargo valid --registry examples/iam_transition_registry.rs graph iam-access --format=json
   cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION
   cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION --backend=sat-varisat --json
 
-見どころ:
-  - `sat-varisat` で扱いやすい bounded bool surface の確認用
-  - `graph --format=json` で review-oriented snapshot を取りやすい
-  - path tags を保ったまま backend 比較や explain/testgen の起点にしやすい
+What to look for:
+  - a bounded boolean surface that works well with `sat-varisat`
+  - review-oriented `graph --format=json` snapshots
+  - stable path tags that make backend comparison and follow-up explain/testgen
+    runs easier
 */
 use valid::{registry::run_registry_cli, valid_actions, valid_model, valid_models, valid_state};
 

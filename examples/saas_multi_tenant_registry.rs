@@ -1,28 +1,30 @@
 /*
-SaaS マルチテナント隔離例
+SaaS multi-tenant isolation example
 
-目的:
-  - テナント隔離、shared service、entitlement 付与を grouped transitions の integration model で書く
-  - SaaS / multi-tenant サービス保証の最小読解例にする
-  - compose 構文なしでも shared-state cross-domain check を書ける形を示す
+Purpose:
+  - model tenant isolation, shared-service access, and entitlements in one
+    grouped-transition integration model
+  - provide a compact example of SaaS / multi-tenant service guarantees
+  - show the shared-state cross-domain style that works today without a full
+    compose DSL
 
-統合する関心:
-  - isolation review サブドメイン
-  - entitlement サブドメイン
-  - shared service access サブドメイン
+Concerns combined here:
+  - isolation review
+  - entitlement checks
+  - shared service access
 
-含まれるモデル:
-  - tenant-isolation-safe
-    review 済みの shared search だけを許可し、cross-tenant access を起こさない
-  - tenant-isolation-regression
-    review を飛ばした例外経路を許し、隔離破りの反例を返す
+Included models:
+  - `tenant-isolation-safe`
+    Allows only reviewed shared search and blocks cross-tenant access.
+  - `tenant-isolation-regression`
+    Allows an unreviewed path and produces an isolation counterexample.
 
-主な性質:
-  - P_SHARED_SEARCH_REQUIRES_REVIEW
-  - P_EXPORT_API_REQUIRES_ENTERPRISE
-  - P_NO_CROSS_TENANT_ACCESS
+Key properties:
+  - `P_SHARED_SEARCH_REQUIRES_REVIEW`
+  - `P_EXPORT_API_REQUIRES_ENTERPRISE`
+  - `P_NO_CROSS_TENANT_ACCESS`
 
-最初に試すコマンド:
+First commands to try:
   cargo valid --registry examples/saas_multi_tenant_registry.rs inspect tenant-isolation-safe
   cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
 */

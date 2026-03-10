@@ -1,25 +1,28 @@
 /*
-パスワード構成要件モデル
+Password policy example
 
-目的:
-  - 文字列状態、長さ制約、正規表現ベースの構成要件を `valid` DSL で表現する
-  - 現在の text support が explicit-ready で使えることを確認する
-  - `SetStrongPassword` / `SetWeakPassword` の分割は教育用の bounded 例であり、
-    任意のパスワード入力を variant ごとに増やす推奨パターンではない
+Purpose:
+  - demonstrate string state, length checks, and regex-based policy rules in
+    the `valid` DSL
+  - show the current text-heavy surface that remains explicit-ready even when
+    solver readiness is reduced
+  - make it clear that `SetStrongPassword` / `SetWeakPassword` is only a
+    bounded teaching fixture, not the recommended way to model arbitrary user
+    password payloads
 
-含まれるモデル:
-  - password-policy-safe
-    強いパスワードを設定し、compliant フラグも正しく true になる
-  - password-policy-regression
-    弱いパスワードなのに compliant=true にしてしまう回帰
+Included models:
+  - `password-policy-safe`
+    Sets a strong password and keeps the `compliant` flag aligned.
+  - `password-policy-regression`
+    Marks a weak password as compliant to create a regression.
 
-主な性質:
-  - P_PASSWORD_POLICY_MATCHES_FLAG
-    compliant は実際の構成要件判定と一致しなければならない
-  - P_PASSWORD_LENGTH_BOUND
-    パスワード長は常に 64 文字以下でなければならない
+Key properties:
+  - `P_PASSWORD_POLICY_MATCHES_FLAG`
+    `compliant` must match the actual password policy predicate.
+  - `P_PASSWORD_LENGTH_BOUND`
+    Password length must stay at or below 64 characters.
 
-最初に試すコマンド:
+First commands to try:
   cargo valid --registry examples/password_policy.rs inspect password-policy-safe
   cargo valid --registry examples/password_policy.rs readiness password-policy-safe
   cargo valid --registry examples/password_policy.rs verify password-policy-regression --property=P_PASSWORD_POLICY_MATCHES_FLAG

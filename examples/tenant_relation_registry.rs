@@ -1,27 +1,29 @@
 /*
-テナント関係・マップ例
+Tenant relation and map example
 
-目的:
-  - FiniteRelation と FiniteMap を使って、テナント所属とテナント別プランを自然に書く
-  - SaaS の cross-tenant access を小さい integration model で検証する
-  - compose 構文なしでも shared-state cross-domain check を書ける形を示す
+Purpose:
+  - use `FiniteRelation` and `FiniteMap` to model tenant membership and
+    tenant-specific plans naturally
+  - verify cross-tenant SaaS access in a small integration model
+  - show the shared-state cross-domain style that works today without a full
+    compose DSL
 
-統合する関心:
-  - membership サブドメイン
-  - billing / plan サブドメイン
+Concerns combined here:
+  - membership
+  - billing / plan checks
 
-含まれるモデル:
-  - tenant-relation-safe
-    membership と tenant plan の shared state を見て export を許可する
-  - tenant-relation-regression
-    plan だけで export を許可してしまい、cross-tenant access が起きる
+Included models:
+  - `tenant-relation-safe`
+    Allows export only when membership and tenant plan both permit it.
+  - `tenant-relation-regression`
+    Allows export from plan state alone and produces a cross-tenant regression.
 
-主な性質:
-  - P_EXPORT_REQUIRES_MEMBERSHIP
-  - P_EXPORT_REQUIRES_ENTERPRISE
-  - P_NO_CROSS_TENANT_ACCESS
+Key properties:
+  - `P_EXPORT_REQUIRES_MEMBERSHIP`
+  - `P_EXPORT_REQUIRES_ENTERPRISE`
+  - `P_NO_CROSS_TENANT_ACCESS`
 
-最初に試すコマンド:
+First commands to try:
   cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
   cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 */

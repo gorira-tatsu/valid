@@ -36,49 +36,55 @@ Command surface guide:
 - In-process Rust conformance harness:
   `conformance_harness.rs`
 
-Current examples:
+## Example Catalog
+
+### Smallest starting points
 
 - `valid_models.rs`
-  Minimal step-first registry with `counter` and `failing-counter`.
-- `compose_helper_registry.rs`
-  Small helper-based composition example that uses `compose_models(...)`
-  directly and prints inspect/check output for the composed surface.
-- `conformance_harness.rs`
-  Small in-process Rust harness example that runs a generated vector against a
-  `RustConformanceHarness`.
+  Minimal step-model registry with `counter` and `failing-counter`.
+- `fizzbuzz.rs`
+  Small arithmetic/declarative model that is easy to inspect and graph.
 - `cover_review.valid`
-  Small `.valid` example for `cover`-oriented review and explicit reachability
-  checks.
+  Minimal `.valid` source for `cover`-oriented review.
+
+### Review and evidence flows
+
+- `scenario_focus.valid`
+  Small `.valid` source for analysis profiles, scoped review, and
+  `graph_snapshot` JSON output.
+- `handoff_testgen_registry.rs`
+  Small registry for ranked handoff/testgen output with
+  `counterexample_kind`, `priority`, `selection_reason`, and witness metadata.
 - `deadlock_enablement_registry.rs`
   Small registry for deadlock-oriented and blocked-action enablement-oriented
   test generation.
-- `fizzbuzz.rs`
-  Small declarative arithmetic model using grouped `on Action { ... }`.
-- `handoff_testgen_registry.rs`
-  Small registry that makes `handoff` and `testgen` line up around one failing
-  review gate, including `counterexample_kind`, ranked vector `priority`, and
-  `selection_reason` in JSON output.
-- `property_suites_project/`
-  Small project-first example that demonstrates `critical_properties` and
-  named `property_suites`, plus the project-level `capabilities` and
-  `selfcheck` flow you would use before preferring `sat-varisat`.
-- `scenario_focus.valid`
-  Small `.valid` example for scenario-focused review with `--scenario=...`.
-- `tenant_relation_registry.rs`
-  Small declarative integration model that demonstrates the shared-state
-  pattern for tenant membership plus tenant plan checks.
-- `password_policy.rs`
-  Small declarative string/password-policy model using `len` and
-  `regex_match`. Its strong/weak split is a bounded teaching fixture, not the
-  recommended long-term pattern for arbitrary password payloads. Treat it as a
-  temporary stand-in for the parameterized-action roadmap, not as a template
-  for variant-per-input modeling.
+
+### Backend and capability review
+
 - `iam_transition_registry.rs`
   Small declarative policy model with explicit path tags and a bounded
-  `sat-varisat`-friendly verification surface.
+  `sat-varisat`-friendly surface.
+- `password_policy.rs`
+  String-heavy explicit-first model that is useful for readiness and migration
+  review.
+- `property_suites_project/`
+  Small project-first example for `critical_properties`, named suites,
+  `capabilities`, and `selfcheck`.
+
+### Integration-style modeling
+
+- `tenant_relation_registry.rs`
+  Shared-state integration model for membership and tenant-plan checks.
 - `saas_multi_tenant_registry.rs`
-  Medium-sized integration model that demonstrates the same shared-state
-  pattern for tenant isolation and shared-service access.
+  Shared-state integration model for tenant isolation and service access.
+- `compose_helper_registry.rs`
+  Helper-based composition example using `compose_models(...)` directly.
+
+### Runtime conformance
+
+- `conformance_harness.rs`
+  Small in-process Rust harness example that runs a generated vector against a
+  `RustConformanceHarness`.
 
 Heavy or fixture-like inputs live elsewhere:
 
@@ -120,10 +126,6 @@ cargo valid --registry examples/fizzbuzz.rs verify fizzbuzz --property=P_FIZZBUZ
 cargo valid --registry examples/handoff_testgen_registry.rs handoff review-gate-regression --json
 cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json
 cargo valid --registry examples/handoff_testgen_registry.rs testgen review-gate-regression --strategy=counterexample --json | jq '.vectors[] | {counterexample_kind, priority, selection_reason}'
-cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --critical --json
-cargo valid --manifest-path examples/property_suites_project/Cargo.toml suite --suite=smoke --json
-cargo valid --manifest-path examples/property_suites_project/Cargo.toml capabilities --backend=sat-varisat --json
-cargo valid --manifest-path examples/property_suites_project/Cargo.toml selfcheck --json
 cargo valid --registry examples/tenant_relation_registry.rs inspect tenant-relation-safe
 cargo valid --registry examples/tenant_relation_registry.rs verify tenant-relation-regression --property=P_NO_CROSS_TENANT_ACCESS
 cargo valid --registry examples/password_policy.rs inspect password-policy-safe
@@ -131,6 +133,17 @@ cargo valid --registry examples/password_policy.rs verify password-policy-regres
 cargo valid --registry examples/iam_transition_registry.rs graph iam-access
 cargo valid --registry examples/iam_transition_registry.rs verify iam-access --property=P_BILLING_READ_REQUIRES_SESSION --backend=sat-varisat --json
 cargo valid --registry examples/saas_multi_tenant_registry.rs verify tenant-isolation-regression --property=P_NO_CROSS_TENANT_ACCESS
+```
+
+Project-first example commands:
+
+```sh
+cd examples/property_suites_project
+valid models
+valid suite --critical --json
+valid suite --suite=smoke --json
+valid capabilities --backend=sat-varisat --json
+valid selfcheck --json
 ```
 
 What to look for in the newer outputs:
