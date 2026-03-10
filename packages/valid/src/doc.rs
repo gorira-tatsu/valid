@@ -3,7 +3,7 @@ use serde_json::json;
 use crate::{
     api::InspectResponse,
     project::{doc_repair_surfaces, doc_suggested_reruns, RerunSuggestion},
-    reporter::{build_graph_snapshot, GraphView},
+    reporter::{build_graph_snapshot_for_profile, GraphView},
     support::{
         artifact_index::{record_artifact, synthetic_run_id, ArtifactRecord},
         hash::stable_hash_hex,
@@ -49,8 +49,9 @@ pub fn generate_doc(
     mermaid: String,
     source_hash: String,
     contract_hash: String,
+    profile_id: Option<&str>,
 ) -> GeneratedDoc {
-    let markdown = render_doc_markdown(inspect, &mermaid, &source_hash, &contract_hash);
+    let markdown = render_doc_markdown(inspect, &mermaid, &source_hash, &contract_hash, profile_id);
     GeneratedDoc {
         schema_version: "1.0.0".to_string(),
         model_id: inspect.model_id.clone(),
@@ -222,9 +223,12 @@ fn render_doc_markdown(
     mermaid: &str,
     source_hash: &str,
     contract_hash: &str,
+    profile_id: Option<&str>,
 ) -> String {
     let mut out = String::new();
-    let snapshot = build_graph_snapshot(inspect, GraphView::Overview);
+    let selected_profile = profile_id.unwrap_or(&inspect.default_profile_id);
+    let snapshot =
+        build_graph_snapshot_for_profile(inspect, GraphView::Overview, Some(selected_profile));
     out.push_str(&format!(
         "<!-- valid-doc: model_id={} source_hash={} contract_hash={} -->\n\n",
         inspect.model_id, source_hash, contract_hash
@@ -236,7 +240,7 @@ fn render_doc_markdown(
         inspect.machine_ir_ready,
         inspect.capabilities.explicit_ready,
         inspect.capabilities.solver_ready,
-        inspect.default_profile_id,
+        selected_profile,
         contract_hash
     ));
     out.push_str("## Analysis Profiles\n\n");
@@ -479,6 +483,7 @@ mod tests {
             "flowchart TD\n  s0 --> s1".to_string(),
             "source-hash".to_string(),
             "contract-hash".to_string(),
+            None,
         );
         assert!(doc.markdown.contains("<!-- valid-doc:"));
         assert!(
@@ -496,6 +501,7 @@ mod tests {
             "flowchart TD\n  s0 --> s1".to_string(),
             "source-hash".to_string(),
             "contract-hash".to_string(),
+            None,
         );
         let mut existing = generated.markdown.clone();
         existing = existing.replace("s0 --> s1", "s0 --> s2");

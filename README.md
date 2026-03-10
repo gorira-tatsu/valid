@@ -80,6 +80,8 @@ The product story is now:
 - Lower modulo-based declarative guards and properties such as FizzBuzz-style `%`
 - Emit graph snapshots with reduction metadata for overview, failure, deadlock,
   and SCC review surfaces
+- Load named `analysis_profiles` from `valid.toml` for project-first review
+  defaults and doc/graph snapshot policy
 - Report temporal fairness support separately from temporal operator support
 
 ## Current Limits
@@ -89,9 +91,12 @@ The product story is now:
   common cases, but the derive surface is still intentionally small
 - parameterized actions are currently the bounded-choice form, not arbitrary
   payload-bearing action parameters
-- analysis profiles are currently default + scenario-backed, not a full custom
-  authoring surface yet
+- analysis profiles are now configurable in `valid.toml`, but Rust registry
+  execution does not yet turn arbitrary profile `scope_expr` strings into
+  executable runtime filters
 - Full solver coverage beyond the current bounded invariant subset is not done
+- fairness assumptions are not modeled yet in the authoring surface or explicit
+  engine; temporal checks are fairness-free today
 - `testgen` now ranks and dedupes review vectors, but it is still not a full
   scenario planner
 

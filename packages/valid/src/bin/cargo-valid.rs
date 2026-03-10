@@ -43,7 +43,9 @@ use valid::{
         render_handoff_check_text, render_handoff_json, render_handoff_text, write_handoff,
         HandoffInputs,
     },
-    project::{scaffold_project_init, verification_policy, ProjectConfig},
+    project::{
+        project_runtime_env_vars, scaffold_project_init, verification_policy, ProjectConfig,
+    },
     reporter::{
         build_failure_graph_slice, render_model_dot_failure, render_model_dot_with_view,
         render_model_mermaid_failure, render_model_mermaid_with_view, render_model_svg_failure,
@@ -139,6 +141,8 @@ fn main() {
         format: parsed.format,
         view: parsed.view,
         property_id: parsed.property_id,
+        profile_id: parsed.profile_id,
+        scenario_id: parsed.scenario_id,
         backend: parsed.backend,
         solver_executable: parsed.solver_executable,
         solver_args: parsed.solver_args,
@@ -177,7 +181,7 @@ fn main() {
 }
 
 fn primary_usage() -> String {
-    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|completion|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
+    "usage: cargo valid [--manifest-path <path>] [--registry <path>|--file <path>|--example <name>|--bin <name>] <init|models|inspect|graph|doc|handoff|readiness|migrate|benchmark|verify|suite|explain|coverage|orchestrate|generate-tests|replay|contract|artifacts|clean|commands|completion|schema|batch> [extra args] [model] [--json] [--progress=json] [--format=<mermaid|dot|svg|text|json>] [--view=<overview|logic|failure|deadlock|scc>] [--property=<id>] [--profile=<id>] [--scenario=<id>] [--critical] [--suite=<name>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--focus-action=<id>] [--actions=a,b,c] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--write[=<path>]] [--check]".to_string()
 }
 
 fn cmd_completion(parsed: &CliArgs) -> ! {
@@ -290,6 +294,8 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             format: parsed.format.clone(),
             view: parsed.view.clone(),
             property_id: parsed.property_id.clone(),
+            profile_id: parsed.profile_id.clone(),
+            scenario_id: parsed.scenario_id.clone(),
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
             solver_args: parsed.solver_args.clone(),
@@ -361,6 +367,8 @@ fn run_external_all(parsed: CliArgs) -> ! {
             format: parsed.format.clone(),
             view: parsed.view.clone(),
             property_id: run.property_id.clone(),
+            profile_id: parsed.profile_id.clone(),
+            scenario_id: parsed.scenario_id.clone(),
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
             solver_args: parsed.solver_args.clone(),
@@ -444,6 +452,8 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         format: None,
         view: None,
         property_id: None,
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         backend: None,
         solver_executable: None,
         solver_args: Vec::new(),
@@ -770,8 +780,8 @@ fn cmd_all(parsed: ParsedArgs) {
             source_name: normalized_model_ref(&run.model_id),
             source: String::new(),
             property_id: run.property_id.clone(),
-            profile_id: None,
-            scenario_id: None,
+            profile_id: parsed.profile_id.clone(),
+            scenario_id: parsed.scenario_id.clone(),
             seed: parsed.seed,
             backend: parsed.backend.clone(),
             solver_executable: parsed.solver_executable.clone(),
@@ -929,8 +939,8 @@ fn render_cargo_graph_output(
         source_name: request.source_name.clone(),
         source: request.source.clone(),
         property_id: Some(property_id.clone()),
-        profile_id: None,
-        scenario_id: None,
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1002,7 +1012,13 @@ fn cmd_doc(parsed: ParsedArgs) {
                 response.actions.join(","),
                 response.properties.join(",")
             ));
-            let generated = generate_doc(&response, mermaid, source_hash, contract_hash);
+            let generated = generate_doc(
+                &response,
+                mermaid,
+                source_hash,
+                contract_hash,
+                parsed.profile_id.as_deref(),
+            );
             let output_path = parsed
                 .write_path
                 .clone()
@@ -1094,8 +1110,8 @@ fn cmd_handoff(parsed: ParsedArgs) {
                         source_name: source_name.clone(),
                         source: String::new(),
                         property_id: Some(property_id.clone()),
-                        profile_id: None,
-                        scenario_id: None,
+                        profile_id: parsed.profile_id.clone(),
+                        scenario_id: parsed.scenario_id.clone(),
                         seed: None,
                         backend: parsed.backend.clone(),
                         solver_executable: parsed.solver_executable.clone(),
@@ -1121,7 +1137,7 @@ fn cmd_handoff(parsed: ParsedArgs) {
                 source_name: source_name.clone(),
                 source: String::new(),
                 property_id: parsed.property_id.clone(),
-                profile_id: None,
+                profile_id: parsed.profile_id.clone(),
                 focus_action_id: None,
                 strategy: "counterexample".to_string(),
                 seed: None,
@@ -1246,8 +1262,8 @@ fn cmd_benchmark(parsed: ParsedArgs) {
                 source_name: normalized_model_ref(&model),
                 source: String::new(),
                 property_id: parsed.property_id.clone(),
-                profile_id: None,
-                scenario_id: None,
+                profile_id: parsed.profile_id.clone(),
+                scenario_id: parsed.scenario_id.clone(),
                 seed: parsed.seed,
                 backend: parsed.backend.clone(),
                 solver_executable: parsed.solver_executable.clone(),
@@ -1402,8 +1418,8 @@ fn cmd_check(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
-        profile_id: None,
-        scenario_id: None,
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1431,8 +1447,8 @@ fn cmd_explain(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
-        profile_id: None,
-        scenario_id: None,
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         seed: parsed.seed,
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
@@ -1541,7 +1557,7 @@ fn cmd_testgen(parsed: ParsedArgs) {
         source_name: normalized_model_ref(&model),
         source: String::new(),
         property_id: parsed.property_id.clone(),
-        profile_id: None,
+        profile_id: parsed.profile_id.clone(),
         strategy: parsed
             .strategy
             .clone()
@@ -1770,6 +1786,8 @@ struct ParsedArgs {
     format: Option<String>,
     view: Option<String>,
     property_id: Option<String>,
+    profile_id: Option<String>,
+    scenario_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -1800,6 +1818,8 @@ struct CliArgs {
     format: Option<String>,
     view: Option<String>,
     property_id: Option<String>,
+    profile_id: Option<String>,
+    scenario_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -1899,7 +1919,15 @@ fn parse_cli(args: Vec<String>) -> CliArgs {
             _ if arg.starts_with("--property=") => {
                 parsed.property_id = Some(arg.trim_start_matches("--property=").to_string())
             }
+            _ if arg.starts_with("--profile=") => {
+                parsed.profile_id = Some(arg.trim_start_matches("--profile=").to_string())
+            }
+            _ if arg.starts_with("--scenario=") => {
+                parsed.scenario_id = Some(arg.trim_start_matches("--scenario=").to_string())
+            }
             "--critical" => parsed.critical = true,
+            "--profile" => parsed.profile_id = Some(next_arg(&mut iter, "--profile")),
+            "--scenario" => parsed.scenario_id = Some(next_arg(&mut iter, "--scenario")),
             "--suite" => parsed.suite_name = Some(next_arg(&mut iter, "--suite")),
             _ if arg.starts_with("--suite=") => {
                 parsed.suite_name = Some(arg.trim_start_matches("--suite=").to_string())
@@ -2074,6 +2102,8 @@ fn build_external_request(parsed: &CliArgs) -> RegistryCommandRequest {
         format: parsed.format.clone(),
         view: parsed.view.clone(),
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -2194,6 +2224,8 @@ fn inspect_completion_candidates_cargo(
             format: None,
             view: None,
             property_id: None,
+            profile_id: None,
+            scenario_id: None,
             backend: None,
             solver_executable: None,
             solver_args: Vec::new(),
@@ -2664,20 +2696,10 @@ fn resolve_project_dir(root: &Path, env_key: &str, default_rel: &str) -> PathBuf
 }
 
 fn apply_project_runtime_config(config: &ProjectConfig) {
-    if let Some(generated_tests_dir) = &config.generated_tests_dir {
-        env::set_var("VALID_GENERATED_TESTS_DIR", generated_tests_dir);
-    }
-    if let Some(artifacts_dir) = &config.artifacts_dir {
-        env::set_var("VALID_ARTIFACTS_DIR", artifacts_dir);
-    }
-    if let Some(benchmarks_dir) = &config.benchmarks_dir {
-        env::set_var("VALID_BENCHMARKS_DIR", benchmarks_dir);
-    }
-    if let Some(benchmark_baseline_dir) = &config.benchmark_baseline_dir {
-        env::set_var("VALID_BENCHMARK_BASELINES_DIR", benchmark_baseline_dir);
-    }
-    if let Some(default_graph_format) = &config.default_graph_format {
-        env::set_var("VALID_DEFAULT_GRAPH_FORMAT", default_graph_format);
+    for (key, value) in project_runtime_env_vars(config)
+        .unwrap_or_else(|message| usage_exit(&format!("invalid project runtime config: {message}")))
+    {
+        env::set_var(key, value);
     }
 }
 

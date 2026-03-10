@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, env, fs, path::Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 /// One model-to-property entry inside a named property suite.
@@ -47,6 +47,29 @@ pub struct VerificationPolicy {
     pub coverage_gates: CoverageGates,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// User-authored analysis profile configuration from `valid.toml`.
+pub struct AnalysisProfileConfig {
+    pub scenario: Option<String>,
+    pub scope_expr: Option<String>,
+    pub backend_hint: Option<String>,
+    pub doc_graph_policy: Option<String>,
+    pub deadlock_check: Option<bool>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Runtime-ready analysis profile entry exported through environment variables.
+pub struct RuntimeAnalysisProfile {
+    pub profile_id: String,
+    pub scenario_id: Option<String>,
+    pub scope_expr: Option<String>,
+    pub backend_hint: Option<String>,
+    pub doc_graph_policy: String,
+    pub deadlock_check: bool,
+    pub notes: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 /// Parsed `valid.toml` project configuration.
 pub struct ProjectConfig {
@@ -60,6 +83,8 @@ pub struct ProjectConfig {
     pub property_suites: BTreeMap<String, Vec<PropertySuiteEntry>>,
     pub preferred_backends: Vec<String>,
     pub default_suite: Option<String>,
+    pub default_analysis_profile: Option<String>,
+    pub analysis_profiles: BTreeMap<String, AnalysisProfileConfig>,
     pub coverage_gates: CoverageGates,
     pub benchmark_models: Vec<String>,
     pub benchmark_repeats: Option<usize>,
@@ -122,6 +147,7 @@ enum ConfigSection {
     TopLevel,
     CriticalProperties,
     PropertySuite(String),
+    AnalysisProfile(String),
 }
 
 /// Load `valid.toml` from a project root if it exists.
@@ -193,6 +219,24 @@ pub fn parse_project_config(body: &str) -> Result<ProjectConfig, String> {
                     ));
                 }
             },
+            ConfigSection::AnalysisProfile(name) => {
+                let profile = config.analysis_profiles.entry(name.clone()).or_default();
+                match key.trim() {
+                    other => {
+                        if assign_analysis_profile_key(profile, other, value.trim(), index + 1)? {
+                            continue;
+                        }
+                        if assign_top_level_key(&mut config, other, value.trim(), index + 1)? {
+                            section = ConfigSection::TopLevel;
+                            continue;
+                        }
+                        return Err(format!(
+                            "unsupported analysis profile key `{other}` on line {}",
+                            index + 1
+                        ));
+                    }
+                }
+            }
         }
     }
     Ok(config)
@@ -211,10 +255,68 @@ pub fn verification_policy(config: &ProjectConfig) -> VerificationPolicy {
     }
 }
 
+/// Render analysis profiles into runtime env pairs consumed by registry-backed
+/// commands.
+pub fn project_runtime_env_vars(config: &ProjectConfig) -> Result<Vec<(String, String)>, String> {
+    let mut vars = Vec::new();
+    if let Some(generated_tests_dir) = &config.generated_tests_dir {
+        vars.push((
+            "VALID_GENERATED_TESTS_DIR".to_string(),
+            generated_tests_dir.clone(),
+        ));
+    }
+    if let Some(artifacts_dir) = &config.artifacts_dir {
+        vars.push(("VALID_ARTIFACTS_DIR".to_string(), artifacts_dir.clone()));
+    }
+    if let Some(benchmarks_dir) = &config.benchmarks_dir {
+        vars.push(("VALID_BENCHMARKS_DIR".to_string(), benchmarks_dir.clone()));
+    }
+    if let Some(benchmark_baseline_dir) = &config.benchmark_baseline_dir {
+        vars.push((
+            "VALID_BENCHMARK_BASELINES_DIR".to_string(),
+            benchmark_baseline_dir.clone(),
+        ));
+    }
+    if let Some(default_graph_format) = &config.default_graph_format {
+        vars.push((
+            "VALID_DEFAULT_GRAPH_FORMAT".to_string(),
+            default_graph_format.clone(),
+        ));
+    }
+    if let Some(default_analysis_profile) = &config.default_analysis_profile {
+        vars.push((
+            "VALID_DEFAULT_ANALYSIS_PROFILE".to_string(),
+            default_analysis_profile.clone(),
+        ));
+    }
+    if !config.analysis_profiles.is_empty() {
+        let runtime_profiles = config
+            .analysis_profiles
+            .iter()
+            .map(|(profile_id, profile)| RuntimeAnalysisProfile {
+                profile_id: profile_id.clone(),
+                scenario_id: profile.scenario.clone(),
+                scope_expr: profile.scope_expr.clone(),
+                backend_hint: profile.backend_hint.clone(),
+                doc_graph_policy: profile
+                    .doc_graph_policy
+                    .clone()
+                    .unwrap_or_else(|| "full".to_string()),
+                deadlock_check: profile.deadlock_check.unwrap_or(true),
+                notes: profile.notes.clone(),
+            })
+            .collect::<Vec<_>>();
+        let body = serde_json::to_string(&runtime_profiles)
+            .map_err(|err| format!("failed to serialize analysis profiles: {err}"))?;
+        vars.push(("VALID_ANALYSIS_PROFILES_JSON".to_string(), body));
+    }
+    Ok(vars)
+}
+
 /// Render the starter `valid.toml` template used by `valid init`.
 pub fn render_project_config_template(registry: &str) -> String {
     format!(
-        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\npreferred_backends = [\"explicit\"]\ndefault_suite = \"smoke\"\nminimum_overall_coverage_percent = 80\nminimum_business_coverage_percent = 75\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 70\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
+        "registry = {:?}\ndefault_backend = \"explicit\"\ndefault_property = \"\"\ndefault_solver_executable = \"\"\ndefault_solver_args = []\nsuite_models = []\npreferred_backends = [\"explicit\"]\ndefault_suite = \"smoke\"\ndefault_analysis_profile = \"default\"\nminimum_overall_coverage_percent = 80\nminimum_business_coverage_percent = 75\nminimum_setup_coverage_percent = 100\nminimum_requirement_coverage_percent = 70\n\n[critical_properties]\n# approval-model = [\"P_APPROVAL_IS_BOOLEAN\"]\n\n[property_suites.smoke]\nentries = []\n\n[analysis_profiles.review]\n# scenario = \"DeletedPost\"\n# scope_expr = \"deleted == true\"\nbackend_hint = \"explicit\"\ndoc_graph_policy = \"boundary_paths\"\ndeadlock_check = false\nnotes = [\"use this profile for focused business review\"]\n\nbenchmark_models = []\nbenchmark_repeats = 3\ngenerated_tests_dir = \"generated-tests\"\nartifacts_dir = \"artifacts\"\nbenchmarks_dir = \"artifacts/benchmarks\"\nbenchmark_baseline_dir = \"benchmarks/baselines\"\nbenchmark_regression_threshold_percent = 25\ndefault_graph_format = \"mermaid\"\n",
         registry
     )
 }
@@ -1050,6 +1152,9 @@ fn parse_section_header(input: &str, line: usize) -> Result<ConfigSection, Strin
         section if section.starts_with("property_suites.") => Ok(ConfigSection::PropertySuite(
             section.trim_start_matches("property_suites.").to_string(),
         )),
+        section if section.starts_with("analysis_profiles.") => Ok(ConfigSection::AnalysisProfile(
+            section.trim_start_matches("analysis_profiles.").to_string(),
+        )),
         other => Err(format!(
             "unsupported config section `{other}` on line {line}"
         )),
@@ -1073,6 +1178,9 @@ fn assign_top_level_key(
         "suite_models" => config.suite_models = parse_string_array(value, line)?,
         "preferred_backends" => config.preferred_backends = parse_string_array(value, line)?,
         "default_suite" => config.default_suite = Some(parse_string(value, line)?),
+        "default_analysis_profile" => {
+            config.default_analysis_profile = Some(parse_string(value, line)?)
+        }
         "minimum_overall_coverage_percent" => {
             config.coverage_gates.minimum_overall_coverage_percent = Some(parse_u32(value, line)?)
         }
@@ -1103,12 +1211,38 @@ fn assign_top_level_key(
     Ok(true)
 }
 
+fn assign_analysis_profile_key(
+    profile: &mut AnalysisProfileConfig,
+    key: &str,
+    value: &str,
+    line: usize,
+) -> Result<bool, String> {
+    match key {
+        "scenario" => profile.scenario = Some(parse_string(value, line)?),
+        "scope_expr" => profile.scope_expr = Some(parse_string(value, line)?),
+        "backend_hint" => profile.backend_hint = Some(parse_string(value, line)?),
+        "doc_graph_policy" => profile.doc_graph_policy = Some(parse_string(value, line)?),
+        "deadlock_check" => profile.deadlock_check = Some(parse_bool(value, line)?),
+        "notes" => profile.notes = parse_string_array(value, line)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 fn parse_string(input: &str, line: usize) -> Result<String, String> {
     let trimmed = input.trim();
     if !(trimmed.starts_with('"') && trimmed.ends_with('"')) {
         return Err(format!("expected quoted string on line {line}"));
     }
     Ok(trimmed[1..trimmed.len() - 1].to_string())
+}
+
+fn parse_bool(input: &str, line: usize) -> Result<bool, String> {
+    match input.trim() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("expected boolean on line {line}")),
+    }
 }
 
 fn parse_string_array(input: &str, line: usize) -> Result<Vec<String>, String> {
@@ -1232,12 +1366,12 @@ mod tests {
     use std::{collections::BTreeMap, fs};
 
     use super::{
-        check_project_init, parse_project_config, render_bootstrap_ai_readme,
-        render_bootstrap_claude_code_config, render_bootstrap_claude_desktop_config,
-        render_bootstrap_codex_config, render_project_config_template,
-        render_registry_source_template, rerun_recommendations, verification_policy, CoverageGates,
-        ProjectConfig, PropertySuiteEntry, RerunRecommendations, RerunSuggestion,
-        VerificationPolicy,
+        check_project_init, parse_project_config, project_runtime_env_vars,
+        render_bootstrap_ai_readme, render_bootstrap_claude_code_config,
+        render_bootstrap_claude_desktop_config, render_bootstrap_codex_config,
+        render_project_config_template, render_registry_source_template, rerun_recommendations,
+        verification_policy, CoverageGates, ProjectConfig, PropertySuiteEntry,
+        RerunRecommendations, RerunSuggestion, VerificationPolicy,
     };
 
     #[test]
@@ -1285,6 +1419,8 @@ default_graph_format = "mermaid"
                 suite_models: vec!["counter".to_string(), "failing-counter".to_string()],
                 preferred_backends: vec!["explicit".to_string(), "sat-varisat".to_string()],
                 default_suite: Some("smoke".to_string()),
+                default_analysis_profile: None,
+                analysis_profiles: BTreeMap::new(),
                 coverage_gates: CoverageGates {
                     minimum_overall_coverage_percent: Some(90),
                     minimum_business_coverage_percent: Some(80),
@@ -1315,6 +1451,42 @@ default_graph_format = "mermaid"
     }
 
     #[test]
+    fn parses_analysis_profiles_and_exports_runtime_env() {
+        let config = parse_project_config(
+            r#"
+registry = "valid/registry.rs"
+default_analysis_profile = "review"
+
+[analysis_profiles.review]
+scenario = "DeletedPost"
+backend_hint = "explicit"
+doc_graph_policy = "boundary_paths"
+deadlock_check = false
+notes = ["focus the review on deleted content"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.default_analysis_profile.as_deref(), Some("review"));
+        let review = config
+            .analysis_profiles
+            .get("review")
+            .expect("review profile");
+        assert_eq!(review.scenario.as_deref(), Some("DeletedPost"));
+        assert_eq!(review.backend_hint.as_deref(), Some("explicit"));
+        assert_eq!(review.doc_graph_policy.as_deref(), Some("boundary_paths"));
+        assert_eq!(review.deadlock_check, Some(false));
+        let env_vars = project_runtime_env_vars(&config).expect("runtime env");
+        let profile_json = env_vars
+            .iter()
+            .find(|(key, _)| key == "VALID_ANALYSIS_PROFILES_JSON")
+            .map(|(_, value)| value.clone())
+            .expect("analysis profile json");
+        assert!(profile_json.contains("\"profile_id\":\"review\""));
+        assert!(profile_json.contains("\"scenario_id\":\"DeletedPost\""));
+        assert!(profile_json.contains("\"doc_graph_policy\":\"boundary_paths\""));
+    }
+
+    #[test]
     fn renders_project_template() {
         let body = render_project_config_template("examples/valid_models.rs");
         assert!(body.contains("registry = \"examples/valid_models.rs\""));
@@ -1324,9 +1496,11 @@ default_graph_format = "mermaid"
         assert!(body.contains("benchmark_baseline_dir = \"benchmarks/baselines\""));
         assert!(body.contains("preferred_backends = [\"explicit\"]"));
         assert!(body.contains("default_suite = \"smoke\""));
+        assert!(body.contains("default_analysis_profile = \"default\""));
         assert!(body.contains("minimum_overall_coverage_percent = 80"));
         assert!(body.contains("[critical_properties]"));
         assert!(body.contains("[property_suites.smoke]"));
+        assert!(body.contains("[analysis_profiles.review]"));
     }
 
     #[test]

@@ -349,7 +349,13 @@ fn cmd_doc(models: &[RegisteredModel], args: Vec<String>) {
             ))
         });
     let source_hash = stable_hash_hex(&format!("{}|{}", model.name, contract_hash));
-    let generated = generate_doc(&inspect, mermaid, source_hash, contract_hash);
+    let generated = generate_doc(
+        &inspect,
+        mermaid,
+        source_hash,
+        contract_hash,
+        parsed.profile_id.as_deref(),
+    );
     let output_path = parsed
         .write_path
         .clone()
@@ -981,6 +987,37 @@ fn cmd_replay(models: &[RegisteredModel], args: Vec<String>) {
 }
 
 fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
+    let mut analysis_profiles = vec![crate::api::InspectAnalysisProfile {
+        profile_id: "default".to_string(),
+        scenario_id: None,
+        scope_expr: None,
+        backend_hint: None,
+        doc_graph_policy: "full".to_string(),
+        deadlock_check: true,
+        notes: vec!["registry-backed machine uses the default analysis profile".to_string()],
+    }];
+    if let Ok(body) = env::var("VALID_ANALYSIS_PROFILES_JSON") {
+        if let Ok(configured) =
+            serde_json::from_str::<Vec<crate::api::InspectAnalysisProfile>>(&body)
+        {
+            for profile in configured {
+                if !analysis_profiles
+                    .iter()
+                    .any(|existing| existing.profile_id == profile.profile_id)
+                {
+                    analysis_profiles.push(profile);
+                }
+            }
+        }
+    }
+    let default_profile_id = env::var("VALID_DEFAULT_ANALYSIS_PROFILE")
+        .ok()
+        .filter(|value| {
+            analysis_profiles
+                .iter()
+                .any(|profile| profile.profile_id == *value)
+        })
+        .unwrap_or_else(|| "default".to_string());
     let state_field_details = M::State::state_fields()
         .into_iter()
         .map(|field| InspectStateField {
@@ -1154,7 +1191,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: M::model_id().to_string(),
-        default_profile_id: "default".to_string(),
+        default_profile_id,
         machine_ir_ready: capabilities.ir_ready,
         machine_ir_error: capabilities.machine_ir_error.clone(),
         capabilities: InspectCapabilities {
@@ -1202,15 +1239,7 @@ fn inspect_machine<M: VerifiedMachine>(request_id: &str) -> InspectResponse {
             .collect(),
         state_field_details,
         action_details,
-        analysis_profiles: vec![crate::api::InspectAnalysisProfile {
-            profile_id: "default".to_string(),
-            scenario_id: None,
-            scope_expr: None,
-            backend_hint: None,
-            doc_graph_policy: "full".to_string(),
-            deadlock_check: true,
-            notes: vec!["registry-backed machine uses the default analysis profile".to_string()],
-        }],
+        analysis_profiles,
         predicate_details: vec![],
         scenario_details: vec![],
         transition_details,
@@ -1421,6 +1450,8 @@ struct ParsedArgs {
     format: Option<String>,
     view: Option<String>,
     property_id: Option<String>,
+    profile_id: Option<String>,
+    scenario_id: Option<String>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -1476,8 +1507,22 @@ fn parse_args(args: Vec<String>, command: &str, usage: &str) -> ParsedArgs {
             parsed.strategy = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--property=") {
             parsed.property_id = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--profile=") {
+            parsed.profile_id = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--scenario=") {
+            parsed.scenario_id = Some(value.to_string());
         } else if let Some(value) = arg.strip_prefix("--backend=") {
             parsed.backend = Some(value.to_string());
+        } else if arg == "--profile" {
+            parsed.profile_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit(command, parsed.json, usage)),
+            );
+        } else if arg == "--scenario" {
+            parsed.scenario_id = Some(
+                iter.next()
+                    .unwrap_or_else(|| usage_exit(command, parsed.json, usage)),
+            );
         } else if arg == "--solver-exec" {
             parsed.solver_executable = Some(
                 iter.next()

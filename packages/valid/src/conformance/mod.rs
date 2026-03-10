@@ -40,6 +40,8 @@ pub struct ConformanceResponse {
     #[serde(default)]
     pub property_holds: Option<bool>,
     #[serde(default)]
+    pub terminal_state: Option<BTreeMap<String, Value>>,
+    #[serde(default)]
     pub message: Option<String>,
 }
 
@@ -147,6 +149,10 @@ pub trait RustConformanceHarness {
     fn apply_action(&mut self, step: &VectorActionStep) -> Result<BTreeMap<String, Value>, String>;
 
     fn property_holds(&self, _property_id: &str) -> Result<Option<bool>, String> {
+        Ok(None)
+    }
+
+    fn final_state(&self) -> Result<Option<BTreeMap<String, Value>>, String> {
         Ok(None)
     }
 }
@@ -340,6 +346,19 @@ pub fn run_rust_conformance<H: RustConformanceHarness>(
             }
         }
     };
+    let terminal_state = match harness.final_state() {
+        Ok(value) => value,
+        Err(message) => {
+            return harness_runtime_report(
+                vector,
+                harness.harness_name(),
+                format!(
+                    "rust conformance harness failed while reading final state: {}",
+                    message
+                ),
+            );
+        }
+    };
     compare_conformance(
         vector,
         harness.harness_name(),
@@ -349,6 +368,7 @@ pub fn run_rust_conformance<H: RustConformanceHarness>(
             observations,
             side_effects: Vec::new(),
             property_holds,
+            terminal_state,
             message: None,
         },
     )
@@ -363,7 +383,12 @@ pub fn compare_conformance(
 ) -> ConformanceReport {
     let mut observation_mismatches = Vec::new();
     let mut mismatches = Vec::new();
-    for (index, expected) in vector.expected_observations.iter().enumerate() {
+    let expected_outputs = if vector.expected_output.is_empty() {
+        &vector.expected_observations
+    } else {
+        &vector.expected_output
+    };
+    for (index, expected) in expected_outputs.iter().enumerate() {
         let actual = response.observations.get(index).cloned();
         if actual.as_ref() != Some(expected) {
             let (kind, likely_fix_surface, summary) = match actual.as_ref() {
@@ -395,7 +420,7 @@ pub fn compare_conformance(
             });
         }
     }
-    for index in vector.expected_observations.len()..response.observations.len() {
+    for index in expected_outputs.len()..response.observations.len() {
         let actual = response.observations.get(index).cloned();
         observation_mismatches.push(ObservationMismatch {
             index,
@@ -412,6 +437,24 @@ pub fn compare_conformance(
             expected_property_holds: None,
             actual_property_holds: None,
         });
+    }
+    if let Some(expected_state) = &vector.projected_state {
+        let actual_state = response
+            .terminal_state
+            .clone()
+            .or_else(|| response.observations.last().cloned());
+        if actual_state.as_ref() != Some(expected_state) {
+            mismatches.push(ConformanceMismatch {
+                kind: ConformanceMismatchKind::State,
+                likely_fix_surface: "implementation_state".to_string(),
+                summary: "terminal projected state mismatch".to_string(),
+                index: Some(vector.actions.len().saturating_sub(1)),
+                expected: Some(expected_state.clone()),
+                actual: actual_state,
+                expected_property_holds: None,
+                actual_property_holds: None,
+            });
+        }
     }
     let property_mismatch = vector.expected_property_holds != response.property_holds;
     if property_mismatch {
@@ -818,6 +861,7 @@ mod tests {
                 observations: vec![BTreeMap::from([("x".to_string(), Value::UInt(2))])],
                 side_effects: vec![],
                 property_holds: Some(false),
+                terminal_state: None,
                 message: None,
             },
         );
@@ -838,6 +882,7 @@ mod tests {
                 observations: vec![BTreeMap::from([("x".to_string(), Value::UInt(1))])],
                 side_effects: vec![],
                 property_holds: Some(true),
+                terminal_state: None,
                 message: None,
             },
         );
@@ -863,6 +908,7 @@ mod tests {
                 observations: vec![],
                 side_effects: vec![],
                 property_holds: Some(false),
+                terminal_state: None,
                 message: None,
             },
         );
@@ -887,6 +933,7 @@ mod tests {
                 ],
                 side_effects: vec![],
                 property_holds: Some(false),
+                terminal_state: None,
                 message: None,
             },
         );
@@ -894,6 +941,31 @@ mod tests {
         assert_eq!(
             extra_output.mismatches[0].kind,
             ConformanceMismatchKind::Output
+        );
+    }
+
+    #[test]
+    fn compare_conformance_uses_projected_terminal_state_when_available() {
+        let mut vector = sample_vector();
+        vector.projected_state = Some(BTreeMap::from([("x".to_string(), Value::UInt(2))]));
+        let report = compare_conformance(
+            &vector,
+            "fixture-runner",
+            &ConformanceResponse {
+                schema_version: "1.0.0".to_string(),
+                status: "ok".to_string(),
+                observations: vec![BTreeMap::from([("x".to_string(), Value::UInt(2))])],
+                side_effects: vec![],
+                property_holds: Some(false),
+                terminal_state: Some(BTreeMap::from([("x".to_string(), Value::UInt(1))])),
+                message: None,
+            },
+        );
+        assert_eq!(report.status, "FAIL");
+        assert_eq!(report.mismatch_categories, vec!["state".to_string()]);
+        assert_eq!(
+            report.mismatches[0].summary,
+            "terminal projected state mismatch"
         );
     }
 

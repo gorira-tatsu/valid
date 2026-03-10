@@ -244,13 +244,19 @@ fn complete_temporal_support(notes: Vec<String>) -> TemporalCapabilityMatrix {
     TemporalCapabilityMatrix {
         status: "complete".to_string(),
         semantics: "reachable_graph_fixpoint".to_string(),
-        fairness_support: "supported".to_string(),
-        fairness_kinds: vec!["weak".to_string(), "strong".to_string()],
+        fairness_support: "unsupported".to_string(),
+        fairness_kinds: Vec::new(),
         semantics_scope: "reachable_graph".to_string(),
         assurance_levels: vec!["complete".to_string(), "bounded".to_string()],
         supported_operators: all_temporal_operators(),
         unsupported_operators: Vec::new(),
-        notes,
+        notes: {
+            let mut notes = notes;
+            notes.push(
+                "weak/strong fairness is not modeled yet; explicit temporal checks assume fairness-free reachable-graph semantics".to_string(),
+            );
+            notes
+        },
     }
 }
 

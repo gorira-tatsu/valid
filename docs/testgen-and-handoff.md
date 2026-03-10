@@ -139,6 +139,12 @@ vector:
 - `projected_state`
   The final projected state when state visibility is available.
 
+For Rust-native harnesses, those fields now participate in comparison instead
+of being passive notes. `run_rust_conformance(...)` records a terminal-state
+projection when the harness exposes one, compares `expected_output` before raw
+observation fallbacks, and reports projected-state drift as a first-class
+state mismatch.
+
 Canonical example:
 
 ```sh

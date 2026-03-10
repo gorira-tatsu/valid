@@ -117,6 +117,10 @@ impl RustConformanceHarness for CounterHarness {
             _ => Ok(None),
         }
     }
+
+    fn final_state(&self) -> Result<Option<BTreeMap<String, Value>>, String> {
+        Ok(Some(BTreeMap::from([("x".into(), Value::UInt(self.x))])))
+    }
 }
 
 let report = run_rust_conformance(&vector, &mut CounterHarness { x: 0 });
@@ -135,6 +139,8 @@ Use the external `--runner` flow when:
 - which generated vectors or traces were exercised
 - whether the mismatch is state, output, property, or harness-oriented
 - which requirement or scenario the mismatch belongs to
+- whether `expected_output` or `projected_state` failed first when witness
+  metadata is available
 - the normalized `traceback`, `candidate_causes`, `repair_targets`, and
   `review_summary` fields so review tooling can consume conformance output like
   other evidence backends

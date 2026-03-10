@@ -58,7 +58,7 @@ use valid::{
         scaffold_project_init,
     },
     reporter::{
-        build_failure_graph_slice, build_graph_snapshot, render_model_dot_failure,
+        build_failure_graph_slice, build_graph_snapshot_for_profile, render_model_dot_failure,
         render_model_dot_with_view, render_model_mermaid_failure, render_model_mermaid_with_view,
         render_model_svg_failure, render_model_svg_with_view, render_model_text_failure,
         render_model_text_with_view, render_trace_mermaid, render_trace_sequence_mermaid,
@@ -1142,6 +1142,8 @@ fn project_registry_request(command: &str, parsed: &ParsedArgs) -> RegistryComma
         format: parsed.format.clone(),
         view: parsed.view.clone(),
         property_id: parsed.property_id.clone(),
+        profile_id: parsed.profile_id.clone(),
+        scenario_id: parsed.scenario_id.clone(),
         backend: parsed.backend.clone(),
         solver_executable: parsed.solver_executable.clone(),
         solver_args: parsed.solver_args.clone(),
@@ -2751,6 +2753,9 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
     if let Some(property_id) = &parsed.property_id {
         args.push(format!("--property={property_id}"));
     }
+    if let Some(profile_id) = &parsed.profile_id {
+        args.push(format!("--profile={profile_id}"));
+    }
     if let Some(scenario_id) = &parsed.scenario_id {
         args.push(format!("--scenario={scenario_id}"));
     }
@@ -3176,8 +3181,12 @@ fn render_graph_output(
                     }
                     .to_string(),
                 );
-                body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot(response, view))
-                    .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
+                body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot_for_profile(
+                    response,
+                    view,
+                    parsed.profile_id.as_deref(),
+                ))
+                .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
                 format!(
                     "{}\n",
                     serde_json::to_string(&body)
@@ -3228,8 +3237,12 @@ fn render_graph_output(
             let mut body: Value = serde_json::from_str(&render_inspect_json(response))
                 .map_err(|err| format!("failed to prepare graph json: {err}"))?;
             body["graph_view"] = Value::String("failure".to_string());
-            body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot(response, view))
-                .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
+            body["graph_snapshot"] = serde_json::to_value(build_graph_snapshot_for_profile(
+                response,
+                view,
+                parsed.profile_id.as_deref(),
+            ))
+            .map_err(|err| format!("failed to encode graph snapshot: {err}"))?;
             body["graph_slice"] = serde_json::json!({
                 "property_id": slice.property_id,
                 "failing_action_id": slice.failing_action_id,
@@ -3291,7 +3304,13 @@ fn cmd_doc(args: Vec<String>) {
             Err(diagnostics) => diagnostics_exit("doc", parsed.json, &diagnostics, None),
         }
     };
-    let generated = generate_doc(&inspect, mermaid, source_hash, contract_hash);
+    let generated = generate_doc(
+        &inspect,
+        mermaid,
+        source_hash,
+        contract_hash,
+        parsed.profile_id.as_deref(),
+    );
     let output_path = parsed
         .write_path
         .clone()

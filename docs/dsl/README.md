@@ -268,6 +268,12 @@ and concrete-choice coverage so expansion does not inflate business-flow
 progress. `explain`, `testgen`, and `handoff` preserve the same concrete
 parameter choice in their evidence.
 
+For project-first Rust workflows, `valid.toml` can now add named
+`[analysis_profiles.<id>]` entries. Those profiles currently drive review
+metadata such as `default_profile_id`, `analysis_profiles`, generated doc
+snapshots, and graph reduction policy. They are additive to the built-in
+`default` profile, and a project can select one as `default_analysis_profile`.
+
 ## IDE Notes
 
 Current guidance for a smoother IDE experience:
@@ -661,6 +667,12 @@ Temporal capability reporting now also distinguishes:
 - `fairness_support`
 - `fairness_kinds`
 - `semantics_scope`
+
+Current limit:
+
+- fairness metadata is reported explicitly, but fairness assumptions are not
+  modeled yet in the authoring surface or explicit runtime. Temporal checks are
+  fairness-free today.
 
 Typical reasons for degraded readiness:
 

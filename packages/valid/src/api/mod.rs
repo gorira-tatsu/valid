@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use tabled::{
     builder::Builder,
     settings::{style::Style, Alignment, Modify, Padding},
@@ -232,6 +233,20 @@ fn bounded_domain_for_field_type(field_type: &crate::ir::FieldType) -> InspectBo
     }
 }
 
+fn project_analysis_profiles_from_env() -> Vec<InspectAnalysisProfile> {
+    env::var("VALID_ANALYSIS_PROFILES_JSON")
+        .ok()
+        .and_then(|body| serde_json::from_str::<Vec<InspectAnalysisProfile>>(&body).ok())
+        .unwrap_or_default()
+}
+
+fn configured_default_profile_id() -> Option<String> {
+    env::var("VALID_DEFAULT_ANALYSIS_PROFILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn inspect_analysis_profiles(model: &ModelIr) -> Vec<InspectAnalysisProfile> {
     let mut profiles = vec![InspectAnalysisProfile {
         profile_id: "default".to_string(),
@@ -262,7 +277,26 @@ fn inspect_analysis_profiles(model: &ModelIr) -> Vec<InspectAnalysisProfile> {
                 ],
             }),
     );
+    let mut seen = profiles
+        .iter()
+        .map(|profile| profile.profile_id.clone())
+        .collect::<BTreeSet<_>>();
+    for profile in project_analysis_profiles_from_env() {
+        if seen.insert(profile.profile_id.clone()) {
+            profiles.push(profile);
+        }
+    }
     profiles
+}
+
+fn effective_default_profile_id(profiles: &[InspectAnalysisProfile]) -> String {
+    configured_default_profile_id()
+        .filter(|configured| {
+            profiles
+                .iter()
+                .any(|profile| profile.profile_id == *configured)
+        })
+        .unwrap_or_else(|| "default".to_string())
 }
 
 fn resolve_profile_selection(
@@ -271,6 +305,7 @@ fn resolve_profile_selection(
     scenario_id: Option<&str>,
 ) -> Result<(String, Option<String>), String> {
     let profiles = inspect_analysis_profiles(model);
+    let default_profile_id = effective_default_profile_id(&profiles);
     match (profile_id, scenario_id) {
         (Some(profile), Some(scenario)) if profile != scenario && profile != "default" => Err(
             format!("profile `{profile}` does not match scenario `{scenario}`"),
@@ -289,7 +324,13 @@ fn resolve_profile_selection(
                 .ok_or_else(|| format!("unknown scenario/profile `{scenario}`"))?;
             Ok((selected.profile_id.clone(), selected.scenario_id.clone()))
         }
-        (None, None) => Ok(("default".to_string(), None)),
+        (None, None) => {
+            let selected = profiles
+                .iter()
+                .find(|candidate| candidate.profile_id == default_profile_id)
+                .ok_or_else(|| format!("unknown default profile `{default_profile_id}`"))?;
+            Ok((selected.profile_id.clone(), selected.scenario_id.clone()))
+        }
     }
 }
 
@@ -515,7 +556,7 @@ pub struct InspectResponse {
     pub property_details: Vec<InspectProperty>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InspectAnalysisProfile {
     pub profile_id: String,
     pub scenario_id: Option<String>,
@@ -1089,9 +1130,9 @@ fn inspect_temporal_capabilities(model: &ModelIr) -> InspectTemporalCapabilities
         support_level: "backend_specific".to_string(),
         explicit_status: "complete".to_string(),
         solver_status: "bounded_or_unavailable".to_string(),
-        reason: "temporal semantics are backend-specific: explicit evaluates over the reachable graph, mock-bmc is bounded-only, and current SAT/SMT/command adapters do not lower temporal formulas".to_string(),
-        fairness_support: "explicit_only".to_string(),
-        fairness_kinds: vec!["weak".to_string(), "strong".to_string()],
+        reason: "temporal semantics are backend-specific: explicit evaluates over the reachable graph, mock-bmc is bounded-only, current SAT/SMT/command adapters do not lower temporal formulas, and fairness assumptions are not modeled yet".to_string(),
+        fairness_support: "unsupported".to_string(),
+        fairness_kinds: Vec::new(),
         semantics_scope: "reachable_graph_or_bounded".to_string(),
         backend_statuses,
     }
@@ -1210,12 +1251,13 @@ pub fn inspect_model(request_id: &str, model: &ModelIr) -> InspectResponse {
     let parameter_domains = parameter_domains_by_conceptual_action(model);
     let expanded_counts = expanded_choice_counts(model);
     let analysis_profiles = inspect_analysis_profiles(model);
+    let default_profile_id = effective_default_profile_id(&analysis_profiles);
     InspectResponse {
         schema_version: "1.0.0".to_string(),
         request_id: request_id.to_string(),
         status: "ok".to_string(),
         model_id: model.model_id.clone(),
-        default_profile_id: "default".to_string(),
+        default_profile_id,
         machine_ir_ready: true,
         machine_ir_error: None,
         capabilities: InspectCapabilities {

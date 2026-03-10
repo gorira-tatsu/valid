@@ -42,10 +42,19 @@ The reduction metadata is intentionally review-oriented:
   Keep the main structure for overview or logic review.
 - `boundary_paths`
   Focus around failure-oriented or scoped review paths.
+- `focus_states`
+  Keep profile-driven state/property focus when a review profile narrows the
+  graph surface.
 - `deadlock_focus`
   Keep terminal/deadlock-oriented summaries.
 - `scc_condensation`
   Keep the condensed cyclic structure.
+
+When a project defines `valid.toml` analysis profiles, `graph --format=json`
+and generated docs now use the selected profile's `doc_graph_policy` for the
+overview snapshot. In practice that means profile-driven review artifacts can
+default to `boundary_paths` or `focus_states` without changing the top-level
+command shape.
 
 ## Review workflow
 

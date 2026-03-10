@@ -6,7 +6,7 @@ use std::{
 
 use serde_json::Value;
 
-use crate::project::{load_project_config, ProjectConfig};
+use crate::project::{load_project_config, project_runtime_env_vars, ProjectConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExternalTargetOptions {
@@ -71,6 +71,8 @@ pub struct RegistryCommandRequest {
     pub format: Option<String>,
     pub view: Option<String>,
     pub property_id: Option<String>,
+    pub profile_id: Option<String>,
+    pub scenario_id: Option<String>,
     pub backend: Option<String>,
     pub solver_executable: Option<String>,
     pub solver_args: Vec<String>,
@@ -289,6 +291,7 @@ pub fn run_prepared_registry_command(prepared: &PreparedRegistryCommand) -> Resu
         &prepared.target,
         &prepared.command,
         &prepared.environment,
+        prepared.project_config.as_ref(),
     )
 }
 
@@ -359,6 +362,7 @@ fn execute_registry_binary(
     target: &ExternalTarget,
     request: &RegistryCommandRequest,
     environment: &RegistryCommandEnvironment,
+    project_config: Option<&ProjectConfig>,
 ) -> Result<Output, String> {
     let mut command = Command::new(registry_binary);
     command.current_dir(project_root(target.manifest_path.as_deref()));
@@ -370,6 +374,11 @@ fn execute_registry_binary(
     }
     if let Some(model_name) = &environment.model_name {
         command.env("VALID_REGISTRY_MODEL_NAME", model_name);
+    }
+    if let Some(config) = project_config {
+        for (key, value) in project_runtime_env_vars(config)? {
+            command.env(key, value);
+        }
     }
     for arg in registry_command_args(request) {
         command.arg(arg);
@@ -415,6 +424,16 @@ fn registry_command_args(request: &RegistryCommandRequest) -> Vec<String> {
     if command_supports_property(&command_name) {
         if let Some(property_id) = &request.property_id {
             args.push(format!("--property={property_id}"));
+        }
+    }
+    if command_supports_profile(&command_name) {
+        if let Some(profile_id) = &request.profile_id {
+            args.push(format!("--profile={profile_id}"));
+        }
+    }
+    if command_supports_scenario(&command_name) {
+        if let Some(scenario_id) = &request.scenario_id {
+            args.push(format!("--scenario={scenario_id}"));
         }
     }
     if command_supports_seed(&command_name) {
@@ -503,6 +522,29 @@ fn command_supports_property(command: &str) -> bool {
             | "replay"
             | "all"
             | "handoff"
+    )
+}
+
+fn command_supports_profile(command: &str) -> bool {
+    matches!(
+        command,
+        "check"
+            | "graph"
+            | "doc"
+            | "handoff"
+            | "explain"
+            | "testgen"
+            | "orchestrate"
+            | "coverage"
+            | "benchmark"
+            | "migrate"
+    )
+}
+
+fn command_supports_scenario(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "explain" | "coverage" | "orchestrate" | "trace"
     )
 }
 

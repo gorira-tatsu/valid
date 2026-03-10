@@ -87,13 +87,42 @@ struct ActionGraphSummary {
 }
 
 pub fn build_graph_snapshot(response: &InspectResponse, view: GraphView) -> GraphSnapshot {
-    let reduction = match view {
-        GraphView::Overview | GraphView::Logic => "full",
-        GraphView::Failure => "boundary_paths",
-        GraphView::Deadlock => "deadlock_focus",
-        GraphView::Scc => "scc_condensation",
+    build_graph_snapshot_for_profile(response, view, None)
+}
+
+pub fn graph_reduction_for_profile(
+    response: &InspectResponse,
+    view: GraphView,
+    profile_id: Option<&str>,
+) -> String {
+    match view {
+        GraphView::Overview | GraphView::Logic => profile_id
+            .and_then(|selected| {
+                response
+                    .analysis_profiles
+                    .iter()
+                    .find(|profile| profile.profile_id == selected)
+                    .or_else(|| {
+                        response
+                            .analysis_profiles
+                            .iter()
+                            .find(|profile| profile.profile_id == response.default_profile_id)
+                    })
+            })
+            .map(|profile| profile.doc_graph_policy.clone())
+            .unwrap_or_else(|| "full".to_string()),
+        GraphView::Failure => "boundary_paths".to_string(),
+        GraphView::Deadlock => "deadlock_focus".to_string(),
+        GraphView::Scc => "scc_condensation".to_string(),
     }
-    .to_string();
+}
+
+pub fn build_graph_snapshot_for_profile(
+    response: &InspectResponse,
+    view: GraphView,
+    profile_id: Option<&str>,
+) -> GraphSnapshot {
+    let reduction = graph_reduction_for_profile(response, view, profile_id);
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     for field in &response.state_field_details {
@@ -146,8 +175,8 @@ pub fn build_graph_snapshot(response: &InspectResponse, view: GraphView) -> Grap
             }
         }
     }
-    let focus_indices = match view {
-        GraphView::Failure => response
+    let focus_indices = match reduction.as_str() {
+        "boundary_paths" => response
             .transition_details
             .iter()
             .enumerate()
@@ -159,7 +188,13 @@ pub fn build_graph_snapshot(response: &InspectResponse, view: GraphView) -> Grap
                     .then_some(index)
             })
             .collect(),
-        GraphView::Deadlock => response
+        "focus_states" => response
+            .property_details
+            .iter()
+            .enumerate()
+            .filter_map(|(index, property)| property.scope_expr.is_some().then_some(index))
+            .collect(),
+        "deadlock_focus" => response
             .property_details
             .iter()
             .enumerate()
