@@ -1,7 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
 };
 
 use serde_json::Value;
@@ -56,6 +56,46 @@ pub struct RegistryBuildOptions {
     pub locked: bool,
     pub offline: bool,
     pub extra_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryCommandRequest {
+    pub command: String,
+    pub model: Option<String>,
+    pub extra_positionals: Vec<String>,
+    pub seed: Option<u64>,
+    pub repeat: Option<usize>,
+    pub baseline_mode: Option<String>,
+    pub threshold_percent: Option<u32>,
+    pub strategy: Option<String>,
+    pub format: Option<String>,
+    pub view: Option<String>,
+    pub property_id: Option<String>,
+    pub backend: Option<String>,
+    pub solver_executable: Option<String>,
+    pub solver_args: Vec<String>,
+    pub actions: Vec<String>,
+    pub focus_action_id: Option<String>,
+    pub json: bool,
+    pub progress_json: bool,
+    pub write_path: Option<String>,
+    pub check: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryCommandEnvironment {
+    pub manifest_path: Option<String>,
+    pub file: Option<String>,
+    pub model_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedRegistryCommand {
+    pub target: ExternalTarget,
+    pub command: RegistryCommandRequest,
+    pub environment: RegistryCommandEnvironment,
+    pub build_options: RegistryBuildOptions,
+    pub project_config: Option<ProjectConfig>,
 }
 
 pub fn project_root(manifest_path: Option<&str>) -> PathBuf {
@@ -190,6 +230,76 @@ pub fn build_registry_binary(
         .ok_or_else(|| format!("failed to locate built executable for `{}`", target.name))
 }
 
+pub fn prepare_registry_command(
+    target_options: &ExternalTargetOptions,
+    mut request: RegistryCommandRequest,
+) -> Result<PreparedRegistryCommand, String> {
+    let discovered = discover_external_project(target_options)?;
+    if let Some(config) = &discovered.config {
+        if request.backend.is_none() {
+            request.backend = config
+                .default_backend
+                .clone()
+                .filter(|value| !value.trim().is_empty());
+        }
+        if request.property_id.is_none() {
+            request.property_id = config
+                .default_property
+                .clone()
+                .filter(|value| !value.trim().is_empty());
+        }
+        if request.solver_executable.is_none() {
+            request.solver_executable = config
+                .default_solver_executable
+                .clone()
+                .filter(|value| !value.trim().is_empty());
+        }
+        if request.solver_args.is_empty() && !config.default_solver_args.is_empty() {
+            request.solver_args = config.default_solver_args.clone();
+        }
+    }
+
+    let mut build_options = RegistryBuildOptions::default();
+    if matches!(request.backend.as_deref(), Some("sat-varisat")) {
+        build_options
+            .extra_features
+            .push("varisat-backend".to_string());
+    }
+
+    let target = resolve_external_target(&discovered.options)?;
+    let environment = RegistryCommandEnvironment {
+        manifest_path: discovered.options.manifest_path.clone(),
+        file: discovered.options.file.clone(),
+        model_name: request.model.clone(),
+    };
+
+    Ok(PreparedRegistryCommand {
+        target,
+        command: request,
+        environment,
+        build_options,
+        project_config: discovered.config,
+    })
+}
+
+pub fn run_prepared_registry_command(prepared: &PreparedRegistryCommand) -> Result<Output, String> {
+    let registry_binary = build_registry_binary(&prepared.target, &prepared.build_options)?;
+    execute_registry_binary(
+        &registry_binary,
+        &prepared.target,
+        &prepared.command,
+        &prepared.environment,
+    )
+}
+
+pub fn run_registry_command(
+    target_options: &ExternalTargetOptions,
+    request: RegistryCommandRequest,
+) -> Result<Output, String> {
+    let prepared = prepare_registry_command(target_options, request)?;
+    run_prepared_registry_command(&prepared)
+}
+
 fn default_build_features(target: &ExternalTarget) -> Vec<String> {
     let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if project_root(target.manifest_path.as_deref()) == built_in_manifest_dir
@@ -242,6 +352,193 @@ fn parse_executable_path(stdout: &[u8], target: &ExternalTarget) -> Option<Strin
         }
     }
     executable
+}
+
+fn execute_registry_binary(
+    registry_binary: &str,
+    target: &ExternalTarget,
+    request: &RegistryCommandRequest,
+    environment: &RegistryCommandEnvironment,
+) -> Result<Output, String> {
+    let mut command = Command::new(registry_binary);
+    command.current_dir(project_root(target.manifest_path.as_deref()));
+    if let Some(manifest_path) = &environment.manifest_path {
+        command.env("VALID_REGISTRY_MANIFEST_PATH", manifest_path);
+    }
+    if let Some(file) = &environment.file {
+        command.env("VALID_REGISTRY_FILE", file);
+    }
+    if let Some(model_name) = &environment.model_name {
+        command.env("VALID_REGISTRY_MODEL_NAME", model_name);
+    }
+    for arg in registry_command_args(request) {
+        command.arg(arg);
+    }
+    command
+        .output()
+        .map_err(|err| format!("failed to execute target registry `{registry_binary}`: {err}"))
+}
+
+fn registry_command_args(request: &RegistryCommandRequest) -> Vec<String> {
+    let command_name = normalize_registry_command(&request.command);
+    let mut args = vec![command_name.clone()];
+    if let Some(model) = &request.model {
+        args.push(model.clone());
+    }
+    args.extend(request.extra_positionals.clone());
+    if command_name == "benchmark" {
+        if let Some(repeat) = request.repeat {
+            args.push(format!("--repeat={repeat}"));
+        }
+        if let Some(baseline_mode) = &request.baseline_mode {
+            args.push(format!("--baseline={baseline_mode}"));
+        }
+        if let Some(threshold_percent) = request.threshold_percent {
+            args.push(format!("--threshold-percent={threshold_percent}"));
+        }
+    }
+    if command_supports_strategy(&command_name) {
+        if let Some(strategy) = &request.strategy {
+            args.push(format!("--strategy={strategy}"));
+        }
+    }
+    if command_supports_format(&command_name) {
+        if let Some(format) = &request.format {
+            args.push(format!("--format={format}"));
+        }
+    }
+    if command_supports_view(&command_name) {
+        if let Some(view) = &request.view {
+            args.push(format!("--view={view}"));
+        }
+    }
+    if command_supports_property(&command_name) {
+        if let Some(property_id) = &request.property_id {
+            args.push(format!("--property={property_id}"));
+        }
+    }
+    if command_supports_seed(&command_name) {
+        if let Some(seed) = request.seed {
+            args.push(format!("--seed={seed}"));
+        }
+    }
+    if command_supports_backend(&command_name) {
+        if let Some(backend) = &request.backend {
+            args.push(format!("--backend={backend}"));
+        }
+    }
+    if command_supports_solver(&command_name) {
+        if let Some(solver_executable) = &request.solver_executable {
+            args.push("--solver-exec".to_string());
+            args.push(solver_executable.clone());
+        }
+        for solver_arg in &request.solver_args {
+            args.push("--solver-arg".to_string());
+            args.push(solver_arg.clone());
+        }
+    }
+    if command_supports_focus_action(&command_name) {
+        if let Some(focus_action_id) = &request.focus_action_id {
+            args.push(format!("--focus-action={focus_action_id}"));
+        }
+    }
+    if command_supports_actions(&command_name) && !request.actions.is_empty() {
+        args.push(format!("--actions={}", request.actions.join(",")));
+    }
+    if command_supports_write_path(&command_name) {
+        if let Some(write_path) = &request.write_path {
+            if write_path.is_empty() {
+                args.push("--write".to_string());
+            } else {
+                args.push(format!("--write={write_path}"));
+            }
+        }
+    }
+    if command_supports_check_flag(&command_name) && request.check {
+        args.push("--check".to_string());
+    }
+    if request.json {
+        args.push("--json".to_string());
+    }
+    if request.progress_json {
+        args.push("--progress=json".to_string());
+    }
+    args
+}
+
+fn normalize_registry_command(command: &str) -> String {
+    match command {
+        "models" => "list",
+        "diagram" => "graph",
+        "readiness" => "lint",
+        "verify" => "check",
+        "bench" => "benchmark",
+        "suite" => "all",
+        "generate-tests" => "testgen",
+        other => other,
+    }
+    .to_string()
+}
+
+fn command_supports_backend(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "benchmark" | "orchestrate" | "testgen" | "trace" | "coverage"
+    )
+}
+
+fn command_supports_solver(command: &str) -> bool {
+    command_supports_backend(command)
+}
+
+fn command_supports_property(command: &str) -> bool {
+    matches!(
+        command,
+        "check"
+            | "benchmark"
+            | "graph"
+            | "testgen"
+            | "trace"
+            | "coverage"
+            | "replay"
+            | "all"
+            | "handoff"
+    )
+}
+
+fn command_supports_seed(command: &str) -> bool {
+    matches!(
+        command,
+        "check" | "testgen" | "trace" | "coverage" | "orchestrate" | "all"
+    )
+}
+
+fn command_supports_strategy(command: &str) -> bool {
+    matches!(command, "testgen")
+}
+
+fn command_supports_format(command: &str) -> bool {
+    matches!(command, "graph")
+}
+
+fn command_supports_view(command: &str) -> bool {
+    matches!(command, "graph")
+}
+
+fn command_supports_focus_action(command: &str) -> bool {
+    matches!(command, "replay" | "testgen")
+}
+
+fn command_supports_actions(command: &str) -> bool {
+    matches!(command, "replay")
+}
+
+fn command_supports_write_path(command: &str) -> bool {
+    matches!(command, "migrate" | "doc" | "handoff")
+}
+
+fn command_supports_check_flag(command: &str) -> bool {
+    matches!(command, "migrate" | "doc" | "handoff")
 }
 
 fn target_from_file(manifest_path: Option<String>, file: &str) -> Result<ExternalTarget, String> {

@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{self, Command},
 };
@@ -35,9 +35,8 @@ use valid::{
     evidence::{render_outcome_json, render_outcome_text},
     external_registry::{
         discover_external_project as discover_external_registry_project,
-        project_root as external_project_root,
-        resolve_external_target as resolve_external_registry_target, ExternalTarget,
-        ExternalTargetKind, ExternalTargetOptions,
+        project_root as external_project_root, run_registry_command, ExternalTargetOptions,
+        RegistryCommandRequest,
     },
     handoff::{
         check_handoff, default_handoff_path, generate_handoff, render_handoff_check_json,
@@ -255,16 +254,10 @@ fn run_external_registry(parsed: CliArgs) -> ! {
         run_external_benchmark(parsed);
     }
 
-    let status = build_external_command(&parsed)
-        .status()
-        .unwrap_or_else(|err| {
-            message_exit(
-                &parsed.command,
-                parsed.json,
-                &format!("failed to execute target registry: {err}"),
-                None,
-            );
-        });
+    let output = run_external_command(&parsed);
+    let _ = io::stdout().write_all(&output.stdout);
+    let _ = io::stderr().write_all(&output.stderr);
+    let status = output.status;
     process::exit(to_exit_code(status.code().unwrap_or(ExitCode::Error.code())).code());
 }
 
@@ -286,7 +279,7 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
 
     for (index, model) in models.into_iter().enumerate() {
         progress.item_start(index, total, &model);
-        let output = build_external_command(&CliArgs {
+        let output = run_external_command(&CliArgs {
             command: "benchmark".to_string(),
             model: Some(model.clone()),
             seed: parsed.seed,
@@ -316,15 +309,6 @@ fn run_external_benchmark(parsed: CliArgs) -> ! {
             write_path: None,
             check: false,
             extra_positionals: Vec::new(),
-        })
-        .output()
-        .unwrap_or_else(|err| {
-            message_exit(
-                "benchmark",
-                parsed.json,
-                &format!("failed to execute target registry: {err}"),
-                None,
-            );
         });
         let code = to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code()));
         aggregate_status = aggregate_status.aggregate(code);
@@ -366,7 +350,7 @@ fn run_external_all(parsed: CliArgs) -> ! {
 
     for (index, run) in runs.into_iter().enumerate() {
         progress.item_start(index, total, &run.model_id);
-        let mut command = build_external_command(&CliArgs {
+        let output = run_external_command(&CliArgs {
             command: "check".to_string(),
             model: Some(run.model_id.clone()),
             seed: parsed.seed,
@@ -396,14 +380,6 @@ fn run_external_all(parsed: CliArgs) -> ! {
             write_path: None,
             check: false,
             extra_positionals: Vec::new(),
-        });
-        let output = command.output().unwrap_or_else(|err| {
-            message_exit(
-                "all",
-                parsed.json,
-                &format!("failed to execute target registry: {err}"),
-                None,
-            );
         });
         let code = to_exit_code(output.status.code().unwrap_or(ExitCode::Error.code()));
         aggregate_status = aggregate_status.aggregate(code);
@@ -456,192 +432,8 @@ fn run_external_all(parsed: CliArgs) -> ! {
     process::exit(aggregate_status.code());
 }
 
-fn build_external_command(parsed: &CliArgs) -> Command {
-    let target = resolve_external_target(parsed);
-    let mut command = Command::new("cargo");
-    command.arg("run");
-    command.arg("--quiet");
-    let mut features = Vec::new();
-    if external_target_requires_runtime_feature(parsed, &target) {
-        features.push("verification-runtime");
-    }
-    if matches!(parsed.backend.as_deref(), Some("sat-varisat")) {
-        features.push("varisat-backend");
-    }
-    if !features.is_empty() {
-        command.arg("--features").arg(features.join(","));
-    }
-    if let Some(manifest_path) = target.manifest_path {
-        command.arg("--manifest-path").arg(manifest_path);
-    }
-    command.arg(target.kind.cargo_flag()).arg(target.name);
-    if let Some(manifest_path) = &parsed.manifest_path {
-        command.env("VALID_REGISTRY_MANIFEST_PATH", manifest_path);
-    }
-    if let Some(file) = &parsed.file {
-        command.env("VALID_REGISTRY_FILE", file);
-    }
-    if let Some(model) = &parsed.model {
-        command.env("VALID_REGISTRY_MODEL_NAME", model);
-    }
-    command.arg("--");
-    command.arg(&parsed.command);
-    if let Some(model) = &parsed.model {
-        command.arg(model);
-    }
-    for extra in &parsed.extra_positionals {
-        command.arg(extra);
-    }
-    if parsed.command == "benchmark" && parsed.repeat > 0 {
-        command.arg(format!("--repeat={}", parsed.repeat));
-    }
-    if parsed.command == "benchmark" {
-        if let Some(baseline_mode) = &parsed.baseline_mode {
-            command.arg(format!("--baseline={baseline_mode}"));
-        }
-        if let Some(threshold_percent) = parsed.threshold_percent {
-            command.arg(format!("--threshold-percent={threshold_percent}"));
-        }
-    }
-    if command_supports_strategy(&parsed.command) {
-        if let Some(strategy) = &parsed.strategy {
-            command.arg(format!("--strategy={strategy}"));
-        }
-    }
-    if command_supports_format(&parsed.command) {
-        if let Some(format) = &parsed.format {
-            command.arg(format!("--format={format}"));
-        }
-    }
-    if command_supports_view(&parsed.command) {
-        if let Some(view) = &parsed.view {
-            command.arg(format!("--view={view}"));
-        }
-    }
-    if command_supports_property(&parsed.command) {
-        if let Some(property_id) = &parsed.property_id {
-            command.arg(format!("--property={property_id}"));
-        }
-    }
-    if command_supports_seed(&parsed.command) {
-        if let Some(seed) = parsed.seed {
-            command.arg(format!("--seed={seed}"));
-        }
-    }
-    if command_supports_backend(&parsed.command) {
-        if let Some(backend) = &parsed.backend {
-            command.arg(format!("--backend={backend}"));
-        }
-    }
-    if command_supports_solver(&parsed.command) {
-        if let Some(solver_executable) = &parsed.solver_executable {
-            command.arg("--solver-exec").arg(solver_executable);
-        }
-        for solver_arg in &parsed.solver_args {
-            command.arg("--solver-arg").arg(solver_arg);
-        }
-    }
-    if command_supports_focus_action(&parsed.command) {
-        if let Some(focus_action_id) = &parsed.focus_action_id {
-            command.arg(format!("--focus-action={focus_action_id}"));
-        }
-    }
-    if command_supports_actions(&parsed.command) && !parsed.actions.is_empty() {
-        command.arg(format!("--actions={}", parsed.actions.join(",")));
-    }
-    if command_supports_write_path(&parsed.command) {
-        if let Some(write_path) = &parsed.write_path {
-            if write_path.is_empty() {
-                command.arg("--write");
-            } else {
-                command.arg(format!("--write={write_path}"));
-            }
-        }
-    }
-    if command_supports_check_flag(&parsed.command) && parsed.check {
-        command.arg("--check");
-    }
-    if parsed.json {
-        command.arg("--json");
-    }
-    if parsed.progress_json {
-        command.arg("--progress=json");
-    }
-    command
-}
-
-fn command_supports_backend(command: &str) -> bool {
-    matches!(
-        command,
-        "check" | "verify" | "benchmark" | "orchestrate" | "testgen" | "trace" | "coverage"
-    )
-}
-
-fn command_supports_solver(command: &str) -> bool {
-    command_supports_backend(command)
-}
-
-fn command_supports_property(command: &str) -> bool {
-    matches!(
-        command,
-        "check"
-            | "verify"
-            | "benchmark"
-            | "graph"
-            | "testgen"
-            | "trace"
-            | "coverage"
-            | "replay"
-            | "all"
-    )
-}
-
-fn command_supports_seed(command: &str) -> bool {
-    matches!(
-        command,
-        "check" | "verify" | "testgen" | "trace" | "coverage" | "orchestrate" | "all"
-    )
-}
-
-fn command_supports_strategy(command: &str) -> bool {
-    matches!(command, "testgen" | "generate-tests")
-}
-
-fn command_supports_format(command: &str) -> bool {
-    matches!(command, "graph")
-}
-
-fn command_supports_view(command: &str) -> bool {
-    matches!(command, "graph")
-}
-
-fn command_supports_focus_action(command: &str) -> bool {
-    matches!(command, "replay" | "testgen" | "generate-tests")
-}
-
-fn command_supports_actions(command: &str) -> bool {
-    matches!(command, "replay")
-}
-
-fn command_supports_write_path(command: &str) -> bool {
-    matches!(command, "migrate" | "doc" | "handoff")
-}
-
-fn command_supports_check_flag(command: &str) -> bool {
-    matches!(command, "migrate" | "doc" | "handoff")
-}
-
-fn external_target_requires_runtime_feature(parsed: &CliArgs, target: &ExternalTarget) -> bool {
-    let built_in_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    external_project_root(parsed.manifest_path.as_deref()) == built_in_manifest_dir
-        && matches!(
-            target.kind,
-            ExternalTargetKind::Example | ExternalTargetKind::Bin
-        )
-}
-
 fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
-    let output = build_external_command(&CliArgs {
+    let output = run_external_command(&CliArgs {
         command: "list".to_string(),
         model: None,
         seed: None,
@@ -671,15 +463,6 @@ fn fetch_external_models(parsed: &CliArgs) -> Vec<String> {
         write_path: None,
         check: false,
         extra_positionals: Vec::new(),
-    })
-    .output()
-    .unwrap_or_else(|err| {
-        message_exit(
-            "list",
-            true,
-            &format!("failed to execute target registry: {err}"),
-            None,
-        );
     });
     if !output.status.success() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -2268,14 +2051,49 @@ fn maybe_auto_discover_external(mut parsed: CliArgs) -> CliArgs {
     parsed
 }
 
-fn resolve_external_target(parsed: &CliArgs) -> ExternalTarget {
-    resolve_external_registry_target(&ExternalTargetOptions {
-        manifest_path: parsed.manifest_path.clone(),
-        file: parsed.file.clone(),
-        example: parsed.example.clone(),
-        bin: parsed.bin.clone(),
+fn build_external_request(parsed: &CliArgs) -> RegistryCommandRequest {
+    RegistryCommandRequest {
+        command: parsed.command.clone(),
+        model: parsed.model.clone(),
+        extra_positionals: parsed.extra_positionals.clone(),
+        seed: parsed.seed,
+        repeat: (parsed.repeat > 0).then_some(parsed.repeat),
+        baseline_mode: parsed.baseline_mode.clone(),
+        threshold_percent: parsed.threshold_percent,
+        strategy: parsed.strategy.clone(),
+        format: parsed.format.clone(),
+        view: parsed.view.clone(),
+        property_id: parsed.property_id.clone(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+        actions: parsed.actions.clone(),
+        focus_action_id: parsed.focus_action_id.clone(),
+        json: parsed.json,
+        progress_json: parsed.progress_json,
+        write_path: parsed.write_path.clone(),
+        check: parsed.check,
+    }
+}
+
+fn run_external_command(parsed: &CliArgs) -> process::Output {
+    run_registry_command(
+        &ExternalTargetOptions {
+            manifest_path: parsed.manifest_path.clone(),
+            file: parsed.file.clone(),
+            example: parsed.example.clone(),
+            bin: parsed.bin.clone(),
+        },
+        build_external_request(parsed),
+    )
+    .unwrap_or_else(|err| {
+        message_exit(
+            &parsed.command,
+            parsed.json,
+            &format!("failed to execute target registry: {err}"),
+            None,
+        )
     })
-    .unwrap_or_else(|message| usage_exit(&message))
 }
 
 fn parse_models_json(stdout: &str) -> Vec<String> {
@@ -2355,7 +2173,7 @@ fn inspect_completion_candidates_cargo(
         || parsed.example.is_some()
         || parsed.bin.is_some()
     {
-        let output = build_external_command(&CliArgs {
+        let output = run_external_command(&CliArgs {
             command: "inspect".to_string(),
             model: Some(model.to_string()),
             seed: None,
@@ -2385,12 +2203,7 @@ fn inspect_completion_candidates_cargo(
             write_path: None,
             check: false,
             extra_positionals: Vec::new(),
-        })
-        .output()
-        .ok();
-        let Some(output) = output else {
-            return Vec::new();
-        };
+        });
         if !output.status.success() {
             return Vec::new();
         }
@@ -2878,8 +2691,8 @@ mod tests {
     }
 
     #[test]
-    fn build_external_command_appends_extra_positionals_after_model() {
-        let command = build_external_command(&CliArgs {
+    fn build_external_request_appends_extra_positionals_after_model() {
+        let request = build_external_request(&CliArgs {
             manifest_path: Some("Cargo.toml".to_string()),
             file: Some("examples/valid_models.rs".to_string()),
             command: "contract".to_string(),
@@ -2888,33 +2701,21 @@ mod tests {
             json: true,
             ..CliArgs::default()
         });
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
-        assert!(args.ends_with(&[
-            "--".to_string(),
-            "contract".to_string(),
-            "check".to_string(),
-            "valid.lock.json".to_string(),
-            "--json".to_string(),
-        ]));
+        assert_eq!(request.command, "contract");
+        assert_eq!(request.model.as_deref(), Some("check"));
+        assert_eq!(request.extra_positionals, vec!["valid.lock.json"]);
+        assert!(request.json);
     }
 
     #[test]
-    fn build_external_command_runs_cargo_quietly() {
-        let command = build_external_command(&CliArgs {
+    fn build_external_request_keeps_varisat_backend_selection() {
+        let request = build_external_request(&CliArgs {
             manifest_path: Some("Cargo.toml".to_string()),
             file: Some("examples/valid_models.rs".to_string()),
-            command: "list".to_string(),
+            command: "check".to_string(),
+            backend: Some("sat-varisat".to_string()),
             ..CliArgs::default()
         });
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
-        assert!(args.starts_with(&["run".to_string(), "--quiet".to_string()]));
+        assert_eq!(request.backend.as_deref(), Some("sat-varisat"));
     }
 }

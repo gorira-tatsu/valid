@@ -44,7 +44,7 @@ use valid::{
     evidence::{render_outcome_json, render_outcome_text, write_outcome_artifacts},
     external_registry::{
         build_registry_binary, discover_external_project, resolve_external_target,
-        ExternalTargetOptions, RegistryBuildOptions,
+        run_registry_command, ExternalTargetOptions, RegistryBuildOptions, RegistryCommandRequest,
     },
     frontend::compile_model,
     handoff::{
@@ -1113,6 +1113,46 @@ fn should_delegate_project_target(path: &str) -> bool {
     !is_bundled_model_ref(path) && !target_looks_like_file(path) && current_project_root().is_some()
 }
 
+fn project_registry_request(command: &str, parsed: &ParsedArgs) -> RegistryCommandRequest {
+    RegistryCommandRequest {
+        command: command.to_string(),
+        model: Some(parsed.path.clone()),
+        extra_positionals: Vec::new(),
+        seed: parsed.seed,
+        repeat: parsed.repeat,
+        baseline_mode: parsed.baseline_mode.clone(),
+        threshold_percent: parsed.threshold_percent,
+        strategy: parsed.extra.clone(),
+        format: parsed.format.clone(),
+        view: parsed.view.clone(),
+        property_id: parsed.property_id.clone(),
+        backend: parsed.backend.clone(),
+        solver_executable: parsed.solver_executable.clone(),
+        solver_args: parsed.solver_args.clone(),
+        actions: parsed.actions.clone(),
+        focus_action_id: parsed.focus_action_id.clone(),
+        json: parsed.json,
+        progress_json: parsed.progress_json,
+        write_path: parsed.write_path.clone(),
+        check: parsed.check,
+    }
+}
+
+fn run_project_registry_command(
+    command: &str,
+    request: RegistryCommandRequest,
+    json: bool,
+) -> process::Output {
+    run_registry_command(&ExternalTargetOptions::default(), request).unwrap_or_else(|error| {
+        message_exit(
+            command,
+            json,
+            &format!("failed to run project-mode command: {error}"),
+            None,
+        )
+    })
+}
+
 fn run_cargo_valid_subcommand(command: &str, args: &[String], json: bool) -> ! {
     let mut process = if let Some(path) = sibling_cargo_valid_binary().filter(|path| path.exists())
     {
@@ -1143,7 +1183,14 @@ fn run_cargo_valid_subcommand(command: &str, args: &[String], json: bool) -> ! {
 
 fn delegate_project_target(command: &str, parsed: &ParsedArgs) -> bool {
     if should_delegate_project_target(&parsed.path) {
-        run_cargo_valid_subcommand(command, &args_from_parsed(parsed), parsed.json);
+        let output = run_project_registry_command(
+            command,
+            project_registry_request(command, parsed),
+            parsed.json,
+        );
+        let _ = io::stdout().write_all(&output.stdout);
+        let _ = io::stderr().write_all(&output.stderr);
+        process::exit(output.status.code().unwrap_or(ExitCode::Error.code()));
     }
     false
 }
@@ -2768,7 +2815,19 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
 fn cmd_models(args: Vec<String>) {
     let json = detect_json_flag(&args);
     if current_project_root().is_some() {
-        run_cargo_valid_subcommand("models", &args, json);
+        let output = run_project_registry_command(
+            "models",
+            RegistryCommandRequest {
+                command: "models".to_string(),
+                model: None,
+                json,
+                ..RegistryCommandRequest::default()
+            },
+            json,
+        );
+        let _ = io::stdout().write_all(&output.stdout);
+        let _ = io::stderr().write_all(&output.stderr);
+        process::exit(output.status.code().unwrap_or(ExitCode::Error.code()));
     }
     message_exit(
         "models",
@@ -2813,7 +2872,14 @@ fn cmd_benchmark(args: Vec<String>) {
         },
     );
     if should_delegate_project_target(&parsed.path) {
-        run_cargo_valid_subcommand("benchmark", &args_from_parsed(&parsed), parsed.json);
+        let output = run_project_registry_command(
+            "benchmark",
+            project_registry_request("benchmark", &parsed),
+            parsed.json,
+        );
+        let _ = io::stdout().write_all(&output.stdout);
+        let _ = io::stderr().write_all(&output.stderr);
+        process::exit(output.status.code().unwrap_or(ExitCode::Error.code()));
     }
     message_exit(
         "benchmark",
@@ -2829,7 +2895,14 @@ fn cmd_migrate(args: Vec<String>) {
         "usage: valid migrate <target> [--json] [--progress=json] [--write[=<path>]] [--check]",
     );
     if should_delegate_project_target(&parsed.path) {
-        run_cargo_valid_subcommand("migrate", &args_from_parsed(&parsed), parsed.json);
+        let output = run_project_registry_command(
+            "migrate",
+            project_registry_request("migrate", &parsed),
+            parsed.json,
+        );
+        let _ = io::stdout().write_all(&output.stdout);
+        let _ = io::stderr().write_all(&output.stderr);
+        process::exit(output.status.code().unwrap_or(ExitCode::Error.code()));
     }
     message_exit(
         "migrate",
@@ -4829,40 +4902,62 @@ fn inspect_for_completion(target: Option<&str>) -> Option<valid::api::InspectRes
 }
 
 fn project_completion_candidates(kind: &str, target: Option<&str>) -> Vec<String> {
-    let mut args = vec![
-        "completion".to_string(),
-        "candidates".to_string(),
-        kind.to_string(),
-    ];
-    if let Some(target) = target {
-        args.push(target.to_string());
+    match kind {
+        "models" => {
+            let output = match run_registry_command(
+                &ExternalTargetOptions::default(),
+                RegistryCommandRequest {
+                    command: "models".to_string(),
+                    model: None,
+                    json: true,
+                    ..RegistryCommandRequest::default()
+                },
+            ) {
+                Ok(output) => output,
+                Err(_) => return Vec::new(),
+            };
+            if !output.status.success() {
+                return Vec::new();
+            }
+            child_stream_to_json(&output.stdout)
+                .get("models")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        }
+        "properties" | "actions" => {
+            let Some(target) = target else {
+                return Vec::new();
+            };
+            let output = match run_registry_command(
+                &ExternalTargetOptions::default(),
+                RegistryCommandRequest {
+                    command: "inspect".to_string(),
+                    model: Some(target.to_string()),
+                    json: true,
+                    ..RegistryCommandRequest::default()
+                },
+            ) {
+                Ok(output) => output,
+                Err(_) => return Vec::new(),
+            };
+            if !output.status.success() {
+                return Vec::new();
+            }
+            child_stream_to_json(&output.stdout)
+                .get(kind)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        }
+        _ => Vec::new(),
     }
-    let mut process = if let Some(path) = sibling_cargo_valid_binary().filter(|path| path.exists())
-    {
-        Command::new(path)
-    } else {
-        Command::new("cargo-valid")
-    };
-    let output = process
-        .current_dir(
-            current_project_root()
-                .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
-        )
-        .args(args)
-        .output()
-        .ok();
-    let Some(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 fn cmd_schema(args: Vec<String>) {
