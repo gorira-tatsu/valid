@@ -1060,6 +1060,7 @@ fn cli_root_help_and_version_are_human_readable() {
     let help_stdout = String::from_utf8_lossy(&help.stdout);
     assert!(help_stdout.contains("Project-first verification CLI"));
     assert!(help_stdout.contains("Commands"));
+    assert!(help_stdout.contains("models"));
     assert!(help_stdout.contains("mcp"));
     assert!(help_stdout.contains("Start the MCP server with project-first target discovery."));
 
@@ -1348,9 +1349,9 @@ fn cli_init_text_output_recommends_next_commands() {
     let stdout = String::from_utf8_lossy(&init.stdout);
     assert!(stdout.contains("Next Steps"));
     assert!(stdout.contains("valid init --check"));
-    assert!(stdout.contains("cargo valid models"));
-    assert!(stdout.contains("cargo valid inspect approval-model"));
-    assert!(stdout.contains("cargo valid handoff approval-model"));
+    assert!(stdout.contains("valid models"));
+    assert!(stdout.contains("valid inspect approval-model"));
+    assert!(stdout.contains("valid handoff approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1383,6 +1384,54 @@ fn cli_init_generated_project_reaches_cargo_valid_models() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("approval-model"));
+
+    let _ = fs::remove_dir_all(project_dir);
+}
+
+#[test]
+fn cli_project_mode_lists_and_inspects_models_via_valid() {
+    let project_dir = unique_temp_dir("valid-cli-project-mode");
+    fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+    let init = Command::new(binary_path())
+        .env("CARGO_NET_OFFLINE", "true")
+        .env("VALID_LOCAL_DEP_PATH", local_valid_dep_path())
+        .current_dir(&project_dir)
+        .arg("init")
+        .arg("--json")
+        .output()
+        .expect("valid init should run");
+    assert!(init.status.success());
+
+    rewrite_valid_dependency_to_local_path(&project_dir);
+
+    let models = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .env("CARGO_NET_OFFLINE", "true")
+        .arg("models")
+        .output()
+        .expect("valid models should run");
+    assert!(
+        models.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&models.stderr)
+    );
+    assert!(String::from_utf8_lossy(&models.stdout).contains("approval-model"));
+
+    let inspect = Command::new(binary_path())
+        .current_dir(&project_dir)
+        .env("CARGO_NET_OFFLINE", "true")
+        .arg("inspect")
+        .arg("approval-model")
+        .arg("--json")
+        .output()
+        .expect("valid inspect should run");
+    assert!(
+        inspect.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    assert!(String::from_utf8_lossy(&inspect.stdout).contains("\"model_id\":\"ApprovalModel\""));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1741,9 +1790,9 @@ fn cli_onboarding_text_output_recaps_first_value() {
     assert!(stdout.contains("Where To Look Next"));
     assert!(stdout.contains("artifacts/handoff/ApprovalModel.md"));
     assert!(stdout.contains("cargo build --quiet"));
-    assert!(stdout.contains("cargo valid models"));
-    assert!(stdout.contains("cargo valid inspect approval-model"));
-    assert!(stdout.contains("cargo valid handoff approval-model"));
+    assert!(stdout.contains("valid models"));
+    assert!(stdout.contains("valid inspect approval-model"));
+    assert!(stdout.contains("valid handoff approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }
@@ -1785,7 +1834,7 @@ fn cli_onboarding_interactive_shows_command_output_before_next_prompt() {
     assert!(stdout.contains("exit_code: 0"));
     assert!(stdout.contains("Press Enter for the next step"));
     assert!(stdout.contains("command: cargo build --quiet"));
-    assert!(stdout.contains("command: cargo valid inspect approval-model"));
+    assert!(stdout.contains("command: valid inspect approval-model"));
 
     let _ = fs::remove_dir_all(project_dir);
 }

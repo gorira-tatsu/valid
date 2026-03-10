@@ -1,7 +1,7 @@
 # valid
 
 Finite-state verification for business-rule models, with a Rust DSL and
-`cargo valid` as the main product path.
+`valid` as the main product path.
 
 `valid` is aimed at models such as authorization, pricing, entitlements, and
 stateful workflow rules. The main path is:
@@ -10,7 +10,7 @@ stateful workflow rules. The main path is:
 2. Run `valid init` once for a new project
 3. Write a model in Rust
 4. Export it through a small registry file
-5. Use `cargo valid` from the project root
+5. Use `valid` from the project root
 
 `.valid` files still work, but they are now the compatibility path rather than
 the primary one.
@@ -67,7 +67,7 @@ The product story is now:
 - Report both conceptual-action coverage and concrete-choice coverage
 - Generate Rust test files from counterexamples and witnesses
 - Rank and dedupe generated vectors for implementation handoff
-- Run Rust-defined models through `cargo-valid`
+- Run Rust-defined models through project-aware `valid` commands
 - Run the preferred embedded SAT path through `sat-varisat`
 - Report backend preference, selfcheck readiness, and parity readiness before a
   solver-backed run
@@ -105,7 +105,7 @@ above.
 That is enough to bootstrap a project, confirm the scaffold is healthy, inspect
 the starter model, render the first overview graph, and produce an
 implementation-facing handoff summary.
-Onboarding also warms the local Cargo build before the first `cargo valid ...`
+Onboarding also warms the local Cargo build before the first `valid ...`
 review step so later output stays centered on model results.
 
 As it runs, onboarding now explains:
@@ -176,10 +176,10 @@ The onboarding walkthrough is effectively:
 valid init
 valid init --check
 cargo build --quiet
-cargo valid models
-cargo valid inspect approval-model
-cargo valid graph approval-model --view=overview
-cargo valid handoff approval-model
+valid models
+valid inspect approval-model
+valid graph approval-model --view=overview
+valid handoff approval-model
 ```
 
 The main files to inspect after onboarding are:

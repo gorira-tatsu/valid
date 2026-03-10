@@ -86,6 +86,11 @@ enum ValidCommand {
     Init(InitArgs),
     Onboarding(OnboardingArgs),
     Doctor(JsonProgressArgs),
+    Models(JsonOnlyArgs),
+    #[command(alias = "bench")]
+    Benchmark(BenchmarkArgs),
+    Migrate(MigrateArgs),
+    Suite(SuiteArgs),
     #[command(alias = "verify")]
     Check(CommonModelArgs),
     Inspect(ModelPathArgs),
@@ -324,7 +329,7 @@ const ONBOARDING_STAGE_DESCRIPTORS: &[OnboardingStageDescriptor] = &[
         effect_kind: "build_warmup",
         effect_summary: "Builds the starter project, may create `Cargo.lock`, and populates local Cargo/target artifacts for faster follow-up commands.",
         key_paths: &["Cargo.toml", "Cargo.lock", "target/"],
-        expected_result: "Later `cargo valid ...` steps run with much less build noise and fail earlier if the toolchain is unhealthy.",
+        expected_result: "Later `valid ...` project commands run with much less build noise and fail earlier if the toolchain is unhealthy.",
         writes_repo_state: true,
         program: OnboardingProgram::Cargo,
         args: &["build", "--quiet"],
@@ -333,49 +338,49 @@ const ONBOARDING_STAGE_DESCRIPTORS: &[OnboardingStageDescriptor] = &[
     OnboardingStageDescriptor {
         stage_id: "list_models",
         title: "List Starter Models",
-        command: "cargo valid models",
+        command: "valid models",
         purpose: "Confirm that the registry loads and exposes the scaffolded starter model before deeper inspection.",
         effect_kind: "registry_review",
         effect_summary: "Runs a read-only registry listing to prove the starter model is discoverable.",
         key_paths: &["valid/registry.rs", "valid/models/mod.rs", "valid/models/approval.rs"],
         expected_result: "You see `approval-model` in the registry output.",
         writes_repo_state: false,
-        program: OnboardingProgram::Cargo,
-        args: &["valid", "models"],
-        repair_hint: Some("Run `valid doctor` to check Cargo and PATH, then rerun `cargo valid models` once project-first loading is healthy."),
+        program: OnboardingProgram::CurrentExe,
+        args: &["models"],
+        repair_hint: Some("Run `valid doctor` to check Cargo and PATH, then rerun `valid models` once project-first loading is healthy."),
     },
     OnboardingStageDescriptor {
         stage_id: "inspect_starter_model",
         title: "Inspect Starter Model",
-        command: "cargo valid inspect approval-model",
+        command: "valid inspect approval-model",
         purpose: "Show the starter model's state fields, actions, and properties so the user can read the contract before authoring anything.",
         effect_kind: "model_inspection",
         effect_summary: "Runs a read-only model inspection and prints the starter model structure.",
         key_paths: &["valid/models/approval.rs", "valid/registry.rs"],
         expected_result: "You can map the CLI output back to the starter model file and understand what the model currently expresses.",
         writes_repo_state: false,
-        program: OnboardingProgram::Cargo,
-        args: &["valid", "inspect", "approval-model"],
-        repair_hint: Some("Run `valid doctor` first, then `cargo valid inspect approval-model` after the registry and Cargo setup are healthy."),
+        program: OnboardingProgram::CurrentExe,
+        args: &["inspect", "approval-model"],
+        repair_hint: Some("Run `valid doctor` first, then `valid inspect approval-model` after the registry and Cargo setup are healthy."),
     },
     OnboardingStageDescriptor {
         stage_id: "graph_starter_model",
         title: "Render Starter Graph",
-        command: "cargo valid graph approval-model --view=overview",
+        command: "valid graph approval-model --view=overview",
         purpose: "Render the first graph view so the starter model is visible as a quick overview rather than only as Rust source.",
         effect_kind: "graph_render",
         effect_summary: "Runs a read-only graph render of the starter model overview.",
         key_paths: &["valid/models/approval.rs", "valid/registry.rs"],
         expected_result: "You get an overview graph that matches the starter model's fields, actions, and property.",
         writes_repo_state: false,
-        program: OnboardingProgram::Cargo,
-        args: &["valid", "graph", "approval-model", "--view=overview"],
-        repair_hint: Some("Run `valid doctor` and, if needed, `valid init --repair` before retrying `cargo valid graph approval-model --view=overview`."),
+        program: OnboardingProgram::CurrentExe,
+        args: &["graph", "approval-model", "--view=overview"],
+        repair_hint: Some("Run `valid doctor` and, if needed, `valid init --repair` before retrying `valid graph approval-model --view=overview`."),
     },
     OnboardingStageDescriptor {
         stage_id: "handoff_starter_model",
         title: "Generate Starter Handoff",
-        command: "cargo valid handoff approval-model",
+        command: "valid handoff approval-model",
         purpose: "Produce the implementation-facing handoff summary so the user can see the artifact that downstream engineers or AI tools would consume.",
         effect_kind: "artifact_generation",
         effect_summary: "Generates the starter handoff artifact and points at the file you can read next.",
@@ -386,9 +391,9 @@ const ONBOARDING_STAGE_DESCRIPTORS: &[OnboardingStageDescriptor] = &[
         ],
         expected_result: "You have a concrete handoff artifact on disk for the starter model.",
         writes_repo_state: true,
-        program: OnboardingProgram::Cargo,
-        args: &["valid", "handoff", "approval-model"],
-        repair_hint: Some("Run `valid doctor` first, then retry `cargo valid handoff approval-model` after inspect and graph are healthy."),
+        program: OnboardingProgram::CurrentExe,
+        args: &["handoff", "approval-model"],
+        repair_hint: Some("Run `valid doctor` first, then retry `valid handoff approval-model` after inspect and graph are healthy."),
     },
 ];
 
@@ -457,6 +462,56 @@ struct HandoffArgs {
     write: Option<String>,
     #[arg(long, action = ArgAction::SetTrue)]
     check: bool,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct BenchmarkArgs {
+    path: String,
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    repeat: Option<usize>,
+    #[arg(long, num_args = 0..=1, default_missing_value = "compare")]
+    baseline: Option<String>,
+    #[arg(long = "threshold-percent")]
+    threshold_percent: Option<u32>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct MigrateArgs {
+    path: String,
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    write: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    check: bool,
+    #[command(flatten)]
+    json_progress: JsonProgressArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+struct SuiteArgs {
+    #[arg(long)]
+    property: Option<String>,
+    #[arg(long)]
+    backend: Option<String>,
+    #[arg(long = "solver-exec")]
+    solver_exec: Option<String>,
+    #[arg(long = "solver-arg", allow_hyphen_values = true)]
+    solver_args: Vec<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    critical: bool,
+    #[arg(long = "suite")]
+    suite_name: Option<String>,
     #[command(flatten)]
     json_progress: JsonProgressArgs,
 }
@@ -622,6 +677,10 @@ fn main() {
         Some(ValidCommand::Init(args)) => cmd_init_from_parsed(args),
         Some(ValidCommand::Onboarding(args)) => cmd_onboarding_from_parsed(args),
         Some(ValidCommand::Doctor(args)) => cmd_doctor_from_parsed(args),
+        Some(ValidCommand::Models(args)) => cmd_models_from_parsed(args),
+        Some(ValidCommand::Benchmark(args)) => cmd_benchmark_from_parsed(benchmark_to_parsed(args)),
+        Some(ValidCommand::Migrate(args)) => cmd_migrate_from_parsed(migrate_to_parsed(args)),
+        Some(ValidCommand::Suite(args)) => cmd_suite_from_parsed(suite_to_parsed(args)),
         Some(ValidCommand::Check(args)) => cmd_check_from_parsed(common_to_parsed(args)),
         Some(ValidCommand::Inspect(args)) => cmd_inspect_from_parsed(model_to_parsed(args)),
         Some(ValidCommand::Graph(args)) => cmd_graph_from_parsed(graph_to_parsed(args)),
@@ -796,6 +855,47 @@ fn handoff_to_parsed(args: HandoffArgs) -> ParsedArgs {
     }
 }
 
+fn benchmark_to_parsed(args: BenchmarkArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        property_id: args.property,
+        repeat: args.repeat,
+        baseline_mode: args.baseline,
+        threshold_percent: args.threshold_percent,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        ..ParsedArgs::default()
+    }
+}
+
+fn migrate_to_parsed(args: MigrateArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        path: args.path,
+        write_path: args.write,
+        check: args.check,
+        ..ParsedArgs::default()
+    }
+}
+
+fn suite_to_parsed(args: SuiteArgs) -> ParsedArgs {
+    ParsedArgs {
+        json: args.json_progress.json,
+        progress_json: progress_flag(args.json_progress.progress.as_deref()),
+        property_id: args.property,
+        backend: args.backend,
+        solver_executable: args.solver_exec,
+        solver_args: args.solver_args,
+        critical: args.critical,
+        suite_name: args.suite_name,
+        ..ParsedArgs::default()
+    }
+}
+
 fn capabilities_to_parsed(args: CapabilitiesArgs) -> ParsedArgs {
     ParsedArgs {
         json: args.json_progress.json,
@@ -927,6 +1027,22 @@ fn cmd_commands_from_parsed(args: JsonOnlyArgs) {
         Vec::new()
     });
 }
+fn cmd_models_from_parsed(args: JsonOnlyArgs) {
+    let mut values = Vec::new();
+    if args.json {
+        values.push("--json".to_string());
+    }
+    cmd_models(values);
+}
+fn cmd_benchmark_from_parsed(parsed: ParsedArgs) {
+    cmd_benchmark(args_from_parsed(&parsed));
+}
+fn cmd_migrate_from_parsed(parsed: ParsedArgs) {
+    cmd_migrate(args_from_parsed(&parsed));
+}
+fn cmd_suite_from_parsed(parsed: ParsedArgs) {
+    cmd_suite(args_from_parsed(&parsed));
+}
 
 fn command_is_available(name: &str, arg: &str) -> bool {
     Command::new(name)
@@ -952,6 +1068,84 @@ fn current_exe_dir() -> Option<PathBuf> {
     env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from))
+}
+
+fn sibling_cargo_valid_binary() -> Option<PathBuf> {
+    current_exe_dir().map(|dir| {
+        let name = if cfg!(windows) {
+            "cargo-valid.exe"
+        } else {
+            "cargo-valid"
+        };
+        dir.join(name)
+    })
+}
+
+fn current_project_root() -> Option<PathBuf> {
+    discover_external_project(&ExternalTargetOptions {
+        manifest_path: None,
+        file: None,
+        example: None,
+        bin: None,
+    })
+    .ok()
+    .and_then(|discovered| {
+        discovered
+            .options
+            .manifest_path
+            .map(PathBuf::from)
+            .and_then(|manifest| manifest.parent().map(PathBuf::from))
+    })
+}
+
+fn target_looks_like_file(path: &str) -> bool {
+    if path.ends_with(".valid") {
+        return true;
+    }
+    let as_path = PathBuf::from(path);
+    as_path.exists()
+        || path.contains(std::path::MAIN_SEPARATOR)
+        || path.starts_with("./")
+        || path.starts_with("../")
+}
+
+fn should_delegate_project_target(path: &str) -> bool {
+    !is_bundled_model_ref(path) && !target_looks_like_file(path) && current_project_root().is_some()
+}
+
+fn run_cargo_valid_subcommand(command: &str, args: &[String], json: bool) -> ! {
+    let mut process = if let Some(path) = sibling_cargo_valid_binary().filter(|path| path.exists())
+    {
+        Command::new(path)
+    } else {
+        Command::new("cargo-valid")
+    };
+    let output = process
+        .current_dir(
+            current_project_root()
+                .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
+        )
+        .arg(command)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| {
+            message_exit(
+                command,
+                json,
+                &format!("failed to run project-mode command via cargo-valid: {error}"),
+                None,
+            )
+        });
+    let _ = io::stdout().write_all(&output.stdout);
+    let _ = io::stderr().write_all(&output.stderr);
+    process::exit(output.status.code().unwrap_or(ExitCode::Error.code()));
+}
+
+fn delegate_project_target(command: &str, parsed: &ParsedArgs) -> bool {
+    if should_delegate_project_target(&parsed.path) {
+        run_cargo_valid_subcommand(command, &args_from_parsed(parsed), parsed.json);
+    }
+    false
 }
 
 fn env_shell_name() -> Option<String> {
@@ -1780,14 +1974,14 @@ fn cmd_init_from_parsed(args: InitArgs) {
         }
         print!("{}", text_section("Next Steps"));
         println!("{}", text_bullet(&text_command("valid init --check")));
-        println!("{}", text_bullet(&text_command("cargo valid models")));
+        println!("{}", text_bullet(&text_command("valid models")));
         println!(
             "{}",
-            text_bullet(&text_command("cargo valid inspect approval-model"))
+            text_bullet(&text_command("valid inspect approval-model"))
         );
         println!(
             "{}",
-            text_bullet(&text_command("cargo valid handoff approval-model"))
+            text_bullet(&text_command("valid handoff approval-model"))
         );
     }
     progress.finish(ExitCode::Success);
@@ -2181,7 +2375,7 @@ fn finish_onboarding(
             },
             OnboardingNextPathSummary {
                 path_id: "generate_test_specs".to_string(),
-                summary: "Use `cargo valid testgen <model>` to produce language-agnostic test specs for implementation handoff.".to_string(),
+                summary: "Use `valid testgen <model>` to produce language-agnostic test specs for implementation handoff.".to_string(),
             },
             OnboardingNextPathSummary {
                 path_id: "connect_mcp".to_string(),
@@ -2235,14 +2429,14 @@ fn finish_onboarding(
         );
         print!("{}", text_section("Recap Commands"));
         println!("{}", text_bullet(&text_command("cargo build --quiet")));
-        println!("{}", text_bullet(&text_command("cargo valid models")));
+        println!("{}", text_bullet(&text_command("valid models")));
         println!(
             "{}",
-            text_bullet(&text_command("cargo valid inspect approval-model"))
+            text_bullet(&text_command("valid inspect approval-model"))
         );
         println!(
             "{}",
-            text_bullet(&text_command("cargo valid handoff approval-model"))
+            text_bullet(&text_command("valid handoff approval-model"))
         );
         print!("{}", text_section("Where To Look Next"));
         println!(
@@ -2252,7 +2446,7 @@ fn finish_onboarding(
         println!(
             "{}",
             text_bullet(
-                "valid/registry.rs: see how the starter model is exported to `cargo valid`"
+                "valid/registry.rs: see how the starter model is exported for project-mode `valid` commands"
             )
         );
         println!(
@@ -2520,6 +2714,25 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
     if let Some(focus_action_id) = &parsed.focus_action_id {
         args.push(format!("--focus-action={focus_action_id}"));
     }
+    if let Some(repeat) = parsed.repeat {
+        args.push(format!("--repeat={repeat}"));
+    }
+    if let Some(baseline_mode) = &parsed.baseline_mode {
+        args.push(if baseline_mode == "compare" {
+            "--baseline".to_string()
+        } else {
+            format!("--baseline={baseline_mode}")
+        });
+    }
+    if let Some(threshold_percent) = parsed.threshold_percent {
+        args.push(format!("--threshold-percent={threshold_percent}"));
+    }
+    if parsed.critical {
+        args.push("--critical".to_string());
+    }
+    if let Some(suite_name) = &parsed.suite_name {
+        args.push(format!("--suite={suite_name}"));
+    }
     if !parsed.actions.is_empty() {
         args.push(format!("--actions={}", parsed.actions.join(",")));
     }
@@ -2552,11 +2765,113 @@ fn args_from_parsed(parsed: &ParsedArgs) -> Vec<String> {
     args
 }
 
+fn cmd_models(args: Vec<String>) {
+    let json = detect_json_flag(&args);
+    if current_project_root().is_some() {
+        run_cargo_valid_subcommand("models", &args, json);
+    }
+    message_exit(
+        "models",
+        json,
+        "`valid models` requires a valid project in the current directory. Run `valid init` here, move into a scaffolded project, or use `cargo valid --registry <path> models` for an explicit Rust registry target.",
+        Some("usage: valid models [--json]"),
+    );
+}
+
+fn cmd_benchmark(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid benchmark <target> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]",
+        |arg, parsed| {
+            if let Some(value) = arg.strip_prefix("--repeat=") {
+                parsed.repeat = Some(value.parse().unwrap_or_else(|_| {
+                    usage_exit(
+                        "benchmark",
+                        parsed.json,
+                        "usage: valid benchmark <target> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]",
+                    )
+                }));
+                true
+            } else if arg == "--baseline" {
+                parsed.baseline_mode = Some("compare".to_string());
+                true
+            } else if let Some(value) = arg.strip_prefix("--baseline=") {
+                parsed.baseline_mode = Some(value.to_string());
+                true
+            } else if let Some(value) = arg.strip_prefix("--threshold-percent=") {
+                parsed.threshold_percent = Some(value.parse().unwrap_or_else(|_| {
+                    usage_exit(
+                        "benchmark",
+                        parsed.json,
+                        "usage: valid benchmark <target> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]",
+                    )
+                }));
+                true
+            } else {
+                false
+            }
+        },
+    );
+    if should_delegate_project_target(&parsed.path) {
+        run_cargo_valid_subcommand("benchmark", &args_from_parsed(&parsed), parsed.json);
+    }
+    message_exit(
+        "benchmark",
+        parsed.json,
+        "`valid benchmark` currently runs on project models. Use it from a scaffolded project root, or use `cargo valid --registry <path> benchmark <model>` for an explicit Rust registry target.",
+        Some("usage: valid benchmark <target> [--json] [--progress=json] [--property=<id>] [--repeat=<n>] [--baseline[=compare|record|ignore]] [--threshold-percent=<n>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]"),
+    );
+}
+
+fn cmd_migrate(args: Vec<String>) {
+    let parsed = parse_common_args(
+        args,
+        "usage: valid migrate <target> [--json] [--progress=json] [--write[=<path>]] [--check]",
+    );
+    if should_delegate_project_target(&parsed.path) {
+        run_cargo_valid_subcommand("migrate", &args_from_parsed(&parsed), parsed.json);
+    }
+    message_exit(
+        "migrate",
+        parsed.json,
+        "`valid migrate` currently runs on project models. Use it from a scaffolded project root, or use `cargo valid --registry <path> migrate <model>` for an explicit Rust registry target.",
+        Some("usage: valid migrate <target> [--json] [--progress=json] [--write[=<path>]] [--check]"),
+    );
+}
+
+fn cmd_suite(args: Vec<String>) {
+    let parsed = parse_common_args_with(
+        args,
+        "usage: valid suite [--json] [--progress=json] [--critical|--suite=<name>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]",
+        |arg, parsed| {
+            if arg == "--critical" {
+                parsed.critical = true;
+                true
+            } else if let Some(value) = arg.strip_prefix("--suite=") {
+                parsed.suite_name = Some(value.to_string());
+                true
+            } else {
+                false
+            }
+        },
+    );
+    if current_project_root().is_some() {
+        run_cargo_valid_subcommand("suite", &args_from_parsed(&parsed), parsed.json);
+    }
+    message_exit(
+        "suite",
+        parsed.json,
+        "`valid suite` requires a valid project in the current directory. Run `valid init` here, move into a scaffolded project, or use `cargo valid --manifest-path <path> suite` for an explicit target.",
+        Some("usage: valid suite [--json] [--progress=json] [--critical|--suite=<name>] [--backend=<...>] [--solver-exec <path>] [--solver-arg <arg>]"),
+    );
+}
+
 fn cmd_check(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid check <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid check <target> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    delegate_project_target("check", &parsed);
     let progress = ProgressReporter::new("check", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "check", parsed.json);
@@ -2594,8 +2909,9 @@ fn cmd_check(args: Vec<String>) {
 fn cmd_explain(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid explain <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid explain <target> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    delegate_project_target("explain", &parsed);
     let progress = ProgressReporter::new("explain", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "explain", parsed.json);
@@ -2675,8 +2991,9 @@ fn cmd_minimize(args: Vec<String>) {
 fn cmd_inspect(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid inspect <model-file> [--json] [--progress=json]",
+        "usage: valid inspect <target> [--json] [--progress=json]",
     );
+    delegate_project_target("inspect", &parsed);
     let progress = ProgressReporter::new("inspect", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "inspect", parsed.json);
@@ -2709,9 +3026,10 @@ fn cmd_inspect(args: Vec<String>) {
 fn cmd_graph(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid graph <model-file> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure|deadlock|scc] [--property=<id>] [--json] [--progress=json]",
+        "usage: valid graph <target> [--format=mermaid|dot|svg|text|json] [--view=overview|logic|failure|deadlock|scc] [--property=<id>] [--json] [--progress=json]",
         |_arg, _parsed| false,
     );
+    delegate_project_target("graph", &parsed);
     let json_output = parsed.json || matches!(parsed.format.as_deref(), Some("json"));
     let progress = ProgressReporter::new("graph", parsed.progress_json);
     progress.start(None);
@@ -2825,8 +3143,9 @@ fn render_graph_output(
 fn cmd_doc(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid doc <model-file> [--json] [--progress=json] [--write[=<path>]] [--check]",
+        "usage: valid doc <target> [--json] [--progress=json] [--write[=<path>]] [--check]",
     );
+    delegate_project_target("doc", &parsed);
     let progress = ProgressReporter::new("doc", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "doc", parsed.json);
@@ -2910,9 +3229,10 @@ fn cmd_doc(args: Vec<String>) {
 fn cmd_handoff(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid handoff <model-file> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--write[=<path>]] [--check]",
+        "usage: valid handoff <target> [--json] [--progress=json] [--property=<id>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--write[=<path>]] [--check]",
         |_arg, _parsed| false,
     );
+    delegate_project_target("handoff", &parsed);
     let progress = ProgressReporter::new("handoff", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "handoff", parsed.json);
@@ -3083,8 +3403,9 @@ fn cmd_handoff(args: Vec<String>) {
 fn cmd_lint(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid lint <model-file> [--json] [--progress=json]",
+        "usage: valid lint <target> [--json] [--progress=json]",
     );
+    delegate_project_target("lint", &parsed);
     let progress = ProgressReporter::new("lint", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "lint", parsed.json);
@@ -3335,8 +3656,9 @@ fn cmd_contract(args: Vec<String>) {
 fn cmd_testgen(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid testgen <model-file> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid testgen <target> [--json] [--progress=json] [--property=<id>] [--strategy=<counterexample|transition|witness|guard|boundary|path|random|deadlock|enablement>] [--focus-action=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    delegate_project_target("testgen", &parsed);
     let progress = ProgressReporter::new("testgen", parsed.progress_json);
     progress.start(None);
     let strategy = parsed
@@ -3563,7 +3885,7 @@ fn cmd_distinguish(args: DistinguishArgs) {
 fn cmd_trace(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid trace <model-file> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
+        "usage: valid trace <target> [--format=mermaid-state|mermaid-sequence|json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>] [--json] [--progress=json]",
         |arg, options| {
             let _ = (arg, options);
             false
@@ -3608,7 +3930,7 @@ fn cmd_trace(args: Vec<String>) {
 fn cmd_replay(args: Vec<String>) {
     let parsed = parse_common_args_with(
         args,
-        "usage: valid replay <model-file> [--json] [--progress=json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]",
+        "usage: valid replay <target> [--json] [--progress=json] [--property=<id>] [--focus-action=<id>] [--actions=a,b,c]",
         |arg, parsed| {
             if let Some(value) = arg.strip_prefix("--actions=") {
                 parsed.actions = value
@@ -3625,6 +3947,7 @@ fn cmd_replay(args: Vec<String>) {
             }
         },
     );
+    delegate_project_target("replay", &parsed);
     let progress = ProgressReporter::new("replay", parsed.progress_json);
     progress.start(None);
     let output = if is_bundled_model_ref(&parsed.path) {
@@ -3841,8 +4164,9 @@ fn cmd_conformance(args: Vec<String>) {
 fn cmd_orchestrate(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid orchestrate <model-file> [--json] [--progress=json] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid orchestrate <target> [--json] [--progress=json] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    delegate_project_target("orchestrate", &parsed);
     let progress = ProgressReporter::new("orchestrate", parsed.progress_json);
     progress.start(None);
     let source = read_source(&parsed.path, "orchestrate", parsed.json);
@@ -3915,8 +4239,9 @@ fn cmd_orchestrate(args: Vec<String>) {
 fn cmd_coverage(args: Vec<String>) {
     let parsed = parse_common_args(
         args,
-        "usage: valid coverage <model-file> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
+        "usage: valid coverage <target> [--json] [--progress=json] [--property=<id>] [--scenario=<id>] [--seed=<u64>] [--backend=<explicit|mock-bmc|sat-varisat|smt-cvc5|command>] [--solver-exec <path>] [--solver-arg <arg>]",
     );
+    delegate_project_target("coverage", &parsed);
     let progress = ProgressReporter::new("coverage", parsed.progress_json);
     progress.start(None);
     if is_bundled_model_ref(&parsed.path) {
@@ -3968,6 +4293,9 @@ struct ParsedArgs {
     progress_json: bool,
     path: String,
     seed: Option<u64>,
+    repeat: Option<usize>,
+    baseline_mode: Option<String>,
+    threshold_percent: Option<u32>,
     backend: Option<String>,
     solver_executable: Option<String>,
     solver_args: Vec<String>,
@@ -3980,6 +4308,8 @@ struct ParsedArgs {
     runner: Option<String>,
     runner_args: Vec<String>,
     extra: Option<String>,
+    critical: bool,
+    suite_name: Option<String>,
     write_path: Option<String>,
     check: bool,
 }
@@ -4076,7 +4406,10 @@ where
             usage_exit("valid", parsed.json, usage);
         }
     }
-    if parsed.path.is_empty() && !usage.contains("valid capabilities") {
+    if parsed.path.is_empty()
+        && !usage.contains("valid capabilities")
+        && !usage.contains("valid suite")
+    {
         usage_exit("valid", parsed.json, usage);
     }
     parsed
@@ -4444,16 +4777,34 @@ fn cmd_completion(args: CompletionArgs) {
 
 fn completion_candidates_valid(kind: &str, target: Option<&str>) -> Vec<String> {
     match kind {
-        "models" => list_bundled_models()
-            .into_iter()
-            .map(|model| format!("rust:{model}"))
-            .collect(),
-        "properties" => inspect_for_completion(target)
-            .map(|inspect| inspect.properties)
-            .unwrap_or_default(),
-        "actions" => inspect_for_completion(target)
-            .map(|inspect| inspect.actions)
-            .unwrap_or_default(),
+        "models" => {
+            if current_project_root().is_some() {
+                project_completion_candidates("models", target)
+            } else {
+                list_bundled_models()
+                    .into_iter()
+                    .map(|model| format!("rust:{model}"))
+                    .collect()
+            }
+        }
+        "properties" => {
+            if target.is_some_and(should_delegate_project_target) {
+                project_completion_candidates("properties", target)
+            } else {
+                inspect_for_completion(target)
+                    .map(|inspect| inspect.properties)
+                    .unwrap_or_default()
+            }
+        }
+        "actions" => {
+            if target.is_some_and(should_delegate_project_target) {
+                project_completion_candidates("actions", target)
+            } else {
+                inspect_for_completion(target)
+                    .map(|inspect| inspect.actions)
+                    .unwrap_or_default()
+            }
+        }
         "views" => ["overview", "logic", "failure", "deadlock", "scc"]
             .into_iter()
             .map(str::to_string)
@@ -4475,6 +4826,43 @@ fn inspect_for_completion(target: Option<&str>) -> Option<valid::api::InspectRes
         source,
     })
     .ok()
+}
+
+fn project_completion_candidates(kind: &str, target: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "completion".to_string(),
+        "candidates".to_string(),
+        kind.to_string(),
+    ];
+    if let Some(target) = target {
+        args.push(target.to_string());
+    }
+    let mut process = if let Some(path) = sibling_cargo_valid_binary().filter(|path| path.exists())
+    {
+        Command::new(path)
+    } else {
+        Command::new("cargo-valid")
+    };
+    let output = process
+        .current_dir(
+            current_project_root()
+                .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
+        )
+        .args(args)
+        .output()
+        .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn cmd_schema(args: Vec<String>) {

@@ -127,9 +127,9 @@ Project-first flow now scaffolds `valid/registry.rs` plus `valid/models/approval
 
 ```sh
 valid init
-cargo valid models
-cargo valid inspect approval-model
-cargo valid handoff approval-model
+valid models
+valid inspect approval-model
+valid handoff approval-model
 ```
 
 Generated tests are written under `generated-tests/`, not under `tests/`.

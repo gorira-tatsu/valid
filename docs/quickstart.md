@@ -45,16 +45,16 @@ scaffold files, use `valid init --repair` and rerun onboarding.
 valid init
 valid init --check
 cargo build --quiet
-cargo valid models
-cargo valid inspect approval-model
-cargo valid graph approval-model --view=overview
-cargo valid handoff approval-model
+valid models
+valid inspect approval-model
+valid graph approval-model --view=overview
+valid handoff approval-model
 ```
 
 Key files to look at after the walkthrough:
 
 - `valid/models/approval.rs` for the starter model itself
-- `valid/registry.rs` for the registry wiring used by `cargo valid`
+- `valid/registry.rs` for the registry wiring used by project-mode `valid`
 - `docs/rdd/README.md` for the scaffolded requirement notes location
 - `.mcp/codex.toml` for local AI/MCP wiring
 - `artifacts/handoff/ApprovalModel.md` for the generated starter handoff
@@ -90,19 +90,19 @@ inspect it, graph it, and hand it off before writing your own models.
 Inspect the starter model:
 
 ```sh
-cargo valid inspect approval-model
+valid inspect approval-model
 ```
 
 Generate a handoff summary with recommended test vectors:
 
 ```sh
-cargo valid handoff approval-model
+valid handoff approval-model
 ```
 
 Look at the generated graph:
 
 ```sh
-cargo valid graph approval-model --view=overview
+valid graph approval-model --view=overview
 ```
 
 ## When to Read More
